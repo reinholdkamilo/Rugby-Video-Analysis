@@ -10,13 +10,14 @@ from app import models  # noqa: F401
 from app.api.events import router as events_router
 from app.api.routes import router as api_router
 from app.api.suggestions import router as suggestions_router
+from app.api.understanding import router as understanding_router
 from app.api.uploads import router as uploads_router
 from app.api.vision import router as vision_router
 from app.database import Base, engine
 from app.worker import start_embedded_worker
 
 APP_NAME = "Rugby Video Analysis API"
-APP_VERSION = "0.7.0"
+APP_VERSION = "0.8.0"
 THUMBNAIL_DIR = Path(os.getenv("THUMBNAIL_DIR", "thumbnails"))
 CLIP_DIR = Path(os.getenv("CLIP_DIR", "clips"))
 VISION_FRAME_DIR = Path(os.getenv("VISION_FRAME_DIR", "vision_frames"))
@@ -64,6 +65,7 @@ app.include_router(events_router)
 app.include_router(uploads_router)
 app.include_router(suggestions_router)
 app.include_router(vision_router)
+app.include_router(understanding_router)
 app.mount("/media/thumbnails", StaticFiles(directory=str(THUMBNAIL_DIR)), name="thumbnails")
 app.mount("/media/clips", StaticFiles(directory=str(CLIP_DIR)), name="clips")
 app.mount("/media/vision", StaticFiles(directory=str(VISION_FRAME_DIR)), name="vision")

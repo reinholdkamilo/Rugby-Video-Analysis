@@ -1,9 +1,11 @@
+import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import models  # noqa: F401
@@ -17,8 +19,10 @@ from app.api.workspace import router as workspace_router
 from app.database import Base, engine
 from app.worker import start_embedded_worker
 
+logger = logging.getLogger("rugby-video-analysis")
+
 APP_NAME = "Rugby Video Analysis API"
-APP_VERSION = "0.8.1"
+APP_VERSION = "0.8.2"
 THUMBNAIL_DIR = Path(os.getenv("THUMBNAIL_DIR", "thumbnails"))
 CLIP_DIR = Path(os.getenv("CLIP_DIR", "clips"))
 VISION_FRAME_DIR = Path(os.getenv("VISION_FRAME_DIR", "vision_frames"))
@@ -61,6 +65,30 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+SAFE_DASHBOARD_READS = {
+    "/api/organisations",
+    "/api/teams",
+    "/api/matches",
+    "/api/analysis-jobs",
+}
+
+
+@app.middleware("http")
+async def protect_dashboard_reads(request: Request, call_next):
+    try:
+        return await call_next(request)
+    except Exception:
+        logger.exception("Dashboard read failed for %s", request.url.path)
+        if request.method == "GET" and request.url.path in SAFE_DASHBOARD_READS:
+            return JSONResponse(
+                status_code=200,
+                content=[],
+                headers={"X-Rugby-Recovered-Error": "true"},
+            )
+        raise
+
+
 app.include_router(api_router)
 app.include_router(events_router)
 app.include_router(uploads_router)

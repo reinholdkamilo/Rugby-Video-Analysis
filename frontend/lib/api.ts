@@ -19,6 +19,21 @@ export type EventType = "kickoff" | "scrum" | "lineout" | "carry" | "tackle" | "
 export type EventTeam = "home" | "away" | "neutral";
 export type EventClip = { id: number; event_id: number; duration_seconds: number; file_path: string; created_at: string };
 export type TimelineEvent = { id: number; match_id: number; video_asset_id: number; event_type: EventType; team: EventTeam; start_seconds: number; end_seconds: number; player_name: string | null; outcome: string | null; notes: string | null; phase_number: number | null; field_zone: string | null; clip_requested: boolean; created_at: string; updated_at: string; clip: EventClip | null };
+export type SuggestionStatus = "pending" | "accepted" | "rejected";
+export type AutomaticSuggestion = {
+  id: number;
+  match_id: number;
+  video_asset_id: number;
+  event_type: EventType;
+  team: EventTeam;
+  start_seconds: number;
+  end_seconds: number;
+  confidence: number;
+  label: string;
+  reason: string;
+  status: SuggestionStatus;
+  timeline_event_id: number | null;
+};
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${apiUrl}${path}`, init);
@@ -109,5 +124,25 @@ export const api = {
     create: (payload: Omit<TimelineEvent, "id" | "created_at" | "updated_at" | "clip">) => request<TimelineEvent>("/api/timeline-events", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
     update: (eventId: number, payload: Partial<TimelineEvent>) => request<TimelineEvent>(`/api/timeline-events/${eventId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
     regenerateClip: (eventId: number) => request<EventClip>(`/api/timeline-events/${eventId}/clip`, { method: "POST" }),
+  },
+  suggestions: {
+    detect: (videoAssetId: number, sceneThreshold = 0.28) => request<AutomaticSuggestion[]>("/api/automatic-suggestions/detect", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ video_asset_id: videoAssetId, replace_pending: true, scene_threshold: sceneThreshold }),
+    }),
+    list: (videoAssetId?: number, status?: SuggestionStatus) => {
+      const query = new URLSearchParams();
+      if (videoAssetId) query.set("video_asset_id", String(videoAssetId));
+      if (status) query.set("suggestion_status", status);
+      return request<AutomaticSuggestion[]>(`/api/automatic-suggestions${query.size ? `?${query}` : ""}`);
+    },
+    update: (suggestionId: number, payload: Partial<Pick<AutomaticSuggestion, "event_type" | "team" | "start_seconds" | "end_seconds" | "label">>) => request<AutomaticSuggestion>(`/api/automatic-suggestions/${suggestionId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+    accept: (suggestionId: number) => request<AutomaticSuggestion>(`/api/automatic-suggestions/${suggestionId}/accept`, { method: "POST" }),
+    reject: (suggestionId: number) => request<AutomaticSuggestion>(`/api/automatic-suggestions/${suggestionId}/reject`, { method: "POST" }),
   },
 };

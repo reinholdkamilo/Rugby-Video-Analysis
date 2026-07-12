@@ -22,6 +22,7 @@ export type TimelineEvent = { id: number; match_id: number; video_asset_id: numb
 export type SuggestionStatus = "pending" | "accepted" | "rejected";
 export type AutomaticSuggestion = { id: number; match_id: number; video_asset_id: number; event_type: EventType; team: EventTeam; start_seconds: number; end_seconds: number; confidence: number; label: string; reason: string; status: SuggestionStatus; timeline_event_id: number | null };
 export type VisionObservation = { id: number; match_id: number; video_asset_id: number; timestamp_seconds: number; frame_path: string; field_green_ratio: number; field_visible: boolean; scoreboard_region: string | null; scoreboard_confidence: number; brightness: number; motion_score: number };
+export type RugbyUnderstandingObservation = { id: number; match_id: number; video_asset_id: number; timestamp_seconds: number; estimated_players: number; dominant_team_colour_1: string | null; dominant_team_colour_2: string | null; field_zone: string; activity_level: number; possession_side_candidate: string; confidence: number; source_frame_path: string };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${apiUrl}${path}`, init);
@@ -35,36 +36,139 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const thumbnailUrl = (result: VideoProcessingResult) => `${apiUrl}/media/thumbnails/${result.thumbnail_path.split("/").pop()}`;
 export const clipUrl = (clip: EventClip) => `${apiUrl}/media/clips/${clip.file_path.split("/").pop()}`;
-export const visionFrameUrl = (observation: VisionObservation) => {
+export const visionFrameUrl = (observation: VisionObservation | RugbyUnderstandingObservation) => {
+  const framePath = "frame_path" in observation ? observation.frame_path : observation.source_frame_path;
   const marker = "vision_frames/";
-  const relative = observation.frame_path.includes(marker) ? observation.frame_path.split(marker)[1] : observation.frame_path.split("/").slice(-2).join("/");
+  const relative = framePath.includes(marker) ? framePath.split(marker)[1] : framePath.split("/").slice(-2).join("/");
   return `${apiUrl}/media/vision/${relative}`;
 };
 
-export async function uploadVideoInChunks(matchId: number, file: File, onProgress: (percent: number, message: string) => void, signal?: AbortSignal): Promise<UploadSession> {
-  const chunkSize = 4 * 1024 * 1024;
-  let session = await request<UploadSession>("/api/uploads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ match_id: matchId, filename: file.name, content_type: file.type || null, size_bytes: file.size, chunk_size: chunkSize }), signal });
+function uploadKey(matchId: number, file: File) {
+  return `rugby-upload:${matchId}:${file.name}:${file.size}:${file.lastModified}`;
+}
+
+async function withRetry<T>(operation: () => Promise<T>, attempts = 4): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
+    }
+  }
+  throw lastError;
+}
+
+export async function uploadVideoInChunks(
+  matchId: number,
+  file: File,
+  onProgress: (percent: number, message: string) => void,
+  signal?: AbortSignal,
+): Promise<UploadSession> {
+  const chunkSize = 8 * 1024 * 1024;
+  const key = uploadKey(matchId, file);
+  let session: UploadSession | null = null;
+  const savedId = typeof window !== "undefined" ? window.localStorage.getItem(key) : null;
+
+  if (savedId) {
+    try {
+      session = await request<UploadSession>(`/api/uploads/${savedId}`, { signal });
+      if (session.match_id !== matchId || session.filename !== file.name || session.size_bytes !== file.size) session = null;
+    } catch {
+      session = null;
+    }
+  }
+
+  if (!session) {
+    session = await request<UploadSession>("/api/uploads", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ match_id: matchId, filename: file.name, content_type: file.type || null, size_bytes: file.size, chunk_size: chunkSize }),
+      signal,
+    });
+    if (typeof window !== "undefined") window.localStorage.setItem(key, session.upload_id);
+  }
+
+  if (session.completed) {
+    if (typeof window !== "undefined") window.localStorage.removeItem(key);
+    onProgress(100, "Upload already complete");
+    return session;
+  }
+
   const uploaded = new Set(session.uploaded_chunks);
+  onProgress(Math.round((uploaded.size / session.total_chunks) * 95), uploaded.size ? `Resuming at chunk ${uploaded.size + 1}` : "Starting full-match upload");
+
   for (let index = 0; index < session.total_chunks; index += 1) {
     if (uploaded.has(index)) continue;
     const chunk = file.slice(index * chunkSize, Math.min(file.size, (index + 1) * chunkSize));
-    session = await request<UploadSession>(`/api/uploads/${session.upload_id}/chunks/${index}`, { method: "PUT", headers: { "Content-Type": "application/octet-stream" }, body: chunk, signal });
-    onProgress(Math.round((session.uploaded_chunks.length / session.total_chunks) * 95), `Uploading chunk ${session.uploaded_chunks.length} of ${session.total_chunks}`);
+    session = await withRetry(() => request<UploadSession>(`/api/uploads/${session!.upload_id}/chunks/${index}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: chunk,
+      signal,
+    }));
+    const percent = Math.round((session.uploaded_chunks.length / session.total_chunks) * 95);
+    onProgress(percent, `Uploaded ${session.uploaded_chunks.length} of ${session.total_chunks} chunks`);
   }
-  onProgress(97, "Finalising video upload");
+
+  onProgress(97, "Assembling full match on the server");
   session = await request<UploadSession>(`/api/uploads/${session.upload_id}/complete`, { method: "POST", signal });
-  onProgress(100, "Upload complete and analysis queued");
+  if (typeof window !== "undefined") window.localStorage.removeItem(key);
+  onProgress(100, "Full match uploaded and analysis queued");
   return session;
 }
 
 export const api = {
   health: () => request<{ status: string }>("/health"),
-  organisations: { list: () => request<Organisation[]>("/api/organisations"), create: (name: string) => request<Organisation>("/api/organisations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }) },
-  teams: { list: (organisationId?: number) => request<Team[]>(`/api/teams${organisationId ? `?organisation_id=${organisationId}` : ""}`), create: (payload: { organisation_id: number; name: string; age_group?: string }) => request<Team>("/api/teams", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }) },
-  matches: { list: (organisationId?: number) => request<Match[]>(`/api/matches${organisationId ? `?organisation_id=${organisationId}` : ""}`), create: (payload: { organisation_id: number; home_team_id: number; away_team_id: number; match_date: string; competition?: string; venue?: string }) => request<Match>("/api/matches", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }), videos: (matchId: number) => request<VideoAsset[]>(`/api/matches/${matchId}/videos`) },
+  organisations: {
+    list: () => request<Organisation[]>("/api/organisations"),
+    create: (name: string) => request<Organisation>("/api/organisations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }),
+  },
+  teams: {
+    list: (organisationId?: number) => request<Team[]>(`/api/teams${organisationId ? `?organisation_id=${organisationId}` : ""}`),
+    create: (payload: { organisation_id: number; name: string; age_group?: string }) => request<Team>("/api/teams", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  },
+  matches: {
+    list: (organisationId?: number) => request<Match[]>(`/api/matches${organisationId ? `?organisation_id=${organisationId}` : ""}`),
+    create: (payload: { organisation_id: number; home_team_id: number; away_team_id: number; match_date: string; competition?: string; venue?: string }) => request<Match>("/api/matches", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+    videos: (matchId: number) => request<VideoAsset[]>(`/api/matches/${matchId}/videos`),
+  },
   videos: { processingResult: (videoAssetId: number) => request<VideoProcessingResult>(`/api/videos/${videoAssetId}/processing-result`) },
-  jobs: { list: () => request<AnalysisJob[]>("/api/analysis-jobs"), create: (payload: { match_id: number; video_asset_id?: number }) => request<AnalysisJob>("/api/analysis-jobs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }), get: (jobId: number) => request<AnalysisJob>(`/api/analysis-jobs/${jobId}`) },
-  timeline: { list: (matchId?: number, videoAssetId?: number) => { const query = new URLSearchParams(); if (matchId) query.set("match_id", String(matchId)); if (videoAssetId) query.set("video_asset_id", String(videoAssetId)); return request<TimelineEvent[]>(`/api/timeline-events${query.size ? `?${query}` : ""}`); }, create: (payload: Omit<TimelineEvent, "id" | "created_at" | "updated_at" | "clip">) => request<TimelineEvent>("/api/timeline-events", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }), update: (eventId: number, payload: Partial<TimelineEvent>) => request<TimelineEvent>(`/api/timeline-events/${eventId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }), regenerateClip: (eventId: number) => request<EventClip>(`/api/timeline-events/${eventId}/clip`, { method: "POST" }) },
-  suggestions: { detect: (videoAssetId: number, sceneThreshold = 0.28) => request<AutomaticSuggestion[]>("/api/automatic-suggestions/detect", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ video_asset_id: videoAssetId, replace_pending: true, scene_threshold: sceneThreshold }) }), list: (videoAssetId?: number, status?: SuggestionStatus) => { const query = new URLSearchParams(); if (videoAssetId) query.set("video_asset_id", String(videoAssetId)); if (status) query.set("suggestion_status", status); return request<AutomaticSuggestion[]>(`/api/automatic-suggestions${query.size ? `?${query}` : ""}`); }, update: (suggestionId: number, payload: Partial<Pick<AutomaticSuggestion, "event_type" | "team" | "start_seconds" | "end_seconds" | "label">>) => request<AutomaticSuggestion>(`/api/automatic-suggestions/${suggestionId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }), accept: (suggestionId: number) => request<AutomaticSuggestion>(`/api/automatic-suggestions/${suggestionId}/accept`, { method: "POST" }), reject: (suggestionId: number) => request<AutomaticSuggestion>(`/api/automatic-suggestions/${suggestionId}/reject`, { method: "POST" }) },
-  vision: { run: (videoAssetId: number, intervalSeconds = 2) => request<VisionObservation[]>("/api/vision/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ video_asset_id: videoAssetId, interval_seconds: intervalSeconds, max_frames: 240, replace_existing: true }) }), list: (videoAssetId: number) => request<VisionObservation[]>(`/api/vision/observations?video_asset_id=${videoAssetId}`) },
+  jobs: {
+    list: () => request<AnalysisJob[]>("/api/analysis-jobs"),
+    create: (payload: { match_id: number; video_asset_id?: number }) => request<AnalysisJob>("/api/analysis-jobs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+    get: (jobId: number) => request<AnalysisJob>(`/api/analysis-jobs/${jobId}`),
+  },
+  timeline: {
+    list: (matchId?: number, videoAssetId?: number) => {
+      const query = new URLSearchParams();
+      if (matchId) query.set("match_id", String(matchId));
+      if (videoAssetId) query.set("video_asset_id", String(videoAssetId));
+      return request<TimelineEvent[]>(`/api/timeline-events${query.size ? `?${query}` : ""}`);
+    },
+    create: (payload: Omit<TimelineEvent, "id" | "created_at" | "updated_at" | "clip">) => request<TimelineEvent>("/api/timeline-events", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+    update: (eventId: number, payload: Partial<TimelineEvent>) => request<TimelineEvent>(`/api/timeline-events/${eventId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+    regenerateClip: (eventId: number) => request<EventClip>(`/api/timeline-events/${eventId}/clip`, { method: "POST" }),
+  },
+  suggestions: {
+    detect: (videoAssetId: number, sceneThreshold = 0.28) => request<AutomaticSuggestion[]>("/api/automatic-suggestions/detect", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ video_asset_id: videoAssetId, replace_pending: true, scene_threshold: sceneThreshold }) }),
+    list: (videoAssetId?: number, status?: SuggestionStatus) => {
+      const query = new URLSearchParams();
+      if (videoAssetId) query.set("video_asset_id", String(videoAssetId));
+      if (status) query.set("suggestion_status", status);
+      return request<AutomaticSuggestion[]>(`/api/automatic-suggestions${query.size ? `?${query}` : ""}`);
+    },
+    update: (suggestionId: number, payload: Partial<Pick<AutomaticSuggestion, "event_type" | "team" | "start_seconds" | "end_seconds" | "label">>) => request<AutomaticSuggestion>(`/api/automatic-suggestions/${suggestionId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+    accept: (suggestionId: number) => request<AutomaticSuggestion>(`/api/automatic-suggestions/${suggestionId}/accept`, { method: "POST" }),
+    reject: (suggestionId: number) => request<AutomaticSuggestion>(`/api/automatic-suggestions/${suggestionId}/reject`, { method: "POST" }),
+  },
+  vision: {
+    run: (videoAssetId: number, intervalSeconds = 2) => request<VisionObservation[]>("/api/vision/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ video_asset_id: videoAssetId, interval_seconds: intervalSeconds, max_frames: 240, replace_existing: true }) }),
+    list: (videoAssetId: number) => request<VisionObservation[]>(`/api/vision/observations?video_asset_id=${videoAssetId}`),
+  },
+  understanding: {
+    run: (videoAssetId: number) => request<RugbyUnderstandingObservation[]>(`/api/understanding/run/${videoAssetId}`, { method: "POST" }),
+    list: (videoAssetId: number) => request<RugbyUnderstandingObservation[]>(`/api/understanding/${videoAssetId}`),
+  },
 };

@@ -147,6 +147,14 @@ def create_analysis_job(payload: AnalysisJobCreate, db: Session = Depends(get_db
     return job
 
 
+@router.get("/analysis-jobs", response_model=list[AnalysisJobRead])
+def list_analysis_jobs(match_id: int | None = None, db: Session = Depends(get_db)) -> list[AnalysisJob]:
+    statement = select(AnalysisJob).order_by(AnalysisJob.created_at.desc())
+    if match_id is not None:
+        statement = statement.where(AnalysisJob.match_id == match_id)
+    return list(db.scalars(statement))
+
+
 @router.get("/analysis-jobs/{job_id}", response_model=AnalysisJobRead)
 def get_analysis_job(job_id: int, db: Session = Depends(get_db)) -> AnalysisJob:
     job = db.get(AnalysisJob, job_id)

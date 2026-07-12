@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: rugby-video-analysis-api
+    runtime: docker
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: FRONTEND_URL
+        sync: false

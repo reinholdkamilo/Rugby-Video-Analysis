@@ -64,7 +64,7 @@ class Team(Base):
 class Match(Base):
     __tablename__ = "matches"
     id: Mapped[int] = mapped_column(primary_key=True)
-    organisation_id: Mapped[int] = mapped_column(ForeKey("organisations.id", ondelete="CASCADE"), index=True)
+    organisation_id: Mapped[int] = mapped_column(ForeignKey("organisations.id", ondelete="CASCADE"), index=True)
     home_team_id: Mapped[int] = mapped_column(ForeignKey("teams.id"), index=True)
     away_team_id: Mapped[int] = mapped_column(ForeignKey("teams.id"), index=True)
     match_date: Mapped[date] = mapped_column(Date)

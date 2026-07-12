@@ -14,12 +14,12 @@ from app.worker import start_embedded_worker
 APP_NAME = "Rugby Video Analysis API"
 APP_VERSION = "0.3.0"
 THUMBNAIL_DIR = Path(os.getenv("THUMBNAIL_DIR", "thumbnails"))
+THUMBNAIL_DIR.mkdir(parents=True, exist_ok=True)
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     Base.metadata.create_all(bind=engine)
-    THUMBNAIL_DIR.mkdir(parents=True, exist_ok=True)
     worker = None
     if os.getenv("ENABLE_EMBEDDED_WORKER", "true").lower() in {"1", "true", "yes"}:
         worker = start_embedded_worker()

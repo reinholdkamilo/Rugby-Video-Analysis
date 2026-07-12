@@ -6,14 +6,27 @@ A professional rugby video-analysis platform for uploading match footage, taggin
 
 - Next.js and TypeScript frontend
 - FastAPI and Python backend
+- SQLAlchemy with SQLite locally and PostgreSQL in production
 - GitHub Codespaces development environment
 - GitHub Actions continuous integration
-- Render backend deployment configuration
+- Render backend, PostgreSQL, and persistent video storage configuration
 - Vercel frontend deployment configuration
+
+## Current platform capabilities
+
+- Create and list organisations
+- Create and list teams
+- Create and list matches
+- Upload MP4, MOV, AVI, and MKV match videos
+- Store video metadata and persistent storage paths
+- Create, read, and update analysis jobs
+- Track queued, processing, completed, and failed analysis states
+
+Interactive API documentation is available at `/docs` while the backend is running.
 
 ## Codespaces development
 
-The repository is configured to install both backend and frontend dependencies automatically when a Codespace is created.
+The repository installs backend and frontend dependencies automatically when a Codespace is created.
 
 Start the backend:
 
@@ -42,6 +55,10 @@ Expected response:
 {"status":"healthy","service":"backend"}
 ```
 
+## Environment
+
+Copy `.env.example` values into your local environment as required. The backend defaults to SQLite and switches to PostgreSQL whenever `DATABASE_URL` is supplied.
+
 ## Deployment
 
-The backend is prepared for deployment to Render using `render.yaml`. The frontend is prepared for Vercel using the `frontend` directory as the project root.
+`render.yaml` provisions the backend web service, PostgreSQL database, and a persistent disk for uploaded footage. The frontend is prepared for Vercel using `frontend` as the project root.

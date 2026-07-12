@@ -18,17 +18,19 @@ exec > >(tee -a "$STARTUP_LOG") 2>&1
 
 echo "Starting Rugby Video Analysis at $(date -Iseconds)"
 
-if [ ! -d .venv ]; then
-  echo "Python environment is missing; installing dependencies."
+# A previous interrupted installation can leave .venv present but incomplete.
+# Validate the actual backend executable rather than checking the directory alone.
+if [ ! -x .venv/bin/python ] || ! .venv/bin/python -c "import uvicorn, fastapi, sqlalchemy" >/dev/null 2>&1; then
+  echo "Python environment is missing or incomplete; repairing dependencies."
   bash scripts/install.sh
 fi
 
-if [ ! -d frontend/node_modules ]; then
-  echo "Frontend dependencies are missing; installing them."
+if [ ! -d frontend/node_modules ] || [ ! -x frontend/node_modules/.bin/next ]; then
+  echo "Frontend dependencies are missing or incomplete; installing them."
   (cd frontend && npm install)
 fi
 
-source .venv/bin/activate
+PYTHON="$PROJECT_ROOT/.venv/bin/python"
 
 for port in 8000 3000; do
   pids="$(lsof -t -iTCP:${port} -sTCP:LISTEN 2>/dev/null || true)"
@@ -50,7 +52,7 @@ trap cleanup EXIT INT TERM
 
 (
   cd backend
-  exec uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+  exec "$PYTHON" -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ) > "$BACKEND_LOG" 2>&1 &
 BACKEND_PID=$!
 

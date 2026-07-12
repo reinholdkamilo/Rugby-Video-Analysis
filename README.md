@@ -14,15 +14,27 @@ A professional rugby video-analysis platform for uploading match footage, taggin
 
 ## Current platform capabilities
 
-- Create and list organisations
-- Create and list teams
-- Create and list matches
+- Create and select organisations from the frontend workspace
+- Add teams and age groups to an organisation
+- Create matches with teams, date, competition, and venue
 - Upload MP4, MOV, AVI, and MKV match videos
+- Automatically create an analysis job after a successful upload
+- Display queued, processing, completed, and failed analysis states
+- Poll active analysis jobs and update progress without a page reload
 - Store video metadata and persistent storage paths
-- Create, read, and update analysis jobs
-- Track queued, processing, completed, and failed analysis states
+- Use typed frontend API requests with readable backend error messages
 
 Interactive API documentation is available at `/docs` while the backend is running.
+
+## Current workflow
+
+1. Create an organisation.
+2. Add at least two teams.
+3. Create a match.
+4. Upload match footage.
+5. The platform creates an analysis job and displays its status.
+
+The current worker layer does not process the video yet, so new jobs remain queued until the next processing milestone is added.
 
 ## Codespaces development
 

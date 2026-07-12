@@ -178,3 +178,19 @@ class AutomaticEventSuggestion(Base):
     timeline_event_id: Mapped[int | None] = mapped_column(ForeignKey("timeline_events.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+
+class VisionFrameObservation(Base):
+    __tablename__ = "vision_frame_observations"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    match_id: Mapped[int] = mapped_column(ForeignKey("matches.id", ondelete="CASCADE"), index=True)
+    video_asset_id: Mapped[int] = mapped_column(ForeignKey("video_assets.id", ondelete="CASCADE"), index=True)
+    timestamp_seconds: Mapped[float] = mapped_column(Float, index=True)
+    frame_path: Mapped[str] = mapped_column(Text)
+    field_green_ratio: Mapped[float] = mapped_column(Float)
+    field_visible: Mapped[bool] = mapped_column(Boolean, default=False)
+    scoreboard_region: Mapped[str | None] = mapped_column(Text, nullable=True)
+    scoreboard_confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    brightness: Mapped[float] = mapped_column(Float)
+    motion_score: Mapped[float] = mapped_column(Float, default=0.0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

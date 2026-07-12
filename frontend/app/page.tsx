@@ -2,12 +2,14 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
-import { AnalysisJob, Match, Organisation, Team, api, apiUrl } from "@/lib/api";
+import { AnalysisJob, Match, Organisation, Team, api, apiUrl, uploadVideoInChunks } from "@/lib/api";
 
 const fieldClass =
   "w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-emerald-400";
 const buttonClass =
   "rounded-lg bg-emerald-400 px-4 py-2.5 text-sm font-bold text-slate-950 hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-50";
+
+type UploadProgress = { percent: number; message: string };
 
 export default function Home() {
   const [connected, setConnected] = useState(false);
@@ -18,6 +20,7 @@ export default function Home() {
   const [selectedOrganisationId, setSelectedOrganisationId] = useState<number | null>(null);
   const [notice, setNotice] = useState("Loading workspace...");
   const [busy, setBusy] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<Record<number, UploadProgress>>({});
 
   const loadData = useCallback(async () => {
     try {
@@ -44,9 +47,7 @@ export default function Home() {
     }
   }, []);
 
-  useEffect(() => {
-    void loadData();
-  }, [loadData]);
+  useEffect(() => { void loadData(); }, [loadData]);
 
   useEffect(() => {
     const activeJobs = jobs.filter((job) => job.status === "queued" || job.status === "processing");
@@ -66,18 +67,13 @@ export default function Home() {
     () => teams.filter((team) => team.organisation_id === selectedOrganisationId),
     [teams, selectedOrganisationId],
   );
-
   const teamName = (id: number) => teams.find((team) => team.id === id)?.name ?? `Team ${id}`;
 
   async function run(action: () => Promise<void>) {
     setBusy(true);
-    try {
-      await action();
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Something went wrong");
-    } finally {
-      setBusy(false);
-    }
+    try { await action(); }
+    catch (error) { setNotice(error instanceof Error ? error.message : "Something went wrong"); }
+    finally { setBusy(false); }
   }
 
   async function createOrganisation(event: FormEvent<HTMLFormElement>) {
@@ -96,10 +92,7 @@ export default function Home() {
   async function createTeam(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const formElement = event.currentTarget;
-    if (!selectedOrganisationId) {
-      setNotice("Create or select an organisation before adding a team.");
-      return;
-    }
+    if (!selectedOrganisationId) return setNotice("Create or select an organisation before adding a team.");
     const form = new FormData(formElement);
     await run(async () => {
       const team = await api.teams.create({
@@ -139,14 +132,24 @@ export default function Home() {
     const input = formElement.elements.namedItem("video") as HTMLInputElement;
     const file = input.files?.[0];
     if (!file) return setNotice("Select a video first");
-    await run(async () => {
-      setNotice(`Uploading ${file.name}...`);
-      const video = await api.matches.uploadVideo(matchId, file);
-      const job = await api.jobs.create({ match_id: matchId, video_asset_id: video.id });
-      setJobs((current) => [job, ...current]);
+    setBusy(true);
+    setUploadProgress((current) => ({ ...current, [matchId]: { percent: 0, message: "Starting resumable upload" } }));
+    try {
+      await uploadVideoInChunks(matchId, file, (percent, message) => {
+        setUploadProgress((current) => ({ ...current, [matchId]: { percent, message } }));
+        setNotice(`${file.name}: ${message}`);
+      });
       formElement.reset();
-      setNotice("Video uploaded and processing queued");
-    });
+      const jobData = await api.jobs.list();
+      setJobs(jobData);
+      setNotice("Video uploaded successfully and processing has started");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Upload failed";
+      setUploadProgress((current) => ({ ...current, [matchId]: { percent: 0, message } }));
+      setNotice(message);
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -160,25 +163,20 @@ export default function Home() {
 
       <div className="mx-auto max-w-7xl px-6 py-8">
         <div className="mb-8 rounded-xl border border-slate-800 bg-slate-900 px-5 py-4 text-sm text-slate-300">{notice}</div>
-
         <section className="grid gap-6 lg:grid-cols-3">
           <form onSubmit={createOrganisation} className="rounded-xl border border-slate-800 bg-slate-900 p-5">
             <p className="text-xs font-bold uppercase text-slate-500">Step 1</p><h2 className="mt-2 text-xl font-bold">Organisation</h2>
             <input name="name" required minLength={2} placeholder="e.g. ACT Brumbies" className={`${fieldClass} mt-5`} />
             <button type="submit" disabled={busy} className={`${buttonClass} mt-3 w-full`}>Create organisation</button>
           </form>
-
           <form onSubmit={createTeam} className="rounded-xl border border-slate-800 bg-slate-900 p-5">
             <p className="text-xs font-bold uppercase text-slate-500">Step 2</p><h2 className="mt-2 text-xl font-bold">Teams</h2>
             <select className={`${fieldClass} mt-5`} value={selectedOrganisationId ?? ""} onChange={(event) => setSelectedOrganisationId(event.target.value ? Number(event.target.value) : null)}>
-              <option value="">Select organisation</option>
-              {organisations.map((organisation) => <option key={organisation.id} value={organisation.id}>{organisation.name}</option>)}
+              <option value="">Select organisation</option>{organisations.map((organisation) => <option key={organisation.id} value={organisation.id}>{organisation.name}</option>)}
             </select>
             <div className="mt-3 grid grid-cols-2 gap-3"><input name="name" required minLength={2} placeholder="Team name" className={fieldClass} /><input name="age_group" placeholder="Age group" className={fieldClass} /></div>
             <button type="submit" disabled={busy || !selectedOrganisationId} className={`${buttonClass} mt-3 w-full`}>Add team</button>
-            {!selectedOrganisationId && <p className="mt-3 text-xs text-amber-300">Create or select an organisation first.</p>}
           </form>
-
           <form onSubmit={createMatch} className="rounded-xl border border-slate-800 bg-slate-900 p-5">
             <p className="text-xs font-bold uppercase text-slate-500">Step 3</p><h2 className="mt-2 text-xl font-bold">Create match</h2>
             <div className="mt-5 grid grid-cols-2 gap-3">
@@ -197,7 +195,8 @@ export default function Home() {
             {!matches.length && <div className="rounded-xl border border-dashed border-slate-700 p-10 text-center text-slate-500">Create your first match above.</div>}
             {matches.map((match) => {
               const job = jobs.find((item) => item.match_id === match.id);
-              return <article key={match.id} className="rounded-xl border border-slate-800 bg-slate-900 p-5"><div className="grid gap-5 lg:grid-cols-[1fr_360px] lg:items-center"><div><p className="text-sm text-slate-500">{match.match_date} · {match.competition || "Unspecified competition"}</p><h3 className="mt-2 text-xl font-bold">{teamName(match.home_team_id)} <span className="text-slate-500">vs</span> {teamName(match.away_team_id)}</h3><p className="mt-1 text-sm text-slate-400">{match.venue || "Venue not set"}</p>{job && <div className="mt-4"><div className="mb-2 flex justify-between text-xs uppercase"><span>{job.status}</span><span>{job.progress_percent}%</span></div><div className="h-2 rounded-full bg-slate-800"><div className="h-full rounded-full bg-emerald-400" style={{ width: `${job.progress_percent}%` }} /></div><p className="mt-2 text-sm text-slate-400">{job.message}</p></div>}</div><form onSubmit={(event) => uploadAndAnalyse(event, match.id)} className="rounded-lg border border-slate-700 bg-slate-950 p-4"><label className="text-sm font-semibold">Upload match video</label><input name="video" type="file" accept="video/mp4,video/quicktime,video/x-msvideo,video/x-matroska" required className="mt-3 block w-full text-sm" /><button type="submit" disabled={busy} className={`${buttonClass} mt-4 w-full`}>Upload and start analysis</button></form></div></article>;
+              const progress = uploadProgress[match.id];
+              return <article key={match.id} className="rounded-xl border border-slate-800 bg-slate-900 p-5"><div className="grid gap-5 lg:grid-cols-[1fr_360px] lg:items-center"><div><p className="text-sm text-slate-500">{match.match_date} · {match.competition || "Unspecified competition"}</p><h3 className="mt-2 text-xl font-bold">{teamName(match.home_team_id)} <span className="text-slate-500">vs</span> {teamName(match.away_team_id)}</h3><p className="mt-1 text-sm text-slate-400">{match.venue || "Venue not set"}</p>{job && <div className="mt-4"><div className="mb-2 flex justify-between text-xs uppercase"><span>{job.status}</span><span>{job.progress_percent}%</span></div><div className="h-2 rounded-full bg-slate-800"><div className="h-full rounded-full bg-emerald-400" style={{ width: `${job.progress_percent}%` }} /></div><p className="mt-2 text-sm text-slate-400">{job.message}</p></div>}</div><form onSubmit={(event) => uploadAndAnalyse(event, match.id)} className="rounded-lg border border-slate-700 bg-slate-950 p-4"><label className="text-sm font-semibold">Upload match video</label><p className="mt-1 text-xs text-slate-500">Resumable 4 MB chunks · supports videos up to 5 GB</p><input name="video" type="file" accept="video/mp4,video/quicktime,video/x-msvideo,video/x-matroska,video/x-m4v" required className="mt-3 block w-full text-sm" />{progress && <div className="mt-4"><div className="mb-2 flex justify-between text-xs"><span>{progress.message}</span><span>{progress.percent}%</span></div><div className="h-2 rounded-full bg-slate-800"><div className="h-full rounded-full bg-sky-400 transition-all" style={{ width: `${progress.percent}%` }} /></div></div>}<button type="submit" disabled={busy} className={`${buttonClass} mt-4 w-full`}>{busy && progress ? "Uploading…" : "Upload and start analysis"}</button></form></div></article>;
             })}
           </div>
         </section>

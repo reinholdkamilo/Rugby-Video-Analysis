@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Node
+node_modules/
+.next/
+out/
+npm-debug.log*
+
+# Video and generated analysis files
+uploads/
+processed/
+clips/
+reports/
+*.mp4
+*.mov
+*.avi
+*.mkv
+
+# Operating system and editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

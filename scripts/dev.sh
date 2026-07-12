@@ -18,11 +18,22 @@ exec > >(tee -a "$STARTUP_LOG") 2>&1
 
 echo "Starting Rugby Video Analysis at $(date -Iseconds)"
 
+REQUIREMENTS_STAMP="$PROJECT_ROOT/.venv/.requirements.sha256"
+CURRENT_REQUIREMENTS_HASH="$({ sha256sum backend/requirements.txt; [ -f backend/requirements-dev.txt ] && sha256sum backend/requirements-dev.txt || true; } | sha256sum | awk '{print $1}')"
+INSTALLED_REQUIREMENTS_HASH=""
+if [ -f "$REQUIREMENTS_STAMP" ]; then
+  INSTALLED_REQUIREMENTS_HASH="$(cat "$REQUIREMENTS_STAMP")"
+fi
+
 # A previous interrupted installation can leave .venv present but incomplete.
-# Validate the actual backend executable rather than checking the directory alone.
-if [ ! -x .venv/bin/python ] || ! .venv/bin/python -c "import uvicorn, fastapi, sqlalchemy" >/dev/null 2>&1; then
-  echo "Python environment is missing or incomplete; repairing dependencies."
+# Also reinstall whenever the checked-in requirements change, including Stage 5
+# computer-vision packages such as OpenCV and NumPy.
+if [ ! -x .venv/bin/python ] \
+  || [ "$CURRENT_REQUIREMENTS_HASH" != "$INSTALLED_REQUIREMENTS_HASH" ] \
+  || ! .venv/bin/python -c "import uvicorn, fastapi, sqlalchemy, cv2, numpy" >/dev/null 2>&1; then
+  echo "Python environment is missing, incomplete, or out of date; repairing dependencies."
   bash scripts/install.sh
+  printf '%s\n' "$CURRENT_REQUIREMENTS_HASH" > "$REQUIREMENTS_STAMP"
 fi
 
 if [ ! -d frontend/node_modules ] || [ ! -x frontend/node_modules/.bin/next ]; then

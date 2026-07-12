@@ -7,7 +7,7 @@ A professional rugby video-analysis platform for uploading match footage, taggin
 - Next.js and TypeScript frontend
 - FastAPI and Python backend
 - SQLAlchemy with SQLite locally and PostgreSQL in production
-- FFmpeg and ffprobe video preparation
+- FFmpeg and ffprobe video preparation and clip export
 - GitHub Codespaces development environment
 - GitHub Actions continuous integration
 - Render backend, PostgreSQL, and persistent video storage configuration
@@ -15,30 +15,40 @@ A professional rugby video-analysis platform for uploading match footage, taggin
 
 ## Current platform capabilities
 
-- Create and select organisations from the frontend workspace
-- Add teams and age groups to an organisation
-- Create matches with teams, date, competition, and venue
+- Create organisations, teams, and matches
 - Upload MP4, MOV, AVI, and MKV match videos
-- Automatically create an analysis job after a successful upload
-- Process queued jobs with an embedded background worker
-- Read duration, resolution, frame rate, video codec, and audio codec with ffprobe
-- Generate a representative match thumbnail with FFmpeg
-- Display live queued, processing, completed, and failed states
-- Poll active jobs and update progress without a page reload
-- Show completed video metadata and thumbnails in the dashboard
-- Preserve readable failure messages when processing cannot complete
+- Process queued footage and extract video metadata
+- Generate thumbnails and display live processing status
+- Open a dedicated timeline analyst workspace at `/timeline`
+- Tag kickoff, scrum, lineout, carry, tackle, ruck, maul, pass, kick, turnover, penalty, try, conversion, card, stoppage, and custom events
+- Record event team, start/end time, player, outcome, phase number, field zone, and analyst notes
+- Filter tagged moments by rugby event type
+- Automatically export event clips with FFmpeg
+- Regenerate clips after timestamp changes
+- Serve generated clips from persistent storage
 
 Interactive API documentation is available at `/docs` while the backend is running.
 
 ## Current workflow
 
-1. Create an organisation.
-2. Add at least two teams.
-3. Create a match.
-4. Upload match footage.
-5. The platform creates an analysis job.
-6. The embedded worker probes the footage and generates a thumbnail.
-7. The dashboard updates automatically and displays the completed video details.
+1. Create an organisation and at least two teams.
+2. Create a match and upload footage.
+3. The worker probes the footage and generates a thumbnail.
+4. Open `/timeline` and select the match and video.
+5. Enter the event start/end timestamps and rugby details.
+6. Save the event and optionally export its clip automatically.
+7. Review or open clips from the chronological timeline.
+
+## Timeline endpoints
+
+```text
+POST  /api/timeline-events
+GET   /api/timeline-events
+GET   /api/timeline-events/{event_id}
+PATCH /api/timeline-events/{event_id}
+POST  /api/timeline-events/{event_id}/clip
+GET   /media/clips/{clip_name}
+```
 
 ## Processing endpoints
 
@@ -56,11 +66,9 @@ cd backend
 python -m app.worker
 ```
 
-Only one worker mode should process a given database at a time. The default local and Render configuration uses the embedded worker inside the FastAPI service so uploaded files and thumbnails share the same persistent storage.
-
 ## Codespaces development
 
-The repository installs backend and frontend dependencies automatically when a Codespace is created. FFmpeg must be available in the development environment. The Render Docker image installs it automatically.
+The repository installs Python, Node, and FFmpeg dependencies automatically when a Codespace is created.
 
 Start the backend:
 
@@ -77,31 +85,16 @@ cd frontend
 npm run dev
 ```
 
-Backend health check:
-
-```bash
-curl http://127.0.0.1:8000/health
-```
-
-Expected response:
-
-```json
-{"status":"healthy","service":"backend"}
-```
-
 ## Environment
-
-Copy `.env.example` values into your local environment as required. The backend defaults to SQLite and switches to PostgreSQL whenever `DATABASE_URL` is supplied.
-
-Important processing settings:
 
 ```text
 UPLOAD_DIR=uploads
 THUMBNAIL_DIR=thumbnails
+CLIP_DIR=clips
 ENABLE_EMBEDDED_WORKER=true
 WORKER_POLL_INTERVAL_SECONDS=3
 ```
 
 ## Deployment
 
-`render.yaml` provisions the backend web service, PostgreSQL database, FFmpeg-enabled Docker image, embedded worker, and a persistent disk shared by uploaded footage and generated thumbnails. The frontend is prepared for Vercel using `frontend` as the project root.
+`render.yaml` provisions the backend, PostgreSQL, FFmpeg-enabled processing, and a persistent disk shared by uploaded footage, thumbnails, and exported clips. The frontend is prepared for Vercel using `frontend` as the project root.

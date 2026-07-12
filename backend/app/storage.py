@@ -1,5 +1,4 @@
 import os
-import shutil
 from pathlib import Path
 from uuid import uuid4
 
@@ -29,7 +28,6 @@ def save_video_upload(file: UploadFile) -> tuple[str, str, int]:
         while chunk := file.file.read(1024 * 1024):
             size_bytes += len(chunk)
             if size_bytes > MAX_UPLOAD_BYTES:
-                output.close()
                 destination.unlink(missing_ok=True)
                 raise ValueError("Video exceeds the configured upload size limit.")
             output.write(chunk)

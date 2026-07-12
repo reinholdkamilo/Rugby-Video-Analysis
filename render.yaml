@@ -25,6 +25,8 @@ services:
         value: /var/data/uploads
       - key: THUMBNAIL_DIR
         value: /var/data/thumbnails
+      - key: CLIP_DIR
+        value: /var/data/clips
       - key: ENABLE_EMBEDDED_WORKER
         value: "true"
       - key: WORKER_POLL_INTERVAL_SECONDS

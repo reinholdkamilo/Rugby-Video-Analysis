@@ -12,7 +12,7 @@ services:
     healthCheckPath: /health
     disk:
       name: video-storage
-      mountPath: /var/data/uploads
+      mountPath: /var/data
       sizeGB: 20
     envVars:
       - key: FRONTEND_URL
@@ -23,5 +23,11 @@ services:
           property: connectionString
       - key: UPLOAD_DIR
         value: /var/data/uploads
+      - key: THUMBNAIL_DIR
+        value: /var/data/thumbnails
+      - key: ENABLE_EMBEDDED_WORKER
+        value: "true"
+      - key: WORKER_POLL_INTERVAL_SECONDS
+        value: "3"
       - key: MAX_UPLOAD_BYTES
         value: "5368709120"

@@ -1,5 +1,11 @@
+const configuredApiUrl = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "");
+
 export const apiUrl =
-  process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") ?? "http://localhost:8000";
+  !configuredApiUrl ||
+  configuredApiUrl === "http://localhost:8000" ||
+  configuredApiUrl.includes(".app.github.dev")
+    ? "/backend"
+    : configuredApiUrl;
 
 export type Organisation = { id: number; name: string; created_at: string };
 export type Team = { id: number; organisation_id: number; name: string; age_group: string | null; created_at: string };

@@ -46,6 +46,20 @@ export type AnalysisJob = {
   updated_at: string;
 };
 
+export type VideoProcessingResult = {
+  id: number;
+  analysis_job_id: number;
+  video_asset_id: number;
+  duration_seconds: number;
+  width: number;
+  height: number;
+  frame_rate: number;
+  video_codec: string | null;
+  audio_codec: string | null;
+  thumbnail_path: string;
+  created_at: string;
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${apiUrl}${path}`, init);
   if (!response.ok) {
@@ -54,6 +68,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
   return (await response.json()) as T;
 }
+
+export const thumbnailUrl = (result: VideoProcessingResult) =>
+  `${apiUrl}/media/thumbnails/${result.thumbnail_path.split("/").pop()}`;
 
 export const api = {
   health: () => request<{ status: string }>("/health"),
@@ -100,6 +117,10 @@ export const api = {
         body: formData,
       });
     },
+  },
+  videos: {
+    processingResult: (videoAssetId: number) =>
+      request<VideoProcessingResult>(`/api/videos/${videoAssetId}/processing-result`),
   },
   jobs: {
     list: () => request<AnalysisJob[]>("/api/analysis-jobs"),

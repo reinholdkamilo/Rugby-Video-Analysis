@@ -4,7 +4,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import AnalysisJob, Match, Organisation, Team, VideoAsset
+from app.models import (
+    AnalysisJob,
+    Match,
+    Organisation,
+    Team,
+    VideoAsset,
+    VideoProcessingResult,
+)
 from app.schemas import (
     AnalysisJobCreate,
     AnalysisJobRead,
@@ -16,6 +23,7 @@ from app.schemas import (
     TeamCreate,
     TeamRead,
     VideoAssetRead,
+    VideoProcessingResultRead,
 )
 from app.storage import delete_stored_file, save_video_upload
 
@@ -130,6 +138,19 @@ def list_match_videos(match_id: int, db: Session = Depends(get_db)) -> list[Vide
         raise HTTPException(status_code=404, detail="Match not found.")
     statement = select(VideoAsset).where(VideoAsset.match_id == match_id).order_by(VideoAsset.created_at.desc())
     return list(db.scalars(statement))
+
+
+@router.get("/videos/{video_asset_id}/processing-result", response_model=VideoProcessingResultRead)
+def get_video_processing_result(
+    video_asset_id: int,
+    db: Session = Depends(get_db),
+) -> VideoProcessingResult:
+    result = db.scalar(
+        select(VideoProcessingResult).where(VideoProcessingResult.video_asset_id == video_asset_id)
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="Video processing result not found.")
+    return result
 
 
 @router.post("/analysis-jobs", response_model=AnalysisJobRead, status_code=status.HTTP_201_CREATED)

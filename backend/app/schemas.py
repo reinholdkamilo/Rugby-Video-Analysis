@@ -62,6 +62,20 @@ class VideoAssetRead(ORMModel):
     created_at: datetime
 
 
+class VideoProcessingResultRead(ORMModel):
+    id: int
+    analysis_job_id: int
+    video_asset_id: int
+    duration_seconds: float
+    width: int
+    height: int
+    frame_rate: float
+    video_codec: str | None
+    audio_codec: str | None
+    thumbnail_path: str
+    created_at: datetime
+
+
 class AnalysisJobCreate(BaseModel):
     match_id: int
     video_asset_id: int | None = None

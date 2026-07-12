@@ -1,7 +1,7 @@
 import enum
 from datetime import date, datetime, timezone
 
-from sqlalchemy import Date, DateTime, Enum, ForeignKey, Integer, String, Text
+from sqlalchemy import Date, DateTime, Enum, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -71,6 +71,11 @@ class VideoAsset(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
     match: Mapped[Match] = relationship(back_populates="videos")
+    processing_result: Mapped["VideoProcessingResult | None"] = relationship(
+        back_populates="video_asset",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
 
 
 class AnalysisJob(Base):
@@ -87,3 +92,31 @@ class AnalysisJob(Base):
 
     match: Mapped[Match] = relationship(back_populates="analysis_jobs")
     video_asset: Mapped[VideoAsset | None] = relationship()
+    processing_result: Mapped["VideoProcessingResult | None"] = relationship(
+        back_populates="analysis_job",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+
+
+class VideoProcessingResult(Base):
+    __tablename__ = "video_processing_results"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    analysis_job_id: Mapped[int] = mapped_column(
+        ForeignKey("analysis_jobs.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    video_asset_id: Mapped[int] = mapped_column(
+        ForeignKey("video_assets.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    duration_seconds: Mapped[float] = mapped_column(Float)
+    width: Mapped[int] = mapped_column(Integer)
+    height: Mapped[int] = mapped_column(Integer)
+    frame_rate: Mapped[float] = mapped_column(Float)
+    video_codec: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    audio_codec: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    thumbnail_path: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    analysis_job: Mapped[AnalysisJob] = relationship(back_populates="processing_result")
+    video_asset: Mapped[VideoAsset] = relationship(back_populates="processing_result")

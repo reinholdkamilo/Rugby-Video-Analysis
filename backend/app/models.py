@@ -194,3 +194,20 @@ class VisionFrameObservation(Base):
     brightness: Mapped[float] = mapped_column(Float)
     motion_score: Mapped[float] = mapped_column(Float, default=0.0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class RugbyUnderstandingObservation(Base):
+    __tablename__ = "rugby_understanding_observations"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    match_id: Mapped[int] = mapped_column(ForeignKey("matches.id", ondelete="CASCADE"), index=True)
+    video_asset_id: Mapped[int] = mapped_column(ForeignKey("video_assets.id", ondelete="CASCADE"), index=True)
+    timestamp_seconds: Mapped[float] = mapped_column(Float, index=True)
+    estimated_players: Mapped[int] = mapped_column(Integer, default=0)
+    dominant_team_colour_1: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    dominant_team_colour_2: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    field_zone: Mapped[str] = mapped_column(String(32), default="unknown")
+    activity_level: Mapped[float] = mapped_column(Float, default=0.0)
+    possession_side_candidate: Mapped[str] = mapped_column(String(16), default="unknown")
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    source_frame_path: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

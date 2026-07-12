@@ -15,8 +15,8 @@ router = APIRouter(prefix="/api/uploads", tags=["uploads"])
 
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "uploads"))
 SESSION_DIR = Path(os.getenv("UPLOAD_SESSION_DIR", "upload_sessions"))
-MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(5 * 1024 * 1024 * 1024)))
-MAX_CHUNK_BYTES = int(os.getenv("MAX_CHUNK_BYTES", str(8 * 1024 * 1024)))
+MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(20 * 1024 * 1024 * 1024)))
+MAX_CHUNK_BYTES = int(os.getenv("MAX_CHUNK_BYTES", str(16 * 1024 * 1024)))
 ALLOWED_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".m4v"}
 
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -62,8 +62,7 @@ def _read_metadata(upload_id: str) -> dict:
 
 
 def _write_metadata(upload_id: str, metadata: dict) -> None:
-    path = _metadata_path(upload_id)
-    path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+    _metadata_path(upload_id).write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
 
 def _response(metadata: dict) -> UploadSessionRead:
@@ -78,7 +77,8 @@ def create_upload_session(payload: UploadSessionCreate, db: Session = Depends(ge
     if extension not in ALLOWED_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Unsupported video type. Use MP4, MOV, AVI, MKV, or M4V.")
     if payload.size_bytes > MAX_UPLOAD_BYTES:
-        raise HTTPException(status_code=413, detail=f"Video exceeds the {MAX_UPLOAD_BYTES // (1024 ** 3)} GB upload limit.")
+        limit_gb = MAX_UPLOAD_BYTES / (1024 ** 3)
+        raise HTTPException(status_code=413, detail=f"Video exceeds the {limit_gb:g} GB upload limit.")
 
     upload_id = str(uuid.uuid4())
     session_path = _session_path(upload_id)
@@ -155,7 +155,7 @@ def complete_upload(upload_id: str, db: Session = Depends(get_db)) -> UploadSess
         for index in range(metadata["total_chunks"]):
             chunk_path = _session_path(upload_id) / f"chunk-{index:08d}.part"
             with chunk_path.open("rb") as chunk:
-                shutil.copyfileobj(chunk, output, length=1024 * 1024)
+                shutil.copyfileobj(chunk, output, length=4 * 1024 * 1024)
 
     if temporary_destination.stat().st_size != metadata["size_bytes"]:
         temporary_destination.unlink(missing_ok=True)
@@ -172,7 +172,7 @@ def complete_upload(upload_id: str, db: Session = Depends(get_db)) -> UploadSess
     )
     db.add(video)
     db.flush()
-    job = AnalysisJob(match_id=metadata["match_id"], video_asset_id=video.id, message="Video uploaded and queued for processing")
+    job = AnalysisJob(match_id=metadata["match_id"], video_asset_id=video.id, message="Full match uploaded and queued for processing")
     db.add(job)
     db.commit()
     db.refresh(video)
@@ -190,6 +190,5 @@ def complete_upload(upload_id: str, db: Session = Depends(get_db)) -> UploadSess
 @router.delete("/{upload_id}", status_code=status.HTTP_204_NO_CONTENT)
 def cancel_upload(upload_id: str) -> None:
     session_path = _session_path(upload_id)
-    if not session_path.exists():
-        return
-    shutil.rmtree(session_path)
+    if session_path.exists():
+        shutil.rmtree(session_path)

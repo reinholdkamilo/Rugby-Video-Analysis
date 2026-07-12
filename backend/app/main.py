@@ -1,21 +1,33 @@
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app import models  # noqa: F401
 from app.api.routes import router as api_router
 from app.database import Base, engine
+from app.worker import start_embedded_worker
 
 APP_NAME = "Rugby Video Analysis API"
-APP_VERSION = "0.2.0"
+APP_VERSION = "0.3.0"
+THUMBNAIL_DIR = Path(os.getenv("THUMBNAIL_DIR", "thumbnails"))
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     Base.metadata.create_all(bind=engine)
+    THUMBNAIL_DIR.mkdir(parents=True, exist_ok=True)
+    worker = None
+    if os.getenv("ENABLE_EMBEDDED_WORKER", "true").lower() in {"1", "true", "yes"}:
+        worker = start_embedded_worker()
     yield
+    if worker is not None:
+        thread, stop_event = worker
+        stop_event.set()
+        thread.join(timeout=5)
 
 
 app = FastAPI(
@@ -40,6 +52,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(api_router)
+app.mount("/media/thumbnails", StaticFiles(directory=str(THUMBNAIL_DIR)), name="thumbnails")
 
 
 @app.get("/")

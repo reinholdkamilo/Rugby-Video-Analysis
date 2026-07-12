@@ -11,24 +11,33 @@ install_ffmpeg() {
 
   local yarn_source="/etc/apt/sources.list.d/yarn.list"
   local yarn_backup="/tmp/rugby-video-analysis-yarn.list.disabled"
-  local restore_yarn=false
+  local restore_yarn="false"
+  local install_status=0
 
   # Some Codespaces images include an expired Yarn apt key. Yarn is not needed
   # by this project, so temporarily disable that source while installing FFmpeg.
   if [ -f "$yarn_source" ]; then
     sudo mv "$yarn_source" "$yarn_backup"
-    restore_yarn=true
+    restore_yarn="true"
   fi
 
-  cleanup_yarn_source() {
-    if [ "$restore_yarn" = true ] && [ -f "$yarn_backup" ]; then
-      sudo mv "$yarn_backup" "$yarn_source"
-    fi
-  }
-  trap cleanup_yarn_source RETURN
-
+  set +e
   sudo apt-get update
-  sudo apt-get install -y --no-install-recommends ffmpeg
+  install_status=$?
+  if [ "$install_status" -eq 0 ]; then
+    sudo apt-get install -y --no-install-recommends ffmpeg
+    install_status=$?
+  fi
+  set -e
+
+  if [ "$restore_yarn" = "true" ] && [ -f "$yarn_backup" ]; then
+    sudo mv "$yarn_backup" "$yarn_source"
+  fi
+
+  if [ "$install_status" -ne 0 ]; then
+    echo "FFmpeg installation failed."
+    return "$install_status"
+  fi
 }
 
 install_ffmpeg

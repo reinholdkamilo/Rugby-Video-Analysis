@@ -2,12 +2,31 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
-import { AnalysisJob, Match, Organisation, Team, api, apiUrl } from "@/lib/api";
+import {
+  AnalysisJob,
+  Match,
+  Organisation,
+  Team,
+  VideoProcessingResult,
+  api,
+  apiUrl,
+  thumbnailUrl,
+} from "@/lib/api";
 
 const fieldClass =
   "w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none transition focus:border-emerald-400";
 const buttonClass =
   "rounded-lg bg-emerald-400 px-4 py-2.5 text-sm font-bold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-50";
+
+function formatDuration(seconds: number) {
+  const totalSeconds = Math.round(seconds);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const remainingSeconds = totalSeconds % 60;
+  return [hours, minutes, remainingSeconds]
+    .map((part, index) => (index === 0 ? String(part) : String(part).padStart(2, "0")))
+    .join(":");
+}
 
 export default function Home() {
   const [connected, setConnected] = useState(false);
@@ -15,9 +34,33 @@ export default function Home() {
   const [teams, setTeams] = useState<Team[]>([]);
   const [matches, setMatches] = useState<Match[]>([]);
   const [jobs, setJobs] = useState<AnalysisJob[]>([]);
+  const [processingResults, setProcessingResults] = useState<Record<number, VideoProcessingResult>>({});
   const [selectedOrganisationId, setSelectedOrganisationId] = useState<number | null>(null);
   const [notice, setNotice] = useState("Loading workspace...");
   const [busy, setBusy] = useState(false);
+
+  const loadResults = useCallback(async (jobData: AnalysisJob[]) => {
+    const completed = jobData.filter(
+      (job) => job.status === "completed" && job.video_asset_id !== null,
+    );
+    const entries = await Promise.all(
+      completed.map(async (job) => {
+        try {
+          const result = await api.videos.processingResult(job.video_asset_id as number);
+          return [job.id, result] as const;
+        } catch {
+          return null;
+        }
+      }),
+    );
+    setProcessingResults((current) => {
+      const next = { ...current };
+      entries.forEach((entry) => {
+        if (entry) next[entry[0]] = entry[1];
+      });
+      return next;
+    });
+  }, []);
 
   const loadData = useCallback(async () => {
     try {
@@ -34,12 +77,13 @@ export default function Home() {
       setMatches(matchData);
       setJobs(jobData);
       setSelectedOrganisationId((current) => current ?? organisationData[0]?.id ?? null);
+      await loadResults(jobData);
       setNotice("Workspace ready");
     } catch (error) {
       setConnected(false);
       setNotice(error instanceof Error ? error.message : "Backend unavailable");
     }
-  }, []);
+  }, [loadResults]);
 
   useEffect(() => {
     void loadData();
@@ -49,11 +93,16 @@ export default function Home() {
     const activeJobs = jobs.filter((job) => job.status === "queued" || job.status === "processing");
     if (activeJobs.length === 0) return;
     const timer = window.setInterval(async () => {
-      const refreshed = await Promise.all(activeJobs.map((job) => api.jobs.get(job.id)));
-      setJobs((current) => current.map((job) => refreshed.find((item) => item.id === job.id) ?? job));
-    }, 4000);
+      try {
+        const refreshed = await Promise.all(activeJobs.map((job) => api.jobs.get(job.id)));
+        setJobs((current) => current.map((job) => refreshed.find((item) => item.id === job.id) ?? job));
+        await loadResults(refreshed);
+      } catch (error) {
+        setNotice(error instanceof Error ? error.message : "Unable to refresh analysis status");
+      }
+    }, 3000);
     return () => window.clearInterval(timer);
-  }, [jobs]);
+  }, [jobs, loadResults]);
 
   const filteredTeams = useMemo(
     () => teams.filter((team) => team.organisation_id === selectedOrganisationId),
@@ -130,7 +179,7 @@ export default function Home() {
       const job = await api.jobs.create({ match_id: matchId, video_asset_id: video.id });
       setJobs((current) => [job, ...current]);
       event.currentTarget.reset();
-      setNotice("Video uploaded and analysis queued");
+      setNotice("Video uploaded and processing queued");
     });
   }
 
@@ -197,14 +246,17 @@ export default function Home() {
             {matches.length === 0 && <div className="rounded-xl border border-dashed border-slate-700 p-10 text-center text-slate-500">Create your first match above.</div>}
             {matches.map((match) => {
               const job = jobs.find((item) => item.match_id === match.id);
+              const result = job ? processingResults[job.id] : undefined;
               return (
-                <article key={match.id} className="rounded-xl border border-slate-800 bg-slate-900 p-5">
-                  <div className="grid gap-5 lg:grid-cols-[1fr_360px] lg:items-center">
+                <article key={match.id} className="overflow-hidden rounded-xl border border-slate-800 bg-slate-900">
+                  {result && <img src={thumbnailUrl(result)} alt="Generated match video thumbnail" className="h-52 w-full object-cover" />}
+                  <div className="grid gap-5 p-5 lg:grid-cols-[1fr_360px] lg:items-center">
                     <div>
                       <p className="text-sm text-slate-500">{match.match_date} · {match.competition || "Unspecified competition"}</p>
                       <h3 className="mt-2 text-xl font-bold">{teamName(match.home_team_id)} <span className="text-slate-500">vs</span> {teamName(match.away_team_id)}</h3>
                       <p className="mt-1 text-sm text-slate-400">{match.venue || "Venue not set"}</p>
-                      {job && <div className="mt-4 max-w-xl"><div className="mb-2 flex justify-between text-xs uppercase tracking-wider"><span className="text-emerald-400">{job.status}</span><span>{job.progress_percent}%</span></div><div className="h-2 overflow-hidden rounded-full bg-slate-800"><div className="h-full bg-emerald-400 transition-all" style={{ width: `${job.progress_percent}%` }} /></div><p className="mt-2 text-sm text-slate-400">{job.message || "Waiting for processing worker"}</p></div>}
+                      {job && <div className="mt-4 max-w-xl"><div className="mb-2 flex justify-between text-xs uppercase tracking-wider"><span className={job.status === "failed" ? "text-rose-400" : "text-emerald-400"}>{job.status}</span><span>{job.progress_percent}%</span></div><div className="h-2 overflow-hidden rounded-full bg-slate-800"><div className={`h-full transition-all ${job.status === "failed" ? "bg-rose-400" : "bg-emerald-400"}`} style={{ width: `${job.progress_percent}%` }} /></div><p className="mt-2 text-sm text-slate-400">{job.message || "Waiting for processing worker"}</p></div>}
+                      {result && <div className="mt-5 grid max-w-2xl grid-cols-2 gap-3 text-sm sm:grid-cols-4"><div className="rounded-lg bg-slate-950 p-3"><p className="text-slate-500">Duration</p><p className="mt-1 font-semibold">{formatDuration(result.duration_seconds)}</p></div><div className="rounded-lg bg-slate-950 p-3"><p className="text-slate-500">Resolution</p><p className="mt-1 font-semibold">{result.width} × {result.height}</p></div><div className="rounded-lg bg-slate-950 p-3"><p className="text-slate-500">Frame rate</p><p className="mt-1 font-semibold">{result.frame_rate} fps</p></div><div className="rounded-lg bg-slate-950 p-3"><p className="text-slate-500">Codec</p><p className="mt-1 font-semibold uppercase">{result.video_codec || "Unknown"}</p></div></div>}
                     </div>
                     <form onSubmit={(event) => uploadAndAnalyse(event, match.id)} className="rounded-lg border border-slate-700 bg-slate-950 p-4">
                       <label className="text-sm font-semibold">Upload match video</label>

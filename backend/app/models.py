@@ -43,6 +43,12 @@ class EventType(str, enum.Enum):
     custom = "custom"
 
 
+class SuggestionStatus(str, enum.Enum):
+    pending = "pending"
+    accepted = "accepted"
+    rejected = "rejected"
+
+
 class Organisation(Base):
     __tablename__ = "organisations"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -154,3 +160,21 @@ class EventClip(Base):
     duration_seconds: Mapped[float] = mapped_column(Float)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     event: Mapped[TimelineEvent] = relationship(back_populates="clip")
+
+
+class AutomaticEventSuggestion(Base):
+    __tablename__ = "automatic_event_suggestions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    match_id: Mapped[int] = mapped_column(ForeignKey("matches.id", ondelete="CASCADE"), index=True)
+    video_asset_id: Mapped[int] = mapped_column(ForeignKey("video_assets.id", ondelete="CASCADE"), index=True)
+    event_type: Mapped[EventType] = mapped_column(Enum(EventType), index=True)
+    team: Mapped[EventTeam] = mapped_column(Enum(EventTeam), default=EventTeam.neutral)
+    start_seconds: Mapped[float] = mapped_column(Float)
+    end_seconds: Mapped[float] = mapped_column(Float)
+    confidence: Mapped[float] = mapped_column(Float)
+    label: Mapped[str] = mapped_column(String(200))
+    reason: Mapped[str] = mapped_column(Text)
+    status: Mapped[SuggestionStatus] = mapped_column(Enum(SuggestionStatus), default=SuggestionStatus.pending, index=True)
+    timeline_event_id: Mapped[int | None] = mapped_column(ForeignKey("timeline_events.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)

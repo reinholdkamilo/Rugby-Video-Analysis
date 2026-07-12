@@ -23,6 +23,8 @@ services:
           property: connectionString
       - key: UPLOAD_DIR
         value: /var/data/uploads
+      - key: UPLOAD_SESSION_DIR
+        value: /var/data/upload_sessions
       - key: THUMBNAIL_DIR
         value: /var/data/thumbnails
       - key: CLIP_DIR
@@ -33,3 +35,5 @@ services:
         value: "3"
       - key: MAX_UPLOAD_BYTES
         value: "5368709120"
+      - key: MAX_CHUNK_BYTES
+        value: "8388608"

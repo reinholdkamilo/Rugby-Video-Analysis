@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 600;
+export const maxDuration = 300;
 
 const backendInternalUrl = (
   process.env.BACKEND_INTERNAL_URL ?? "http://127.0.0.1:8000"
@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
         },
         body,
         cache: "no-store",
-        signal: AbortSignal.timeout(10 * 60 * 1000),
+        signal: AbortSignal.timeout(295 * 1000),
       },
     );
 

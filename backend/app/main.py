@@ -33,6 +33,22 @@ CLIP_DIR.mkdir(parents=True, exist_ok=True)
 VISION_FRAME_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _configured_origins() -> list[str]:
+    origins = {
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    }
+    for value in (
+        os.getenv("FRONTEND_URL", ""),
+        os.getenv("ALLOWED_ORIGINS", ""),
+    ):
+        for origin in value.split(","):
+            cleaned = origin.strip().rstrip("/")
+            if cleaned:
+                origins.add(cleaned)
+    return sorted(origins)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     Base.metadata.create_all(bind=engine)
@@ -53,16 +69,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000").rstrip("/")
-allowed_origins = {
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    frontend_url,
-}
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=sorted(allowed_origins),
+    allow_origins=_configured_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -9,9 +9,7 @@ def test_health_endpoint() -> None:
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["status"] == "healthy"
-    assert payload["service"] == "backend"
-    assert payload["version"]
+    assert payload == {"status": "healthy", "service": "backend"}
 
 
 def test_system_endpoint_reports_required_services() -> None:
@@ -21,6 +19,7 @@ def test_system_endpoint_reports_required_services() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["status"] in {"healthy", "degraded"}
+    assert payload["version"]
     assert {"api", "database", "ffmpeg", "opencv"}.issubset(payload["checks"])
     assert payload["checks"]["api"]["healthy"] is True
     assert payload["checks"]["database"]["healthy"] is True

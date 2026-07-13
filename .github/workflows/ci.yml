@@ -23,10 +23,10 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install FFmpeg
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null
         working-directory: .
       - name: Install Python dependencies
-        run: pip install -r requirements.txt -r requirements-dev.txt
+        run: pip install -q -r requirements.txt -r requirements-dev.txt
       - name: Ruff
         run: ruff check app tests
       - name: Pytest
@@ -35,7 +35,7 @@ jobs:
           DATABASE_URL: sqlite:///./ci_test.db
         run: |
           pytest -q --maxfail=1 > /tmp/pytest.log 2>&1 || {
-            tail -200 /tmp/pytest.log
+            cat /tmp/pytest.log
             exit 1
           }
           cat /tmp/pytest.log
@@ -52,11 +52,9 @@ jobs:
         with:
           node-version: "22"
       - name: Install frontend dependencies
-        run: npm install
+        run: npm install --silent
       - name: Lint
-        run: |
-          set -o pipefail
-          npm run lint 2>&1 | tail -120
+        run: npm run lint
       - name: Production build
         env:
           NEXT_PUBLIC_API_URL: http://127.0.0.1:8000
@@ -76,12 +74,12 @@ jobs:
           node-version: "22"
       - name: Install application dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg >/dev/null
           python -m venv .venv
-          .venv/bin/pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+          .venv/bin/pip install -q -r backend/requirements.txt -r backend/requirements-dev.txt
           cd frontend
-          npm install
+          npm install --silent
       - name: Start backend
         run: |
           cd backend

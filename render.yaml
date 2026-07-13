@@ -10,12 +10,17 @@ services:
     rootDir: backend
     dockerfilePath: ./Dockerfile
     healthCheckPath: /health
+    autoDeploy: true
     disk:
       name: video-storage
       mountPath: /var/data
       sizeGB: 20
     envVars:
+      - key: APP_ENV
+        value: production
       - key: FRONTEND_URL
+        sync: false
+      - key: ALLOWED_ORIGINS
         sync: false
       - key: DATABASE_URL
         fromDatabase:
@@ -29,6 +34,8 @@ services:
         value: /var/data/thumbnails
       - key: CLIP_DIR
         value: /var/data/clips
+      - key: VISION_FRAME_DIR
+        value: /var/data/vision_frames
       - key: ENABLE_EMBEDDED_WORKER
         value: "true"
       - key: WORKER_POLL_INTERVAL_SECONDS

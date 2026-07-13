@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.models import AnalysisStatus
 
@@ -94,5 +94,85 @@ class AnalysisJobRead(ORMModel):
     status: AnalysisStatus
     progress_percent: int
     message: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class SeasonCreate(BaseModel):
+    organisation_id: int
+    name: str = Field(min_length=2, max_length=120)
+    start_date: date | None = None
+    end_date: date | None = None
+    is_active: bool = True
+
+    @model_validator(mode="after")
+    def validate_dates(self):
+        if self.start_date and self.end_date and self.end_date < self.start_date:
+            raise ValueError("Season end date cannot be before the start date.")
+        return self
+
+
+class SeasonRead(ORMModel):
+    id: int
+    organisation_id: int
+    name: str
+    start_date: date | None
+    end_date: date | None
+    is_active: bool
+    created_at: datetime
+
+
+class CompetitionCreate(BaseModel):
+    organisation_id: int
+    season_id: int | None = None
+    name: str = Field(min_length=2, max_length=150)
+    level: str | None = Field(default=None, max_length=80)
+
+
+class CompetitionRead(ORMModel):
+    id: int
+    organisation_id: int
+    season_id: int | None
+    name: str
+    level: str | None
+    created_at: datetime
+
+
+class PlayerCreate(BaseModel):
+    organisation_id: int
+    team_id: int | None = None
+    first_name: str = Field(min_length=1, max_length=100)
+    last_name: str = Field(min_length=1, max_length=100)
+    preferred_name: str | None = Field(default=None, max_length=100)
+    position: str | None = Field(default=None, max_length=50)
+    jersey_number: int | None = Field(default=None, ge=1, le=99)
+    is_active: bool = True
+
+
+class PlayerRead(ORMModel):
+    id: int
+    organisation_id: int
+    team_id: int | None
+    first_name: str
+    last_name: str
+    preferred_name: str | None
+    position: str | None
+    jersey_number: int | None
+    is_active: bool
+    created_at: datetime
+
+
+class MatchContextUpsert(BaseModel):
+    season_id: int | None = None
+    competition_id: int | None = None
+    round_name: str | None = Field(default=None, max_length=100)
+
+
+class MatchContextRead(ORMModel):
+    id: int
+    match_id: int
+    season_id: int | None
+    competition_id: int | None
+    round_name: str | None
     created_at: datetime
     updated_at: datetime

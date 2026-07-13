@@ -12,8 +12,6 @@ FRONTEND_LOG="$LOG_DIR/frontend.log"
 PID_FILE="$LOG_DIR/dev.pids"
 LOCK_FILE="$LOG_DIR/dev.lock"
 
-# Only one launcher may run at a time. This prevents a stale Codespaces startup
-# process and a manual start from racing each other for ports 3000 and 8000.
 exec 9>"$LOCK_FILE"
 if ! flock -n 9; then
   echo "Another Rugby Video Analysis launcher is already running."
@@ -100,7 +98,6 @@ clear_port() {
   exit 1
 }
 
-# Stop any prior processes recorded by an older launcher before clearing ports.
 if [ -f "$PID_FILE" ]; then
   while read -r old_pid; do
     if [ -n "$old_pid" ] && kill -0 "$old_pid" 2>/dev/null; then
@@ -126,11 +123,11 @@ echo "Waiting for stable backend health checks..."
 
 backend_ready=false
 consecutive_health_checks=0
-for _ in $(seq 1 60); do
+for attempt in $(seq 1 60); do
   if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
     break
   fi
-  if curl --silent --fail http://127.0.0.1:8000/health >/dev/null; then
+  if curl --max-time 2 --silent --fail http://127.0.0.1:8000/health >/dev/null; then
     consecutive_health_checks=$((consecutive_health_checks + 1))
     if [ "$consecutive_health_checks" -ge 3 ]; then
       backend_ready=true
@@ -162,7 +159,7 @@ echo "Frontend process started with PID ${FRONTEND_PID}."
 echo "Waiting for frontend, homepage and backend proxy..."
 
 frontend_ready=false
-for _ in $(seq 1 90); do
+for attempt in $(seq 1 90); do
   if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
     echo "Backend exited while the frontend was starting. Backend log:"
     cat "$BACKEND_LOG"
@@ -172,26 +169,24 @@ for _ in $(seq 1 90); do
     break
   fi
 
-  listener_pids="$(fuser "3000/tcp" 2>/dev/null | tr -s ' ' '\n' | grep -E '^[0-9]+$' || true)"
-  owns_port=false
-  while read -r listener_pid; do
-    if [ -n "$listener_pid" ] && [ "$listener_pid" = "$FRONTEND_PID" ]; then
-      owns_port=true
-      break
-    fi
-  done <<< "$listener_pids"
-
-  if [ "$owns_port" = true ] \
-    && curl --silent --fail http://127.0.0.1:3000/ >/dev/null \
-    && curl --silent --fail http://127.0.0.1:3000/backend/health >/dev/null; then
+  # Next.js may hand the listening socket to a child process, so checking for
+  # exact PID ownership is unreliable. Ports were force-cleared before launch;
+  # a healthy homepage plus backend proxy is the reliable readiness signal.
+  if curl --max-time 3 --silent --fail http://127.0.0.1:3000/ >/dev/null \
+    && curl --max-time 3 --silent --fail http://127.0.0.1:3000/backend/health >/dev/null; then
     frontend_ready=true
     break
+  fi
+
+  if [ $((attempt % 10)) -eq 0 ]; then
+    echo "Still waiting for frontend... ${attempt}s elapsed"
+    tail -n 12 "$FRONTEND_LOG" 2>/dev/null || true
   fi
   sleep 1
 done
 
 if [ "$frontend_ready" != true ]; then
-  echo "Frontend failed to start as the owner of port 3000."
+  echo "Frontend failed to become ready."
   echo "Current port owner:"
   fuser -v 3000/tcp 2>/dev/null || true
   echo

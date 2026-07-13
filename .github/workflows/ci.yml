@@ -33,7 +33,12 @@ jobs:
         env:
           ENABLE_EMBEDDED_WORKER: "false"
           DATABASE_URL: sqlite:///./ci_test.db
-        run: pytest -q
+        run: |
+          pytest -q --maxfail=1 > /tmp/pytest.log 2>&1 || {
+            tail -200 /tmp/pytest.log
+            exit 1
+          }
+          cat /tmp/pytest.log
 
   frontend:
     name: Frontend checks
@@ -47,7 +52,7 @@ jobs:
         with:
           node-version: "22"
       - name: Install frontend dependencies
-        run: npm ci
+        run: npm install
       - name: Lint
         run: npm run lint
       - name: Production build
@@ -74,7 +79,7 @@ jobs:
           python -m venv .venv
           .venv/bin/pip install -r backend/requirements.txt -r backend/requirements-dev.txt
           cd frontend
-          npm ci
+          npm install
       - name: Start backend
         run: |
           cd backend

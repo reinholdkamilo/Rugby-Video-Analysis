@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import models  # noqa: F401
+from app.api.catalog import router as catalog_router
 from app.api.events import router as events_router
 from app.api.intelligence import router as intelligence_router
 from app.api.routes import router as api_router
@@ -24,7 +25,7 @@ from app.worker import start_embedded_worker
 logger = logging.getLogger("rugby-video-analysis")
 
 APP_NAME = "Rugby Video Analysis API"
-APP_VERSION = "0.9.0"
+APP_VERSION = "0.10.0"
 THUMBNAIL_DIR = Path(os.getenv("THUMBNAIL_DIR", "thumbnails"))
 CLIP_DIR = Path(os.getenv("CLIP_DIR", "clips"))
 VISION_FRAME_DIR = Path(os.getenv("VISION_FRAME_DIR", "vision_frames"))
@@ -101,6 +102,7 @@ async def protect_dashboard_reads(request: Request, call_next):
 
 
 app.include_router(api_router)
+app.include_router(catalog_router)
 app.include_router(events_router)
 app.include_router(uploads_router)
 app.include_router(suggestions_router)

@@ -25,9 +25,6 @@ if [ -f "$REQUIREMENTS_STAMP" ]; then
   INSTALLED_REQUIREMENTS_HASH="$(cat "$REQUIREMENTS_STAMP")"
 fi
 
-# A previous interrupted installation can leave .venv present but incomplete.
-# Also reinstall whenever the checked-in requirements change, including Stage 5
-# computer-vision packages such as OpenCV and NumPy.
 if [ ! -x .venv/bin/python ] \
   || [ "$CURRENT_REQUIREMENTS_HASH" != "$INSTALLED_REQUIREMENTS_HASH" ] \
   || ! .venv/bin/python -c "import uvicorn, fastapi, sqlalchemy, cv2, numpy" >/dev/null 2>&1; then
@@ -50,7 +47,7 @@ for port in 8000 3000; do
     kill $pids 2>/dev/null || true
   fi
 done
-sleep 1
+sleep 2
 
 cleanup() {
   if [ -f "$PID_FILE" ]; then
@@ -61,35 +58,44 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+# Do not use uvicorn --reload here. In Codespaces the reloader can briefly pass
+# a health check and then exit, leaving Next.js proxying to a dead port.
 (
   cd backend
-  exec "$PYTHON" -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+  exec "$PYTHON" -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 ) > "$BACKEND_LOG" 2>&1 &
 BACKEND_PID=$!
 
 printf '%s\n' "$BACKEND_PID" > "$PID_FILE"
 echo "Backend process started with PID ${BACKEND_PID}."
-echo "Waiting for backend health check..."
+echo "Waiting for stable backend health checks..."
 
 backend_ready=false
-for _ in $(seq 1 45); do
-  if curl --silent --fail http://127.0.0.1:8000/health >/dev/null; then
-    backend_ready=true
-    break
-  fi
+consecutive_health_checks=0
+for _ in $(seq 1 60); do
   if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
     break
+  fi
+
+  if curl --silent --fail http://127.0.0.1:8000/health >/dev/null; then
+    consecutive_health_checks=$((consecutive_health_checks + 1))
+    if [ "$consecutive_health_checks" -ge 3 ]; then
+      backend_ready=true
+      break
+    fi
+  else
+    consecutive_health_checks=0
   fi
   sleep 1
 done
 
 if [ "$backend_ready" != true ]; then
-  echo "Backend failed to start. Backend log:"
+  echo "Backend failed to remain healthy. Backend log:"
   cat "$BACKEND_LOG"
   exit 1
 fi
 
-echo "Backend is healthy."
+echo "Backend is stable and healthy."
 
 (
   cd frontend
@@ -102,11 +108,18 @@ echo "Frontend process started with PID ${FRONTEND_PID}."
 echo "Waiting for frontend and backend proxy..."
 
 frontend_ready=false
-for _ in $(seq 1 60); do
+for _ in $(seq 1 90); do
+  if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
+    echo "Backend exited while the frontend was starting. Backend log:"
+    cat "$BACKEND_LOG"
+    exit 1
+  fi
+
   if curl --silent --fail http://127.0.0.1:3000/backend/health >/dev/null; then
     frontend_ready=true
     break
   fi
+
   if ! kill -0 "$FRONTEND_PID" 2>/dev/null; then
     break
   fi
@@ -114,7 +127,11 @@ for _ in $(seq 1 60); do
 done
 
 if [ "$frontend_ready" != true ]; then
-  echo "Frontend failed to start or proxy the backend. Frontend log:"
+  echo "Frontend failed to start or proxy the backend."
+  echo "Backend log:"
+  cat "$BACKEND_LOG"
+  echo
+  echo "Frontend log:"
   cat "$FRONTEND_LOG"
   exit 1
 fi
@@ -128,4 +145,17 @@ echo "  Logs:     $LOG_DIR"
 echo
 echo "Keep this terminal open. Press Ctrl+C to stop both services."
 
-wait "$FRONTEND_PID"
+# Exit if either service stops, rather than silently leaving half the stack alive.
+while true; do
+  if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
+    echo "Backend stopped unexpectedly. Backend log:"
+    cat "$BACKEND_LOG"
+    exit 1
+  fi
+  if ! kill -0 "$FRONTEND_PID" 2>/dev/null; then
+    echo "Frontend stopped unexpectedly. Frontend log:"
+    cat "$FRONTEND_LOG"
+    exit 1
+  fi
+  sleep 2
+done

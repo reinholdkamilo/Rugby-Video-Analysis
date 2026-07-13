@@ -150,7 +150,7 @@ echo "Backend is stable and healthy."
 (
   cd frontend
   BACKEND_INTERNAL_URL=http://127.0.0.1:8000 \
-    exec ./node_modules/.bin/next dev --hostname 0.0.0.0 --port 3000
+    exec ./node_modules/.bin/next dev --webpack --hostname 0.0.0.0 --port 3000
 ) > "$FRONTEND_LOG" 2>&1 &
 FRONTEND_PID=$!
 printf '%s\n' "$FRONTEND_PID" >> "$PID_FILE"
@@ -169,9 +169,6 @@ for attempt in $(seq 1 90); do
     break
   fi
 
-  # Next.js may hand the listening socket to a child process, so checking for
-  # exact PID ownership is unreliable. Ports were force-cleared before launch;
-  # a healthy homepage plus backend proxy is the reliable readiness signal.
   if curl --max-time 3 --silent --fail http://127.0.0.1:3000/ >/dev/null \
     && curl --max-time 3 --silent --fail http://127.0.0.1:3000/backend/health >/dev/null; then
     frontend_ready=true
@@ -213,6 +210,7 @@ echo "  Backend:        http://localhost:8000"
 echo "  Health:         http://localhost:3000/backend/health"
 echo "  Logs:           $LOG_DIR"
 echo
+echo "Frontend mode: Webpack compatibility mode for iPad Safari."
 echo "Keep this terminal open. Press Ctrl+C to stop both services."
 
 while true; do

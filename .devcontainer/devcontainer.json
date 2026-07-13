@@ -9,13 +9,15 @@
   "portsAttributes": {
     "3000": {
       "label": "Rugby Video Analysis",
-      "onAutoForward": "openBrowser",
-      "visibility": "private"
+      "onAutoForward": "notify",
+      "visibility": "private",
+      "protocol": "https"
     },
     "8000": {
       "label": "Internal Backend API",
       "onAutoForward": "silent",
-      "visibility": "private"
+      "visibility": "private",
+      "protocol": "https"
     }
   },
   "postCreateCommand": "bash scripts/install.sh",

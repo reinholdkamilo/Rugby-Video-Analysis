@@ -9,6 +9,7 @@ mkdir -p "$LOG_DIR"
 STARTUP_LOG="$LOG_DIR/dev.log"
 BACKEND_LOG="$LOG_DIR/backend.log"
 FRONTEND_LOG="$LOG_DIR/frontend.log"
+FRONTEND_BUILD_LOG="$LOG_DIR/frontend-build.log"
 PID_FILE="$LOG_DIR/dev.pids"
 LOCK_FILE="$LOG_DIR/dev.lock"
 
@@ -111,6 +112,28 @@ fi
 clear_port 8000 "backend"
 clear_port 3000 "frontend"
 
+FRONTEND_BUILD_STAMP="$PROJECT_ROOT/frontend/.next/.source.sha256"
+CURRENT_FRONTEND_HASH="$(git ls-files frontend | grep -vE '(^|/)(node_modules|\.next)/' | xargs sha256sum | sha256sum | awk '{print $1}')"
+BUILT_FRONTEND_HASH=""
+if [ -f "$FRONTEND_BUILD_STAMP" ]; then
+  BUILT_FRONTEND_HASH="$(cat "$FRONTEND_BUILD_STAMP")"
+fi
+
+if [ ! -f frontend/.next/BUILD_ID ] || [ "$CURRENT_FRONTEND_HASH" != "$BUILT_FRONTEND_HASH" ]; then
+  echo "Building production frontend for reliable Codespaces testing..."
+  : > "$FRONTEND_BUILD_LOG"
+  if ! (cd frontend && BACKEND_INTERNAL_URL=http://127.0.0.1:8000 npm run build) > "$FRONTEND_BUILD_LOG" 2>&1; then
+    echo "Frontend production build failed. Build log:"
+    cat "$FRONTEND_BUILD_LOG"
+    exit 1
+  fi
+  mkdir -p frontend/.next
+  printf '%s\n' "$CURRENT_FRONTEND_HASH" > "$FRONTEND_BUILD_STAMP"
+  echo "Frontend production build completed."
+else
+  echo "Existing production frontend build is current."
+fi
+
 (
   cd backend
   exec "$PYTHON" -m uvicorn app.main:app --host 0.0.0.0 --port 8000
@@ -123,7 +146,7 @@ echo "Waiting for stable backend health checks..."
 
 backend_ready=false
 consecutive_health_checks=0
-for attempt in $(seq 1 60); do
+for _ in $(seq 1 60); do
   if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
     break
   fi
@@ -150,16 +173,16 @@ echo "Backend is stable and healthy."
 (
   cd frontend
   BACKEND_INTERNAL_URL=http://127.0.0.1:8000 \
-    exec ./node_modules/.bin/next dev --webpack --hostname 0.0.0.0 --port 3000
+    exec ./node_modules/.bin/next start --hostname 0.0.0.0 --port 3000
 ) > "$FRONTEND_LOG" 2>&1 &
 FRONTEND_PID=$!
 printf '%s\n' "$FRONTEND_PID" >> "$PID_FILE"
 
-echo "Frontend process started with PID ${FRONTEND_PID}."
-echo "Waiting for frontend, homepage and backend proxy..."
+echo "Production frontend process started with PID ${FRONTEND_PID}."
+echo "Waiting for rendered homepage and backend proxy..."
 
 frontend_ready=false
-for attempt in $(seq 1 90); do
+for attempt in $(seq 1 60); do
   if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
     echo "Backend exited while the frontend was starting. Backend log:"
     cat "$BACKEND_LOG"
@@ -169,35 +192,37 @@ for attempt in $(seq 1 90); do
     break
   fi
 
-  if curl --max-time 3 --silent --fail http://127.0.0.1:3000/ >/dev/null \
+  homepage="$(curl --max-time 4 --silent --fail http://127.0.0.1:3000/ 2>/dev/null || true)"
+  if printf '%s' "$homepage" | grep -q "Video Analysis Workspace" \
     && curl --max-time 3 --silent --fail http://127.0.0.1:3000/backend/health >/dev/null; then
     frontend_ready=true
     break
   fi
 
   if [ $((attempt % 10)) -eq 0 ]; then
-    echo "Still waiting for frontend... ${attempt}s elapsed"
-    tail -n 12 "$FRONTEND_LOG" 2>/dev/null || true
+    echo "Still waiting for rendered frontend... ${attempt}s elapsed"
+    tail -n 15 "$FRONTEND_LOG" 2>/dev/null || true
   fi
   sleep 1
 done
 
 if [ "$frontend_ready" != true ]; then
-  echo "Frontend failed to become ready."
+  echo "Frontend did not return the expected rendered application HTML."
   echo "Current port owner:"
   fuser -v 3000/tcp 2>/dev/null || true
   echo
-  echo "Backend log:"
-  cat "$BACKEND_LOG"
-  echo
   echo "Frontend log:"
   cat "$FRONTEND_LOG"
+  echo
+  echo "Build log:"
+  cat "$FRONTEND_BUILD_LOG" 2>/dev/null || true
   exit 1
 fi
 
 PUBLIC_FRONTEND_URL=""
 if [ -n "${CODESPACE_NAME:-}" ] && [ -n "${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:-}" ]; then
-  PUBLIC_FRONTEND_URL="https://${CODESPACE_NAME}-3000.${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}"
+  CACHE_BUSTER="$(git rev-parse --short HEAD 2>/dev/null || date +%s)"
+  PUBLIC_FRONTEND_URL="https://${CODESPACE_NAME}-3000.${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}/?v=${CACHE_BUSTER}"
 fi
 
 echo
@@ -210,7 +235,7 @@ echo "  Backend:        http://localhost:8000"
 echo "  Health:         http://localhost:3000/backend/health"
 echo "  Logs:           $LOG_DIR"
 echo
-echo "Frontend mode: Webpack compatibility mode for iPad Safari."
+echo "Frontend mode: validated Next.js production server."
 echo "Keep this terminal open. Press Ctrl+C to stop both services."
 
 while true; do

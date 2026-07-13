@@ -103,7 +103,7 @@ jobs:
       - name: Start backend
         run: |
           cd backend
-          ENABLE_EMBEDDED_WORKER=false DATABASE_URL=sqlite:///./smoke_test.db PYTHONPATH=. ../.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 > /tmp/backend.log 2>&1 &
+          ENABLE_EMBEDDED_WORKER=true DATABASE_URL=sqlite:///./smoke_test.db PYTHONPATH=. ../.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 > /tmp/backend.log 2>&1 &
           echo $! > /tmp/backend.pid
       - name: Start frontend proxy
         run: |
@@ -123,7 +123,7 @@ jobs:
           cat /tmp/frontend.log || true
           exit 1
       - name: Run end-to-end smoke test
-        run: bash scripts/smoke-test.sh
+        run: timeout 180 bash scripts/smoke-test.sh
       - name: Show logs after failure
         if: failure()
         run: |

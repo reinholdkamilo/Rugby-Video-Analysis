@@ -58,8 +58,6 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# Do not use uvicorn --reload here. In Codespaces the reloader can briefly pass
-# a health check and then exit, leaving Next.js proxying to a dead port.
 (
   cd backend
   exec "$PYTHON" -m uvicorn app.main:app --host 0.0.0.0 --port 8000
@@ -105,7 +103,7 @@ FRONTEND_PID=$!
 printf '%s\n' "$FRONTEND_PID" >> "$PID_FILE"
 
 echo "Frontend process started with PID ${FRONTEND_PID}."
-echo "Waiting for frontend and backend proxy..."
+echo "Waiting for frontend, homepage and backend proxy..."
 
 frontend_ready=false
 for _ in $(seq 1 90); do
@@ -115,7 +113,8 @@ for _ in $(seq 1 90); do
     exit 1
   fi
 
-  if curl --silent --fail http://127.0.0.1:3000/backend/health >/dev/null; then
+  if curl --silent --fail http://127.0.0.1:3000/ >/dev/null \
+    && curl --silent --fail http://127.0.0.1:3000/backend/health >/dev/null; then
     frontend_ready=true
     break
   fi
@@ -136,16 +135,23 @@ if [ "$frontend_ready" != true ]; then
   exit 1
 fi
 
+PUBLIC_FRONTEND_URL=""
+if [ -n "${CODESPACE_NAME:-}" ] && [ -n "${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:-}" ]; then
+  PUBLIC_FRONTEND_URL="https://${CODESPACE_NAME}-3000.${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}"
+fi
+
 echo
 echo "Rugby Video Analysis is ready:"
-echo "  Frontend: http://localhost:3000"
-echo "  Backend:  http://localhost:8000"
-echo "  Health:   http://localhost:3000/backend/health"
-echo "  Logs:     $LOG_DIR"
+echo "  Local frontend: http://localhost:3000"
+if [ -n "$PUBLIC_FRONTEND_URL" ]; then
+  echo "  OPEN THIS URL:  $PUBLIC_FRONTEND_URL"
+fi
+echo "  Backend:        http://localhost:8000"
+echo "  Health:         http://localhost:3000/backend/health"
+echo "  Logs:           $LOG_DIR"
 echo
 echo "Keep this terminal open. Press Ctrl+C to stop both services."
 
-# Exit if either service stops, rather than silently leaving half the stack alive.
 while true; do
   if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
     echo "Backend stopped unexpectedly. Backend log:"

@@ -13,6 +13,7 @@ from app.api.events import router as events_router
 from app.api.intelligence import router as intelligence_router
 from app.api.routes import router as api_router
 from app.api.suggestions import router as suggestions_router
+from app.api.system import router as system_router
 from app.api.understanding import router as understanding_router
 from app.api.uploads import router as uploads_router
 from app.api.vision import router as vision_router
@@ -23,7 +24,7 @@ from app.worker import start_embedded_worker
 logger = logging.getLogger("rugby-video-analysis")
 
 APP_NAME = "Rugby Video Analysis API"
-APP_VERSION = "0.9.0"
+APP_VERSION = os.getenv("APP_VERSION", "0.9.0")
 THUMBNAIL_DIR = Path(os.getenv("THUMBNAIL_DIR", "thumbnails"))
 CLIP_DIR = Path(os.getenv("CLIP_DIR", "clips"))
 VISION_FRAME_DIR = Path(os.getenv("VISION_FRAME_DIR", "vision_frames"))
@@ -98,6 +99,7 @@ app.include_router(vision_router)
 app.include_router(understanding_router)
 app.include_router(intelligence_router)
 app.include_router(workspace_router)
+app.include_router(system_router)
 app.mount("/media/thumbnails", StaticFiles(directory=str(THUMBNAIL_DIR)), name="thumbnails")
 app.mount("/media/clips", StaticFiles(directory=str(CLIP_DIR)), name="clips")
 app.mount("/media/vision", StaticFiles(directory=str(VISION_FRAME_DIR)), name="vision")
@@ -110,4 +112,4 @@ def root() -> dict[str, str]:
 
 @app.get("/health")
 def health_check() -> dict[str, str]:
-    return {"status": "healthy", "service": "backend"}
+    return {"status": "healthy", "service": "backend", "version": APP_VERSION}

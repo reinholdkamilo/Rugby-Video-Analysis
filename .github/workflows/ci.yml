@@ -33,9 +33,10 @@ jobs:
         env:
           ENABLE_EMBEDDED_WORKER: "false"
           DATABASE_URL: sqlite:///./ci_test.db
+          PYTHONPATH: .
         run: |
           set +e
-          pytest -q --maxfail=1 > /tmp/pytest.log 2>&1
+          python -m pytest -q --maxfail=1 > /tmp/pytest.log 2>&1
           status=$?
           cat /tmp/pytest.log
           exit $status
@@ -102,7 +103,7 @@ jobs:
       - name: Start backend
         run: |
           cd backend
-          ENABLE_EMBEDDED_WORKER=false DATABASE_URL=sqlite:///./smoke_test.db ../.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 > /tmp/backend.log 2>&1 &
+          ENABLE_EMBEDDED_WORKER=false DATABASE_URL=sqlite:///./smoke_test.db PYTHONPATH=. ../.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 > /tmp/backend.log 2>&1 &
           echo $! > /tmp/backend.pid
       - name: Start frontend proxy
         run: |

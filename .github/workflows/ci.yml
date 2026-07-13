@@ -34,11 +34,18 @@ jobs:
           ENABLE_EMBEDDED_WORKER: "false"
           DATABASE_URL: sqlite:///./ci_test.db
         run: |
-          pytest -q --maxfail=1 > /tmp/pytest.log 2>&1 || {
-            cat /tmp/pytest.log
-            exit 1
-          }
+          set +e
+          pytest -q --maxfail=1 > /tmp/pytest.log 2>&1
+          status=$?
           cat /tmp/pytest.log
+          exit $status
+      - name: Upload Pytest diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-diagnostics
+          path: /tmp/pytest.log
+          if-no-files-found: error
 
   frontend:
     name: Frontend checks
@@ -54,7 +61,19 @@ jobs:
       - name: Install frontend dependencies
         run: npm install --silent
       - name: Lint
-        run: npm run lint
+        run: |
+          set +e
+          npm run lint > /tmp/eslint.log 2>&1
+          status=$?
+          cat /tmp/eslint.log
+          exit $status
+      - name: Upload ESLint diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eslint-diagnostics
+          path: /tmp/eslint.log
+          if-no-files-found: error
       - name: Production build
         env:
           NEXT_PUBLIC_API_URL: http://127.0.0.1:8000

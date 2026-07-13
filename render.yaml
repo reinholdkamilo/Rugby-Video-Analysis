@@ -13,7 +13,7 @@ services:
     plan: starter
     rootDir: backend
     dockerfilePath: ./Dockerfile
-    healthCheckPath: /health
+    healthCheckPath: /api/system/ready
     autoDeploy: true
     disk:
       name: video-storage

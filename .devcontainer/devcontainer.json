@@ -11,13 +11,13 @@
       "label": "Rugby Video Analysis",
       "onAutoForward": "notify",
       "visibility": "private",
-      "protocol": "https"
+      "protocol": "http"
     },
     "8000": {
       "label": "Internal Backend API",
       "onAutoForward": "silent",
       "visibility": "private",
-      "protocol": "https"
+      "protocol": "http"
     }
   },
   "postCreateCommand": "bash scripts/install.sh"

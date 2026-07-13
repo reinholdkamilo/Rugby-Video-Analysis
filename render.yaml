@@ -2,11 +2,15 @@ databases:
   - name: rugby-video-analysis-db
     databaseName: rugby_video_analysis
     user: rugby_video_analysis
+    region: singapore
+    plan: basic-256mb
 
 services:
   - type: web
     name: rugby-video-analysis-api
     runtime: docker
+    region: singapore
+    plan: starter
     rootDir: backend
     dockerfilePath: ./Dockerfile
     healthCheckPath: /health

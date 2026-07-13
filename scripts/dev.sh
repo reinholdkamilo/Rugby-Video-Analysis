@@ -40,20 +40,56 @@ fi
 
 PYTHON="$PROJECT_ROOT/.venv/bin/python"
 
+stop_pid_tree() {
+  local pid="$1"
+  [ -z "$pid" ] && return 0
+  if kill -0 "$pid" 2>/dev/null; then
+    pkill -TERM -P "$pid" 2>/dev/null || true
+    kill -TERM "$pid" 2>/dev/null || true
+  fi
+}
+
+# Stop processes recorded by a previous run before checking listeners. This also
+# catches orphaned Next.js child processes created by an interrupted Codespace.
+if [ -f "$PID_FILE" ]; then
+  while read -r old_pid; do
+    stop_pid_tree "$old_pid"
+  done < "$PID_FILE"
+  rm -f "$PID_FILE"
+fi
+
+# Stop known project servers that may have survived outside the PID file.
+pkill -TERM -f "uvicorn app.main:app.*--port 8000" 2>/dev/null || true
+pkill -TERM -f "next dev.*--port 3000" 2>/dev/null || true
+sleep 2
+
 for port in 8000 3000; do
-  pids="$(lsof -t -iTCP:${port} -sTCP:LISTEN 2>/dev/null || true)"
-  if [ -n "$pids" ]; then
+  for attempt in $(seq 1 10); do
+    pids="$(lsof -t -iTCP:${port} -sTCP:LISTEN 2>/dev/null || true)"
+    if [ -z "$pids" ]; then
+      break
+    fi
     echo "Stopping existing process on port ${port}: ${pids}"
-    kill $pids 2>/dev/null || true
+    if [ "$attempt" -lt 5 ]; then
+      kill -TERM $pids 2>/dev/null || true
+    else
+      kill -KILL $pids 2>/dev/null || true
+    fi
+    sleep 1
+  done
+
+  if lsof -t -iTCP:${port} -sTCP:LISTEN >/dev/null 2>&1; then
+    echo "Unable to free port ${port}. Refusing to start a duplicate server."
+    exit 1
   fi
 done
-sleep 2
 
 cleanup() {
   if [ -f "$PID_FILE" ]; then
     while read -r pid; do
-      [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
+      stop_pid_tree "$pid"
     done < "$PID_FILE"
+    rm -f "$PID_FILE"
   fi
 }
 trap cleanup EXIT INT TERM

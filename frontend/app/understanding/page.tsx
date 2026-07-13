@@ -61,7 +61,7 @@ export default function UnderstandingPage() {
       <header className="border-b border-slate-800">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-5">
           <div><p className="text-xs font-bold uppercase tracking-[0.22em] text-emerald-400">Stage 6</p><h1 className="mt-1 text-2xl font-bold">Rugby Understanding</h1></div>
-          <div className="flex gap-3 text-sm"><Link href="/" className="rounded-lg border border-slate-700 px-3 py-2">Dashboard</Link><Link href="/vision" className="rounded-lg border border-slate-700 px-3 py-2">Vision</Link></div>
+          <div className="flex gap-3 text-sm"><Link href="/" className="rounded-lg border border-slate-700 px-3 py-2">Dashboard</Link><Link href="/vision" className="rounded-lg border border-slate-700 px-3 py-2">Vision</Link><Link href="/intelligence" className="rounded-lg border border-emerald-500 px-3 py-2 text-emerald-300">Intelligence</Link></div>
         </div>
       </header>
 

@@ -6,7 +6,7 @@ services:
     region: singapore
     rootDir: backend
     dockerfilePath: ./Dockerfile
-    healthCheckPath: /health
+    healthCheckPath: /api/system/ready
     autoDeploy: true
     envVars:
       - key: APP_ENV

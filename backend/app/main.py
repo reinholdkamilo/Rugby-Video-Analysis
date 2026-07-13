@@ -24,7 +24,7 @@ from app.worker import start_embedded_worker
 logger = logging.getLogger("rugby-video-analysis")
 
 APP_NAME = "Rugby Video Analysis API"
-APP_VERSION = os.getenv("APP_VERSION", "0.9.0")
+APP_VERSION = "0.9.0"
 THUMBNAIL_DIR = Path(os.getenv("THUMBNAIL_DIR", "thumbnails"))
 CLIP_DIR = Path(os.getenv("CLIP_DIR", "clips"))
 VISION_FRAME_DIR = Path(os.getenv("VISION_FRAME_DIR", "vision_frames"))
@@ -112,4 +112,4 @@ def root() -> dict[str, str]:
 
 @app.get("/health")
 def health_check() -> dict[str, str]:
-    return {"status": "healthy", "service": "backend", "version": APP_VERSION}
+    return {"status": "healthy", "service": "backend"}

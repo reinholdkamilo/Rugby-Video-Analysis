@@ -22,9 +22,11 @@ services:
       - key: WORKER_POLL_INTERVAL_SECONDS
         value: "5"
       - key: MAX_UPLOAD_BYTES
-        value: "104857600"
+        value: "5368709120"
       - key: MAX_CHUNK_BYTES
         value: "4194304"
+      - key: MULTIPART_PART_SIZE_BYTES
+        value: "16777216"
       - key: UPLOAD_DIR
         value: /tmp/rugby-video-analysis/uploads
       - key: UPLOAD_SESSION_DIR

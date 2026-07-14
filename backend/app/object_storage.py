@@ -81,6 +81,51 @@ def upload_file(local_path: str | Path, key: str, content_type: str | None = Non
     return object_uri(key)
 
 
+def create_multipart_upload(key: str, content_type: str | None = None) -> str:
+    params: dict[str, object] = {"Bucket": R2_BUCKET_NAME, "Key": key}
+    if content_type:
+        params["ContentType"] = content_type
+    response = client().create_multipart_upload(**params)
+    return str(response["UploadId"])
+
+
+def create_presigned_part_url(key: str, upload_id: str, part_number: int) -> str:
+    if part_number < 1 or part_number > 10000:
+        raise ValueError("Multipart part number must be between 1 and 10000.")
+    return client().generate_presigned_url(
+        "upload_part",
+        Params={
+            "Bucket": R2_BUCKET_NAME,
+            "Key": key,
+            "UploadId": upload_id,
+            "PartNumber": part_number,
+        },
+        ExpiresIn=R2_PRESIGNED_URL_SECONDS,
+    )
+
+
+def complete_multipart_upload(key: str, upload_id: str, parts: list[dict[str, object]]) -> str:
+    normalised = [
+        {"PartNumber": int(part["part_number"]), "ETag": str(part["etag"]).strip('"')}
+        for part in sorted(parts, key=lambda item: int(item["part_number"]))
+    ]
+    client().complete_multipart_upload(
+        Bucket=R2_BUCKET_NAME,
+        Key=key,
+        UploadId=upload_id,
+        MultipartUpload={"Parts": normalised},
+    )
+    return object_uri(key)
+
+
+def abort_multipart_upload(key: str, upload_id: str) -> None:
+    client().abort_multipart_upload(
+        Bucket=R2_BUCKET_NAME,
+        Key=key,
+        UploadId=upload_id,
+    )
+
+
 def materialize(uri_or_path: str, cache_dir: str | Path) -> Path:
     local = Path(uri_or_path)
     if local.is_file():

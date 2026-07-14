@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import AnalysisJob, Match, VideoAsset
+from app.object_storage import is_object_storage_enabled, upload_file
 
 router = APIRouter(prefix="/api/uploads", tags=["uploads"])
 
@@ -162,13 +163,21 @@ def complete_upload(upload_id: str, db: Session = Depends(get_db)) -> UploadSess
         raise HTTPException(status_code=500, detail="Assembled video size does not match the original file.")
     temporary_destination.replace(destination)
 
+    storage_path = str(destination)
+    if is_object_storage_enabled():
+        object_key = f"videos/match-{metadata['match_id']}/{stored_filename}"
+        try:
+            storage_path = upload_file(destination, object_key, metadata.get("content_type"))
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"Unable to persist video to object storage: {str(exc)[:300]}") from exc
+
     video = VideoAsset(
         match_id=metadata["match_id"],
         original_filename=metadata["filename"],
         stored_filename=stored_filename,
         content_type=metadata.get("content_type"),
         size_bytes=metadata["size_bytes"],
-        storage_path=str(destination),
+        storage_path=storage_path,
     )
     db.add(video)
     db.flush()

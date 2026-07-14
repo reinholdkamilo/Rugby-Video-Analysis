@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { AppNav } from "@/components/app-nav";
 import "./globals.css";
+import "./tab-pages.css";
 
 export const metadata: Metadata = {
   title: {

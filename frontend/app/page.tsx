@@ -4,9 +4,8 @@ import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { AnalysisJob, Match, Organisation, Team, api, apiUrl, uploadVideoInChunks } from "@/lib/api";
 
-const fieldClass = "w-full px-3.5 py-3 text-sm outline-none";
-const buttonClass = "rounded-xl bg-emerald-400 px-4 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50";
-
+const fieldClass = "workspace-field";
+const buttonClass = "button button--primary";
 type UploadProgress = { percent: number; message: string };
 
 export default function Home() {
@@ -24,19 +23,14 @@ export default function Home() {
     try {
       await api.health();
       const [organisationData, teamData, matchData, jobData] = await Promise.all([
-        api.organisations.list(),
-        api.teams.list(),
-        api.matches.list(),
-        api.jobs.list(),
+        api.organisations.list(), api.teams.list(), api.matches.list(), api.jobs.list(),
       ]);
       setConnected(true);
       setOrganisations(organisationData);
       setTeams(teamData);
       setMatches(matchData);
       setJobs(jobData);
-      setSelectedOrganisationId((current) =>
-        current && organisationData.some((item) => item.id === current) ? current : organisationData[0]?.id ?? null,
-      );
+      setSelectedOrganisationId((current) => current && organisationData.some((item) => item.id === current) ? current : organisationData[0]?.id ?? null);
       setNotice("Workspace ready");
     } catch (error) {
       setConnected(false);
@@ -45,7 +39,6 @@ export default function Home() {
   }, []);
 
   useEffect(() => { void loadData(); }, [loadData]);
-
   useEffect(() => {
     const activeJobs = jobs.filter((job) => job.status === "queued" || job.status === "processing");
     if (!activeJobs.length) return;
@@ -60,10 +53,7 @@ export default function Home() {
     return () => window.clearInterval(timer);
   }, [jobs]);
 
-  const filteredTeams = useMemo(
-    () => teams.filter((team) => team.organisation_id === selectedOrganisationId),
-    [teams, selectedOrganisationId],
-  );
+  const filteredTeams = useMemo(() => teams.filter((team) => team.organisation_id === selectedOrganisationId), [teams, selectedOrganisationId]);
   const teamName = (id: number) => teams.find((team) => team.id === id)?.name ?? `Team ${id}`;
 
   async function run(action: () => Promise<void>) {
@@ -150,167 +140,57 @@ export default function Home() {
 
   return (
     <main>
-      <section className="product-hero">
-        <div className="hero-content mx-auto grid max-w-[1500px] gap-12 px-6 py-16 lg:grid-cols-[0.92fr_1.08fr] lg:items-center lg:px-8 lg:py-24">
-          <div>
-            <p className="hero-eyebrow">Rugby performance analysis, evolved</p>
-            <h1 className="hero-title mt-4">Turn match footage into clear coaching decisions.</h1>
-            <p className="hero-copy mt-6">Upload, code, review and understand rugby from one connected workspace. Built for coaches and analysts who need faster workflows and better conversations.</p>
-            <div className="mt-8 flex flex-wrap gap-3">
-              <a href="#workspace" className="hero-primary">Start your analysis</a>
-              <Link href="/coding" className="hero-secondary">Open coding workspace</Link>
+      <section className="hero-section">
+        <div className="site-container hero-grid">
+          <div className="hero-copy">
+            <span className="eyebrow">Rugby performance intelligence</span>
+            <h1>Turn every match into a clearer coaching decision.</h1>
+            <p>Upload footage, code the game, review the timeline and convert rugby events into practical insight for coaches and players.</p>
+            <div className="hero-actions">
+              <a href="#workspace" className="button button--gold">Start a match</a>
+              <Link href="/coding" className="button button--ghost-light">Open coding workspace</Link>
             </div>
-            <div className="mt-8 flex flex-wrap gap-x-6 gap-y-3 text-sm font-semibold text-white/70">
-              <span>✓ Match coding</span><span>✓ Video-linked timeline</span><span>✓ Rugby intelligence</span>
+            <div className="hero-proof"><span>✓ Guided setup</span><span>✓ Rugby event coding</span><span>✓ Video-linked reports</span></div>
+          </div>
+
+          <div className="product-stage" aria-label="Rugby analysis interface preview">
+            <div className="product-screen product-screen--main">
+              <div className="screen-top"><span className="screen-logo">RVA</span><span>ACT Brumbies U16 v Waratahs U16</span><span className="live-pill">LIVE</span></div>
+              <div className="screen-body"><div className="video-placeholder"><div className="pitch-lines"/><div className="play-button">▶</div></div><div className="analysis-panel"><div className="metric-row"><span>Possession</span><strong>54%</strong></div><div className="metric-row"><span>Territory</span><strong>61%</strong></div><div className="metric-row"><span>Ruck speed</span><strong>3.1s</strong></div><div className="tag-grid"><b>Carry</b><b>Tackle</b><b>Ruck</b><b>Kick</b></div></div></div>
+              <div className="timeline-bars"><i/><i/><i/><i/><i/><i/><i/></div>
             </div>
-          </div>
-
-          <div className="device-stage" aria-label="Rugby analysis platform across devices">
-            <div className="device-laptop">
-              <div className="device-screen">
-                <div className="device-toolbar" />
-                <div className="device-grid">
-                  <div className="device-video"><div className="device-timeline" /></div>
-                  <div className="device-panel"><div className="device-chip" /><div className="device-chip" /><div className="device-chip" /><div className="device-chip" /><div className="device-chip" /></div>
-                </div>
-              </div>
-            </div>
-            <div className="device-tablet"><div className="device-tablet-screen"><div className="h-3 w-2/3 rounded bg-slate-800" /><div className="mt-4 grid grid-cols-2 gap-2"><div className="h-16 rounded-lg bg-emerald-400" /><div className="h-16 rounded-lg bg-slate-800" /><div className="h-16 rounded-lg bg-slate-800" /><div className="h-16 rounded-lg bg-sky-400" /></div></div></div>
-            <div className="device-phone"><div className="device-phone-screen"><div className="mt-20 h-2 w-full rounded bg-slate-800" /><div className="mt-2 h-2 w-4/5 rounded bg-slate-800" /><div className="mt-5 h-9 rounded-lg bg-emerald-400" /></div></div>
+            <div className="product-screen product-screen--tablet"><div className="mini-title">Match report</div><div className="report-chart"/><div className="report-list"><span/><span/><span/></div></div>
+            <div className="product-screen product-screen--phone"><div className="phone-video"/><strong>Clip review</strong><small>12 tagged moments</small></div>
           </div>
         </div>
       </section>
 
-      <section className="dark-band">
-        <div className="mx-auto grid max-w-[1400px] gap-8 px-6 py-10 text-center sm:grid-cols-3 lg:px-8">
-          <div><p className="text-3xl font-black text-white">One workflow</p><p className="mt-1 text-sm text-white/55">From fixture setup to final insight</p></div>
-          <div><p className="text-3xl font-black text-white">Rugby specific</p><p className="mt-1 text-sm text-white/55">Coding language built for the game</p></div>
-          <div><p className="text-3xl font-black text-white">Any device</p><p className="mt-1 text-sm text-white/55">Review and share wherever you coach</p></div>
-        </div>
-      </section>
+      <section className="workflow-band"><div className="site-container workflow-band__grid">{[['01','Prepare','Build the organisation, teams and fixture.'],['02','Upload','Attach footage and process the source video.'],['03','Analyse','Code events, review sequences and create clips.'],['04','Understand','Convert evidence into rugby intelligence.']].map(([number,title,text]) => <div key={number} className="workflow-step"><span>{number}</span><div><strong>{title}</strong><p>{text}</p></div></div>)}</div></section>
 
-      <section className="section-shell text-center">
-        <p className="section-kicker">Integrated analysis workspace</p>
-        <h2 className="section-title">A clear path from video to performance.</h2>
-        <p className="section-copy mx-auto mt-4">The platform is organised around the way rugby programmes actually work: establish the programme, prepare the fixture, code the match and convert evidence into action.</p>
-        <div className="mt-10 grid gap-5 text-left md:grid-cols-2 lg:grid-cols-4">
-          {[
-            ["01", "Prepare", "Create organisations, squads, seasons and fixtures."],
-            ["02", "Upload", "Attach footage and monitor processing from one place."],
-            ["03", "Code", "Tag rugby events against video with fast analyst controls."],
-            ["04", "Understand", "Turn coded evidence into timelines, suggestions and reports."],
-          ].map(([number, title, copy]) => (
-            <div key={number} className="workflow-card"><span className="workflow-number">{number}</span><h3 className="mt-5 text-xl font-black">{title}</h3><p className="mt-2 text-sm text-slate-500">{copy}</p></div>
-          ))}
-        </div>
-      </section>
+      <section className="feature-section"><div className="site-container feature-grid"><div className="feature-copy"><span className="eyebrow eyebrow--dark">Flexible by design</span><h2>A workflow built around how rugby coaches actually review a game.</h2><p>Move from programme setup to coding and reporting without switching between disconnected tools. Every match, event and insight stays linked to the footage.</p><Link href="/timeline" className="text-link">Explore the timeline →</Link></div><div className="feature-cards"><article><span>01</span><h3>Code what matters</h3><p>Tag carries, tackles, rucks, kicks, set piece and custom events with keyboard-first controls.</p></article><article><span>02</span><h3>See the sequence</h3><p>Review match moments chronologically and seek directly back to the source footage.</p></article><article><span>03</span><h3>Share the evidence</h3><p>Build clips and reports that connect coaching language to visible match behaviour.</p></article></div></div></section>
 
-      <section id="workspace" className="border-y border-slate-800 bg-white">
-        <div className="section-shell">
-          <div className="grid gap-8 lg:grid-cols-[1fr_auto] lg:items-end">
-            <div>
-              <p className="section-kicker">Live workspace</p>
-              <h2 className="section-title">Set up your next match.</h2>
-              <p className="section-copy mt-4">Complete the three setup cards in order. The match will then appear in the footage area below, ready for upload and analysis.</p>
-            </div>
-            <div className="flex items-center gap-3 rounded-2xl border border-slate-800 bg-slate-900 px-5 py-4 shadow-sm">
-              <span className={`h-3 w-3 rounded-full ${connected ? "bg-emerald-400" : "bg-rose-400"}`} />
-              <div><p className="text-sm font-black">{connected ? "Platform connected" : "Platform offline"}</p><p className="text-xs text-slate-500">{apiUrl}</p></div>
-            </div>
+      <section id="workspace" className="workspace-section"><div className="site-container"><div className="section-heading section-heading--split"><div><span className="eyebrow eyebrow--dark">Live workspace</span><h2>Prepare your next match.</h2><p>Complete the setup in order, then upload footage and move into analysis.</p></div><div className="connection-card"><span className={connected ? "status-dot status-dot--live" : "status-dot status-dot--off"}/><div><strong>{connected ? "Platform connected" : "Platform offline"}</strong><small>{apiUrl}</small></div></div></div>
+
+        <div className="workspace-status"><div><span>Current status</span><strong>{notice}</strong></div><button onClick={() => void loadData()} className="button button--secondary">Refresh</button></div>
+
+        <div className="workspace-layout"><aside className="workspace-rail"><span className="rail-label">Match setup</span><a href="#step-1"><b>1</b><span>Organisation<small>Programme owner</small></span></a><a href="#step-2"><b>2</b><span>Teams<small>Home and away squads</small></span></a><a href="#step-3"><b>3</b><span>Match<small>Fixture details</small></span></a><a href="#step-4"><b>4</b><span>Footage<small>Upload and process</small></span></a></aside>
+
+          <div className="workspace-content"><div className="setup-grid">
+            <form id="step-1" onSubmit={createOrganisation} className="setup-card"><div className="setup-card__head"><span>01</span><div><small>Foundation</small><h3>Organisation</h3></div></div><p>Create the club, school or programme responsible for this analysis.</p><input name="name" required minLength={2} placeholder="e.g. ACT Brumbies" className={fieldClass}/><button type="submit" disabled={busy} className={buttonClass}>Create organisation</button></form>
+
+            <form id="step-2" onSubmit={createTeam} className="setup-card"><div className="setup-card__head"><span>02</span><div><small>Squads</small><h3>Teams</h3></div></div><p>Select the organisation and add the squads involved.</p><select className={fieldClass} value={selectedOrganisationId ?? ""} onChange={(event) => setSelectedOrganisationId(event.target.value ? Number(event.target.value) : null)}><option value="">Select organisation</option>{organisations.map((organisation) => <option key={organisation.id} value={organisation.id}>{organisation.name}</option>)}</select><div className="field-pair"><input name="name" required minLength={2} placeholder="Team name" className={fieldClass}/><input name="age_group" placeholder="Age group" className={fieldClass}/></div><button type="submit" disabled={busy || !selectedOrganisationId} className={buttonClass}>Add team</button></form>
+
+            <form id="step-3" onSubmit={createMatch} className="setup-card setup-card--wide"><div className="setup-card__head"><span>03</span><div><small>Fixture</small><h3>Create match</h3></div></div><p>Add match context before attaching footage.</p><div className="match-form-grid"><select name="home_team_id" required className={fieldClass}><option value="">Home team</option>{filteredTeams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}</select><select name="away_team_id" required className={fieldClass}><option value="">Away team</option>{filteredTeams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}</select><input name="match_date" type="date" required className={fieldClass}/><input name="competition" placeholder="Competition" className={fieldClass}/><input name="venue" placeholder="Venue" className={`${fieldClass} match-form-grid__wide`}/></div><button type="submit" disabled={busy || filteredTeams.length < 2} className={buttonClass}>Create match</button></form>
           </div>
 
-          <div className="mt-8 flex items-center justify-between gap-4 rounded-2xl border border-slate-800 bg-slate-900 px-5 py-4 shadow-sm">
-            <div><p className="text-[11px] font-black uppercase tracking-[0.14em] text-slate-500">System status</p><p className="mt-1 text-sm font-semibold">{notice}</p></div>
-            <button type="button" onClick={() => void loadData()} className="rounded-xl border border-slate-800 bg-white px-4 py-2 text-sm font-bold">Refresh</button>
-          </div>
+          <section id="step-4" className="footage-section"><div className="footage-section__head"><div><span className="eyebrow eyebrow--dark">Step 04 · Footage</span><h3>Matches ready for analysis</h3><p>Upload a short clip, monitor processing and continue into the analyst tools.</p></div><Link href="/catalog" className="button button--secondary">Programme manager</Link></div>
+            {!matches.length && <div className="empty-state"><span>◌</span><strong>No matches yet</strong><p>Complete the setup above to create your first fixture.</p></div>}
+            <div className="match-list">{matches.map((match) => { const job = jobs.find((item) => item.match_id === match.id); const progress = uploadProgress[match.id]; return <article key={match.id} className="match-card"><div className="match-card__content"><div className="match-meta"><span>{match.match_date}</span><span>{match.competition || "Competition not set"}</span></div><h4>{teamName(match.home_team_id)} <em>vs</em> {teamName(match.away_team_id)}</h4><p>{match.venue || "Venue not set"}</p>{job && <div className="job-progress"><div><span>{job.status}</span><strong>{job.progress_percent}%</strong></div><div className="progress-track"><i style={{ width: `${job.progress_percent}%` }}/></div><small>{job.message}</small></div>}<div className="match-actions"><Link href="/coding" className="button button--secondary">Open coding</Link><Link href="/timeline" className="button button--secondary">View timeline</Link></div></div><form onSubmit={(event) => uploadAndAnalyse(event, match.id)} className="upload-card"><span className="upload-card__icon">↑</span><strong>Upload match footage</strong><p>Phase 1 supports short clips up to 100 MB.</p><input name="video" type="file" accept="video/mp4,video/quicktime,video/x-msvideo,video/x-matroska,video/x-m4v" required/>{progress && <div className="job-progress"><div><span>{progress.message}</span><strong>{progress.percent}%</strong></div><div className="progress-track"><i style={{ width: `${progress.percent}%` }}/></div></div>}<button type="submit" disabled={busy} className={buttonClass}>{busy && progress ? "Uploading…" : "Upload and start analysis"}</button></form></article>; })}</div>
+          </section></div></div></div></section>
 
-          <div className="mt-8 grid gap-5 lg:grid-cols-3">
-            <form onSubmit={createOrganisation} className="workflow-card">
-              <div className="flex items-center gap-3"><span className="workflow-number">1</span><div><p className="text-[11px] font-black uppercase tracking-wider text-slate-500">Foundation</p><h3 className="text-xl font-black">Organisation</h3></div></div>
-              <p className="mt-4 text-sm text-slate-500">Create the club, school or programme that owns the analysis.</p>
-              <input name="name" required minLength={2} placeholder="e.g. ACT Brumbies" className={`${fieldClass} mt-5`} />
-              <button type="submit" disabled={busy} className={`${buttonClass} mt-3 w-full`}>Create organisation</button>
-            </form>
+      <section className="tools-section"><div className="site-container"><div className="section-heading section-heading--center"><span className="eyebrow">Connected analysis tools</span><h2>Everything stays linked to the match.</h2></div><div className="tool-grid">{[["Coding","Tag rugby events quickly and consistently.","/coding"],["Timeline","Review every coded moment chronologically.","/timeline"],["Suggestions","Compare automated candidates with analyst judgement.","/suggestions"],["Intelligence","Turn coded evidence into a coaching report.","/intelligence"]].map(([title,text,href]) => <Link href={href} key={title} className="tool-card"><span>↗</span><h3>{title}</h3><p>{text}</p></Link>)}</div></div></section>
 
-            <form onSubmit={createTeam} className="workflow-card">
-              <div className="flex items-center gap-3"><span className="workflow-number">2</span><div><p className="text-[11px] font-black uppercase tracking-wider text-slate-500">Squads</p><h3 className="text-xl font-black">Teams</h3></div></div>
-              <p className="mt-4 text-sm text-slate-500">Select the organisation and add the squads involved.</p>
-              <select className={`${fieldClass} mt-5`} value={selectedOrganisationId ?? ""} onChange={(event) => setSelectedOrganisationId(event.target.value ? Number(event.target.value) : null)}><option value="">Select organisation</option>{organisations.map((organisation) => <option key={organisation.id} value={organisation.id}>{organisation.name}</option>)}</select>
-              <div className="mt-3 grid grid-cols-2 gap-3"><input name="name" required minLength={2} placeholder="Team name" className={fieldClass} /><input name="age_group" placeholder="Age group" className={fieldClass} /></div>
-              <button type="submit" disabled={busy || !selectedOrganisationId} className={`${buttonClass} mt-3 w-full`}>Add team</button>
-            </form>
-
-            <form onSubmit={createMatch} className="workflow-card">
-              <div className="flex items-center gap-3"><span className="workflow-number">3</span><div><p className="text-[11px] font-black uppercase tracking-wider text-slate-500">Fixture</p><h3 className="text-xl font-black">Create match</h3></div></div>
-              <p className="mt-4 text-sm text-slate-500">Add fixture context before attaching footage.</p>
-              <div className="mt-5 grid grid-cols-2 gap-3"><select name="home_team_id" required className={fieldClass}><option value="">Home team</option>{filteredTeams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}</select><select name="away_team_id" required className={fieldClass}><option value="">Away team</option>{filteredTeams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}</select><input name="match_date" type="date" required className={fieldClass} /><input name="competition" placeholder="Competition" className={fieldClass} /></div>
-              <input name="venue" placeholder="Venue" className={`${fieldClass} mt-3`} />
-              <button type="submit" disabled={busy || filteredTeams.length < 2} className={`${buttonClass} mt-3 w-full`}>Create match</button>
-            </form>
-          </div>
-        </div>
-      </section>
-
-      <section className="section-shell">
-        <div className="grid gap-10 lg:grid-cols-[0.78fr_1.22fr] lg:items-start">
-          <div className="lg:sticky lg:top-28">
-            <p className="section-kicker">Match footage</p>
-            <h2 className="section-title">Ready for analysis.</h2>
-            <p className="section-copy mt-4">Upload a short clip, monitor the processing job, then move directly into coding or timeline review.</p>
-            <Link href="/catalog" className="mt-6 inline-flex rounded-full border border-slate-800 bg-white px-5 py-3 text-sm font-black shadow-sm">Open programme manager →</Link>
-          </div>
-
-          <div className="space-y-5">
-            {!matches.length && <div className="rounded-2xl border border-dashed border-slate-700 bg-white p-14 text-center"><p className="text-xl font-black">No matches yet</p><p className="mt-2 text-sm text-slate-500">Complete the guided setup above to create your first fixture.</p></div>}
-            {matches.map((match) => {
-              const job = jobs.find((item) => item.match_id === match.id);
-              const progress = uploadProgress[match.id];
-              return (
-                <article key={match.id} className="rounded-2xl border border-slate-800 bg-white p-6 shadow-sm">
-                  <div className="grid gap-6 xl:grid-cols-[1fr_360px] xl:items-center">
-                    <div>
-                      <div className="flex flex-wrap gap-2 text-[11px] font-black uppercase tracking-wider text-slate-500"><span>{match.match_date}</span><span>•</span><span>{match.competition || "Competition not set"}</span></div>
-                      <h3 className="mt-3 text-2xl font-black">{teamName(match.home_team_id)} <span className="font-medium text-slate-500">vs</span> {teamName(match.away_team_id)}</h3>
-                      <p className="mt-2 text-sm text-slate-500">{match.venue || "Venue not set"}</p>
-                      {job && <div className="mt-5 max-w-xl"><div className="mb-2 flex justify-between text-xs font-bold uppercase tracking-wider"><span>{job.status}</span><span>{job.progress_percent}%</span></div><div className="h-2.5 overflow-hidden rounded-full bg-slate-800"><div className="h-full rounded-full bg-emerald-400 transition-all" style={{ width: `${job.progress_percent}%` }} /></div><p className="mt-2 text-sm text-slate-500">{job.message}</p></div>}
-                      <div className="mt-5 flex flex-wrap gap-2"><Link href="/coding" className="rounded-xl bg-emerald-400 px-4 py-2 text-sm font-bold text-white">Open coding</Link><Link href="/timeline" className="rounded-xl border border-slate-800 bg-white px-4 py-2 text-sm font-bold">View timeline</Link></div>
-                    </div>
-                    <form onSubmit={(event) => uploadAndAnalyse(event, match.id)} className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
-                      <label className="text-sm font-black">Upload match footage</label>
-                      <p className="mt-1 text-xs text-slate-500">Phase 1 supports short clips up to 100 MB.</p>
-                      <input name="video" type="file" accept="video/mp4,video/quicktime,video/x-msvideo,video/x-matroska,video/x-m4v" required className="mt-4 block w-full text-sm" />
-                      {progress && <div className="mt-4"><div className="mb-2 flex justify-between text-xs font-semibold"><span>{progress.message}</span><span>{progress.percent}%</span></div><div className="h-2.5 overflow-hidden rounded-full bg-slate-800"><div className="h-full rounded-full bg-sky-400 transition-all" style={{ width: `${progress.percent}%` }} /></div></div>}
-                      <button type="submit" disabled={busy} className={`${buttonClass} mt-4 w-full`}>{busy && progress ? "Uploading…" : "Upload and start analysis"}</button>
-                    </form>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        </div>
-      </section>
-
-      <section className="dark-band">
-        <div className="section-shell text-center">
-          <p className="hero-eyebrow">Connected analysis tools</p>
-          <h2 className="mt-3 text-4xl font-black text-white sm:text-5xl">Everything your review workflow needs.</h2>
-          <div className="mt-10 grid gap-4 text-left sm:grid-cols-2 lg:grid-cols-4">
-            {[
-              ["C", "Coding", "Tag carries, tackles, rucks, kicks, set piece and outcomes."],
-              ["T", "Timeline", "Review every coded event in chronological order against video."],
-              ["S", "Suggestions", "Surface evidence-based event candidates for analyst review."],
-              ["I", "Intelligence", "Convert coded evidence into clear rugby observations."],
-            ].map(([icon, title, copy]) => <div key={title} className="rounded-2xl border border-white/10 bg-white/5 p-6"><span className="feature-icon">{icon}</span><h3 className="mt-5 text-xl font-black text-white">{title}</h3><p className="mt-2 text-sm text-white/55">{copy}</p></div>)}
-          </div>
-        </div>
-      </section>
-
-      <footer className="bg-[#0b171b] text-white">
-        <div className="mx-auto flex max-w-[1400px] flex-col gap-5 px-6 py-9 sm:flex-row sm:items-center sm:justify-between lg:px-8">
-          <div><p className="font-black">Rugby Video Analysis</p><p className="mt-1 text-xs text-white/45">Professional performance intelligence for the modern rugby programme.</p></div>
-          <div className="flex flex-wrap gap-5 text-xs font-bold text-white/55"><Link href="/catalog">Programme</Link><Link href="/coding">Coding</Link><Link href="/intelligence">Intelligence</Link><Link href="/system">System</Link></div>
-        </div>
-      </footer>
+      <footer className="site-footer"><div className="site-container site-footer__grid"><div><strong>Rugby Video Analysis</strong><p>Professional match coding and performance intelligence.</p></div><div><Link href="/coding">Coding</Link><Link href="/timeline">Timeline</Link><Link href="/intelligence">Intelligence</Link><Link href="/system">System</Link></div></div></footer>
     </main>
   );
 }

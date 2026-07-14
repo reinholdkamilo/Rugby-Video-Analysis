@@ -13,6 +13,7 @@ from app.api.catalog import router as catalog_router
 from app.api.events import router as events_router
 from app.api.intelligence import router as intelligence_router
 from app.api.media import router as media_router
+from app.api.multipart_uploads import router as multipart_uploads_router
 from app.api.routes import router as api_router
 from app.api.suggestions import router as suggestions_router
 from app.api.system import router as system_router
@@ -26,7 +27,7 @@ from app.worker import start_embedded_worker
 logger = logging.getLogger("rugby-video-analysis")
 
 APP_NAME = "Rugby Video Analysis API"
-APP_VERSION = "0.11.0"
+APP_VERSION = "0.12.0"
 THUMBNAIL_DIR = Path(os.getenv("THUMBNAIL_DIR", "thumbnails"))
 CLIP_DIR = Path(os.getenv("CLIP_DIR", "clips"))
 VISION_FRAME_DIR = Path(os.getenv("VISION_FRAME_DIR", "vision_frames"))
@@ -107,6 +108,7 @@ app.include_router(catalog_router)
 app.include_router(events_router)
 app.include_router(media_router)
 app.include_router(uploads_router)
+app.include_router(multipart_uploads_router)
 app.include_router(suggestions_router)
 app.include_router(vision_router)
 app.include_router(understanding_router)

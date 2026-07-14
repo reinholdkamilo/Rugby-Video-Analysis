@@ -9,20 +9,26 @@ from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
 from app.models import AnalysisJob, AnalysisStatus, VideoAsset, VideoProcessingResult
-from app.object_storage import materialize
+from app.object_storage import create_presigned_get_url, is_object_uri
 from app.video_processing import create_thumbnail, probe_video
 
 logger = logging.getLogger(__name__)
 POLL_INTERVAL_SECONDS = float(os.getenv("WORKER_POLL_INTERVAL_SECONDS", "3"))
 THUMBNAIL_DIR = Path(os.getenv("THUMBNAIL_DIR", "thumbnails"))
-OBJECT_CACHE_DIR = Path(os.getenv("OBJECT_CACHE_DIR", "object_cache"))
-OBJECT_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _update_job(db: Session, job: AnalysisJob, progress: int, message: str) -> None:
     job.progress_percent = progress
     job.message = message
     db.commit()
+
+
+def _processing_source(storage_path: str) -> str:
+    if is_object_uri(storage_path):
+        return create_presigned_get_url(storage_path, expires_in=7200)
+    if Path(storage_path).is_file():
+        return storage_path
+    raise FileNotFoundError(storage_path)
 
 
 def process_job(db: Session, job: AnalysisJob) -> None:
@@ -37,16 +43,16 @@ def process_job(db: Session, job: AnalysisJob) -> None:
         raise RuntimeError("The uploaded video record could not be found.")
 
     try:
-        source_path = materialize(video.storage_path, OBJECT_CACHE_DIR)
+        source = _processing_source(video.storage_path)
     except FileNotFoundError as exc:
         raise RuntimeError("The uploaded video file is missing from storage.") from exc
 
     _update_job(db, job, 30, "Reading video metadata with FFmpeg.")
-    metadata = probe_video(str(source_path))
+    metadata = probe_video(source)
 
     _update_job(db, job, 65, "Generating match thumbnail.")
     thumbnail_path = THUMBNAIL_DIR / f"video-{video.id}.jpg"
-    create_thumbnail(str(source_path), str(thumbnail_path), metadata.duration_seconds)
+    create_thumbnail(source, str(thumbnail_path), metadata.duration_seconds)
 
     _update_job(db, job, 85, "Saving processing results.")
     existing = db.scalar(

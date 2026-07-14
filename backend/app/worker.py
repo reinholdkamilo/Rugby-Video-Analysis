@@ -9,11 +9,14 @@ from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
 from app.models import AnalysisJob, AnalysisStatus, VideoAsset, VideoProcessingResult
+from app.object_storage import materialize
 from app.video_processing import create_thumbnail, probe_video
 
 logger = logging.getLogger(__name__)
 POLL_INTERVAL_SECONDS = float(os.getenv("WORKER_POLL_INTERVAL_SECONDS", "3"))
 THUMBNAIL_DIR = Path(os.getenv("THUMBNAIL_DIR", "thumbnails"))
+OBJECT_CACHE_DIR = Path(os.getenv("OBJECT_CACHE_DIR", "object_cache"))
+OBJECT_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _update_job(db: Session, job: AnalysisJob, progress: int, message: str) -> None:
@@ -32,15 +35,18 @@ def process_job(db: Session, job: AnalysisJob) -> None:
     video = db.get(VideoAsset, job.video_asset_id)
     if video is None:
         raise RuntimeError("The uploaded video record could not be found.")
-    if not Path(video.storage_path).is_file():
-        raise RuntimeError("The uploaded video file is missing from storage.")
+
+    try:
+        source_path = materialize(video.storage_path, OBJECT_CACHE_DIR)
+    except FileNotFoundError as exc:
+        raise RuntimeError("The uploaded video file is missing from storage.") from exc
 
     _update_job(db, job, 30, "Reading video metadata with FFmpeg.")
-    metadata = probe_video(video.storage_path)
+    metadata = probe_video(str(source_path))
 
     _update_job(db, job, 65, "Generating match thumbnail.")
     thumbnail_path = THUMBNAIL_DIR / f"video-{video.id}.jpg"
-    create_thumbnail(video.storage_path, str(thumbnail_path), metadata.duration_seconds)
+    create_thumbnail(str(source_path), str(thumbnail_path), metadata.duration_seconds)
 
     _update_job(db, job, 85, "Saving processing results.")
     existing = db.scalar(

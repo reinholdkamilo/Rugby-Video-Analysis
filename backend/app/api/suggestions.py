@@ -18,9 +18,11 @@ from app.models import (
     VideoAsset,
     VideoProcessingResult,
 )
+from app.object_storage import materialize
 from app.video_processing import probe_video
 
 router = APIRouter(prefix="/api/automatic-suggestions", tags=["automatic suggestions"])
+DETECTION_CACHE_DIR = Path("cache/automatic-detection")
 
 
 class DetectionRequest(BaseModel):
@@ -67,18 +69,37 @@ def _suggestion_or_404(suggestion_id: int, db: Session) -> AutomaticEventSuggest
     return suggestion
 
 
+def _materialized_video_path(video: VideoAsset) -> Path:
+    try:
+        return materialize(video.storage_path, DETECTION_CACHE_DIR)
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail="The source video is no longer available. Re-upload the footage or connect persistent R2 storage.",
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Persistent video storage is unavailable: {exc}",
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Unable to retrieve the source video from storage: {exc}",
+        ) from exc
+
+
 @router.post("/detect", response_model=list[SuggestionRead], status_code=status.HTTP_201_CREATED)
 def detect_suggestions(payload: DetectionRequest, db: Session = Depends(get_db)) -> list[AutomaticEventSuggestion]:
     video = db.get(VideoAsset, payload.video_asset_id)
     if video is None:
         raise HTTPException(status_code=404, detail="Video not found.")
-    if not Path(video.storage_path).is_file():
-        raise HTTPException(status_code=404, detail="Uploaded video file is unavailable.")
 
+    source_path = _materialized_video_path(video)
     processing = db.scalar(
         select(VideoProcessingResult).where(VideoProcessingResult.video_asset_id == video.id)
     )
-    duration = processing.duration_seconds if processing is not None else probe_video(video.storage_path).duration_seconds
+    duration = processing.duration_seconds if processing is not None else probe_video(str(source_path)).duration_seconds
 
     if payload.replace_pending:
         db.execute(
@@ -90,7 +111,12 @@ def detect_suggestions(payload: DetectionRequest, db: Session = Depends(get_db))
         db.commit()
 
     try:
-        scene_times = detect_scene_changes(video.storage_path, threshold=payload.scene_threshold)
+        scene_times = detect_scene_changes(str(source_path), threshold=payload.scene_threshold)
+    except TimeoutError as exc:
+        raise HTTPException(
+            status_code=504,
+            detail="Automatic detection exceeded the processing time limit. Try a shorter clip or use a higher scene threshold.",
+        ) from exc
     except (RuntimeError, FileNotFoundError) as exc:
         raise HTTPException(status_code=500, detail=f"Automatic detection failed: {exc}") from exc
 
@@ -180,15 +206,17 @@ def accept_suggestion(suggestion_id: int, db: Session = Depends(get_db)) -> Auto
     video = db.get(VideoAsset, suggestion.video_asset_id)
     if video is not None:
         try:
+            source_path = _materialized_video_path(video)
             clip_path, duration = generate_event_clip(
-                video.storage_path,
+                str(source_path),
                 event.id,
                 event.start_seconds,
                 event.end_seconds,
             )
             event.clip = EventClip(file_path=clip_path, duration_seconds=duration)
-        except (RuntimeError, ValueError) as exc:
-            event.notes = f"{event.notes}\nClip generation failed: {exc}"
+        except (HTTPException, RuntimeError, ValueError) as exc:
+            detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
+            event.notes = f"{event.notes}\nClip generation failed: {detail}"
 
     suggestion.status = SuggestionStatus.accepted
     suggestion.timeline_event_id = event.id

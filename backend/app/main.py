@@ -14,6 +14,7 @@ from app.api.events import router as events_router
 from app.api.intelligence import router as intelligence_router
 from app.api.media import router as media_router
 from app.api.multipart_uploads import router as multipart_uploads_router
+from app.api.public_media import router as public_media_router
 from app.api.routes import router as api_router
 from app.api.suggestions import router as suggestions_router
 from app.api.system import router as system_router
@@ -115,6 +116,7 @@ app.include_router(understanding_router)
 app.include_router(intelligence_router)
 app.include_router(workspace_router)
 app.include_router(system_router)
+app.include_router(public_media_router)
 app.mount("/media/thumbnails", StaticFiles(directory=str(THUMBNAIL_DIR)), name="thumbnails")
 app.mount("/media/clips", StaticFiles(directory=str(CLIP_DIR)), name="clips")
 app.mount("/media/vision", StaticFiles(directory=str(VISION_FRAME_DIR)), name="vision")

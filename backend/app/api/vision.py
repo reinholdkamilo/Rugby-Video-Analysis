@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import delete, select
@@ -7,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import VideoAsset, VisionFrameObservation
+from app.object_storage import materialize, persist_generated_file
 from app.vision_analysis import analyse_video_frames
 
 router = APIRouter(prefix="/api/vision", tags=["vision"])
@@ -40,20 +39,28 @@ def run_vision(payload: VisionRunRequest, db: Session = Depends(get_db)) -> list
     video = db.get(VideoAsset, payload.video_asset_id)
     if video is None:
         raise HTTPException(status_code=404, detail="Video not found.")
-    if not Path(video.storage_path).is_file():
-        raise HTTPException(status_code=404, detail="Uploaded video file is unavailable.")
 
     if payload.replace_existing:
         db.execute(delete(VisionFrameObservation).where(VisionFrameObservation.video_asset_id == video.id))
         db.commit()
 
     try:
+        source_path = materialize(video.storage_path)
         analysed = analyse_video_frames(
-            video.storage_path,
+            str(source_path),
             video.id,
             interval_seconds=payload.interval_seconds,
             max_frames=payload.max_frames,
         )
+        for observation in analysed:
+            frame_name = observation.frame_path.rsplit("/", maxsplit=1)[-1]
+            observation.frame_path = persist_generated_file(
+                observation.frame_path,
+                f"vision_frames/video-{video.id}/{frame_name}",
+                "image/jpeg",
+            )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Uploaded video file is unavailable.") from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=f"Vision analysis failed: {exc}") from exc
 

@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from app.database import engine
+from app.object_storage import storage_status
 
 router = APIRouter(prefix="/api/system", tags=["system"])
 
@@ -60,8 +61,10 @@ def build_system_status() -> dict[str, object]:
             "detail": ffmpeg_path or "FFmpeg executable not found",
         },
         "opencv": _opencv_status(),
+        "object_storage": storage_status(),
     }
-    overall_healthy = all(bool(item["healthy"]) for item in checks.values())
+    required_checks = {key: value for key, value in checks.items() if key != "object_storage"}
+    overall_healthy = all(bool(item["healthy"]) for item in required_checks.values())
     return {
         "status": "healthy" if overall_healthy else "degraded",
         "checked_at": datetime.now(UTC).isoformat(),

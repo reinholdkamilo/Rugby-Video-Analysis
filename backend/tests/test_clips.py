@@ -6,10 +6,16 @@ from app.clips import generate_event_clip
 
 def test_generate_event_clip_builds_ffmpeg_command(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr("app.clips.CLIP_DIR", tmp_path)
+    source = tmp_path / "match.mp4"
+    source.write_bytes(b"video")
     completed = Mock(returncode=0, stderr="")
 
-    with patch("app.clips.subprocess.run", return_value=completed) as run:
-        path, duration = generate_event_clip("match.mp4", 12, 10.5, 18.0)
+    def fake_run(command: list[str], **_: object) -> Mock:
+        Path(command[-1]).write_bytes(b"clip")
+        return completed
+
+    with patch("app.clips.subprocess.run", side_effect=fake_run) as run:
+        path, duration = generate_event_clip(str(source), 12, 10.5, 18.0)
 
     assert path == str(tmp_path / "event-12.mp4")
     assert duration == 7.5

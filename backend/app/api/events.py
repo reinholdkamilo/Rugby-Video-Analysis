@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -47,7 +45,7 @@ def create_timeline_event(payload: TimelineEventCreate, db: Session = Depends(ge
             event.clip = EventClip(file_path=clip_path, duration_seconds=duration)
             db.commit()
             db.refresh(event)
-        except (RuntimeError, ValueError) as exc:
+        except (FileNotFoundError, RuntimeError, ValueError) as exc:
             event.notes = f"{event.notes or ''}\nClip generation failed: {exc}".strip()
             db.commit()
             db.refresh(event)
@@ -100,10 +98,12 @@ def update_timeline_event(
 def regenerate_event_clip(event_id: int, db: Session = Depends(get_db)) -> EventClip:
     event = get_event_or_404(event_id, db)
     video = db.get(VideoAsset, event.video_asset_id)
-    if video is None or not Path(video.storage_path).exists():
+    if video is None:
         raise HTTPException(status_code=404, detail="Source video file is unavailable.")
     try:
         clip_path, duration = generate_event_clip(video.storage_path, event.id, event.start_seconds, event.end_seconds)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Source video file is unavailable.") from exc
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     if event.clip is None:

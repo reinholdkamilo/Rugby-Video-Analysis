@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
 from app.models import AnalysisJob, AnalysisStatus, VideoAsset, VideoProcessingResult
-from app.object_storage import create_presigned_get_url, is_object_uri
+from app.object_storage import create_presigned_get_url, is_object_uri, persist_generated_file
 from app.video_processing import create_thumbnail, probe_video
 
 logger = logging.getLogger(__name__)
@@ -53,6 +53,11 @@ def process_job(db: Session, job: AnalysisJob) -> None:
     _update_job(db, job, 65, "Generating match thumbnail.")
     thumbnail_path = THUMBNAIL_DIR / f"video-{video.id}.jpg"
     create_thumbnail(source, str(thumbnail_path), metadata.duration_seconds)
+    stored_thumbnail_path = persist_generated_file(
+        thumbnail_path,
+        f"thumbnails/video-{video.id}.jpg",
+        "image/jpeg",
+    )
 
     _update_job(db, job, 85, "Saving processing results.")
     existing = db.scalar(
@@ -68,7 +73,7 @@ def process_job(db: Session, job: AnalysisJob) -> None:
             frame_rate=metadata.frame_rate,
             video_codec=metadata.video_codec,
             audio_codec=metadata.audio_codec,
-            thumbnail_path=str(thumbnail_path),
+            thumbnail_path=stored_thumbnail_path,
         )
         db.add(existing)
     else:
@@ -78,7 +83,7 @@ def process_job(db: Session, job: AnalysisJob) -> None:
         existing.frame_rate = metadata.frame_rate
         existing.video_codec = metadata.video_codec
         existing.audio_codec = metadata.audio_codec
-        existing.thumbnail_path = str(thumbnail_path)
+        existing.thumbnail_path = stored_thumbnail_path
 
     job.status = AnalysisStatus.completed
     job.progress_percent = 100

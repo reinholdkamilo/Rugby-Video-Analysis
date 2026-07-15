@@ -16,6 +16,7 @@ R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY", "").strip()
 R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME", "").strip()
 R2_ENDPOINT_URL = os.getenv("R2_ENDPOINT_URL", "").strip()
 R2_PRESIGNED_URL_SECONDS = int(os.getenv("R2_PRESIGNED_URL_SECONDS", "3600"))
+OBJECT_CACHE_DIR = Path(os.getenv("OBJECT_CACHE_DIR", "cache/object_storage"))
 
 
 def is_object_storage_enabled() -> bool:
@@ -126,7 +127,7 @@ def abort_multipart_upload(key: str, upload_id: str) -> None:
     )
 
 
-def materialize(uri_or_path: str, cache_dir: str | Path) -> Path:
+def materialize(uri_or_path: str, cache_dir: str | Path | None = None) -> Path:
     local = Path(uri_or_path)
     if local.is_file():
         return local
@@ -136,13 +137,27 @@ def materialize(uri_or_path: str, cache_dir: str | Path) -> Path:
     bucket, key = parse_object_uri(uri_or_path)
     digest = hashlib.sha256(uri_or_path.encode("utf-8")).hexdigest()[:16]
     suffix = Path(key).suffix
-    destination = Path(cache_dir) / f"{digest}{suffix}"
+    destination = Path(cache_dir or OBJECT_CACHE_DIR) / f"{digest}{suffix}"
     destination.parent.mkdir(parents=True, exist_ok=True)
     if not destination.is_file():
         temporary = destination.with_suffix(destination.suffix + ".download")
         client().download_file(bucket, key, str(temporary))
         temporary.replace(destination)
     return destination
+
+
+def persist_generated_file(
+    local_path: str | Path,
+    object_key: str,
+    content_type: str | None = None,
+) -> str:
+    """Persist a generated media file and return the canonical storage reference."""
+    source = Path(local_path)
+    if not source.is_file():
+        raise FileNotFoundError(source)
+    if is_object_storage_enabled():
+        return upload_file(source, object_key, content_type)
+    return str(source)
 
 
 def create_presigned_get_url(uri: str, expires_in: int | None = None) -> str:
@@ -163,12 +178,15 @@ def storage_status() -> dict[str, object]:
     if not is_object_storage_enabled():
         status["healthy"] = False
         status["message"] = "R2 environment variables are not configured."
+        status["detail"] = status["message"]
         return status
     try:
         client().head_bucket(Bucket=R2_BUCKET_NAME)
         status["healthy"] = True
         status["message"] = "Cloudflare R2 is reachable."
+        status["detail"] = status["message"]
     except Exception as exc:  # pragma: no cover - provider/network dependent
         status["healthy"] = False
         status["message"] = str(exc)[:300]
+        status["detail"] = status["message"]
     return status

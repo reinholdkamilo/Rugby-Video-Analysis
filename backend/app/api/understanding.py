@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import RugbyUnderstandingObservation, VideoAsset, VisionFrameObservation
+from app.object_storage import materialize
 from app.rugby_understanding import analyse_understanding_frame
 
 router = APIRouter(prefix="/api/understanding", tags=["rugby understanding"])
@@ -41,7 +42,12 @@ def run_understanding(video_asset_id: int, db: Session = Depends(get_db)) -> lis
     db.execute(delete(RugbyUnderstandingObservation).where(RugbyUnderstandingObservation.video_asset_id == video_asset_id))
     records: list[RugbyUnderstandingObservation] = []
     for frame in frames:
-        result = analyse_understanding_frame(frame.frame_path, frame.timestamp_seconds, frame.motion_score)
+        try:
+            frame_path = materialize(frame.frame_path)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="A sampled vision frame is unavailable.") from exc
+        result = analyse_understanding_frame(str(frame_path), frame.timestamp_seconds, frame.motion_score)
+        result.source_frame_path = frame.frame_path
         records.append(RugbyUnderstandingObservation(match_id=video.match_id, video_asset_id=video.id, **result.__dict__))
     db.add_all(records)
     db.commit()

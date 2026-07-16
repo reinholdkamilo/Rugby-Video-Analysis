@@ -1,4 +1,5 @@
 from pathlib import Path
+import subprocess
 from unittest.mock import Mock, patch
 
 from app.clips import generate_event_clip
@@ -23,6 +24,7 @@ def test_generate_event_clip_builds_ffmpeg_command(tmp_path: Path, monkeypatch) 
     assert command[0] == "ffmpeg"
     assert "10.500" in command
     assert "7.500" in command
+    assert command[command.index("-c") + 1] == "copy"
     assert str(tmp_path / "event-12.mp4") == command[-1]
 
 
@@ -46,3 +48,20 @@ def test_generate_event_clip_uses_presigned_r2_source(tmp_path: Path, monkeypatc
     assert path == str(tmp_path / "event-12.mp4")
     assert duration == 8
     assert command[command.index("-i") + 1] == "https://r2.example.test/source.mp4"
+
+
+def test_generate_event_clip_maps_ffmpeg_timeout(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr("app.clips.CLIP_DIR", tmp_path)
+    source = tmp_path / "match.mp4"
+    source.write_bytes(b"video")
+
+    def fake_run(*_args: object, **_kwargs: object) -> Mock:
+        raise subprocess.TimeoutExpired(cmd="ffmpeg", timeout=45)
+
+    with patch("app.clips.subprocess.run", side_effect=fake_run):
+        try:
+            generate_event_clip(str(source), 12, 0, 8)
+        except RuntimeError as exc:
+            assert "timed out" in str(exc)
+        else:
+            raise AssertionError("Expected RuntimeError")

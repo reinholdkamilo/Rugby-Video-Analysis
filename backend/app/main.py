@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
 
 from app import models  # noqa: F401
 from app.api.catalog import router as catalog_router
@@ -53,9 +54,18 @@ def _configured_origins() -> list[str]:
     return sorted(origins)
 
 
+def _ensure_database_schema() -> None:
+    Base.metadata.create_all(bind=engine)
+    if engine.dialect.name != "postgresql":
+        return
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TABLE video_assets ALTER COLUMN size_bytes TYPE BIGINT"))
+        connection.execute(text("ALTER TABLE multipart_upload_sessions ALTER COLUMN size_bytes TYPE BIGINT"))
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    Base.metadata.create_all(bind=engine)
+    _ensure_database_schema()
     worker = None
     if os.getenv("ENABLE_EMBEDDED_WORKER", "true").lower() in {"1", "true", "yes"}:
         worker = start_embedded_worker()

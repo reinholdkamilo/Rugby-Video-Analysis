@@ -1,3 +1,4 @@
+import os
 import re
 import subprocess
 from dataclasses import dataclass
@@ -6,6 +7,8 @@ from pathlib import Path
 from app.models import EventType
 
 PTS_TIME_PATTERN = re.compile(r"pts_time:([0-9]+(?:\.[0-9]+)?)")
+DEFAULT_SAMPLE_FPS = float(os.getenv("AUTO_DETECTION_SAMPLE_FPS", "2"))
+DEFAULT_ANALYSIS_WIDTH = int(os.getenv("AUTO_DETECTION_ANALYSIS_WIDTH", "640"))
 
 
 @dataclass(frozen=True)
@@ -28,24 +31,38 @@ def parse_scene_times(stderr: str) -> list[float]:
     return deduplicated
 
 
-def detect_scene_changes(video_path: str, threshold: float = 0.28, timeout_seconds: int = 900) -> list[float]:
-    source = Path(video_path)
-    if not source.is_file():
-        raise FileNotFoundError(f"Video file not found: {video_path}")
-
-    command = [
+def build_scene_detection_command(
+    source: Path,
+    threshold: float,
+    sample_fps: float = DEFAULT_SAMPLE_FPS,
+    analysis_width: int = DEFAULT_ANALYSIS_WIDTH,
+) -> list[str]:
+    filter_chain = (
+        f"fps={sample_fps},"
+        f"scale={analysis_width}:-2,"
+        f"select='gt(scene,{threshold})',showinfo"
+    )
+    return [
         "ffmpeg",
         "-hide_banner",
         "-nostdin",
         "-i",
         str(source),
         "-vf",
-        f"select='gt(scene,{threshold})',showinfo",
+        filter_chain,
         "-an",
         "-f",
         "null",
         "-",
     ]
+
+
+def detect_scene_changes(video_path: str, threshold: float = 0.28, timeout_seconds: int = 900) -> list[float]:
+    source = Path(video_path)
+    if not source.is_file():
+        raise FileNotFoundError(f"Video file not found: {video_path}")
+
+    command = build_scene_detection_command(source, threshold)
     completed = subprocess.run(
         command,
         capture_output=True,

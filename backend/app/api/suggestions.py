@@ -145,11 +145,8 @@ def _create_suggestions(
 
     try:
         scene_times = detect_scene_changes(source, threshold=payload.scene_threshold)
-    except TimeoutError as exc:
-        raise HTTPException(
-            status_code=504,
-            detail="Automatic detection exceeded the processing time limit. Try a shorter clip or use a higher scene threshold.",
-        ) from exc
+    except TimeoutError:
+        scene_times = []
     except (RuntimeError, FileNotFoundError) as exc:
         raise HTTPException(status_code=500, detail=f"Automatic detection failed: {exc}") from exc
 

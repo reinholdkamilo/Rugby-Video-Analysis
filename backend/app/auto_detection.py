@@ -10,6 +10,7 @@ PTS_TIME_PATTERN = re.compile(r"pts_time:([0-9]+(?:\.[0-9]+)?)")
 DEFAULT_SAMPLE_FPS = float(os.getenv("AUTO_DETECTION_SAMPLE_FPS", "0.5"))
 DEFAULT_ANALYSIS_WIDTH = int(os.getenv("AUTO_DETECTION_ANALYSIS_WIDTH", "426"))
 DEFAULT_MAX_SCAN_SECONDS = float(os.getenv("AUTO_DETECTION_MAX_SCAN_SECONDS", "120"))
+DEFAULT_TIMEOUT_SECONDS = int(os.getenv("AUTO_DETECTION_TIMEOUT_SECONDS", "45"))
 
 
 @dataclass(frozen=True)
@@ -63,7 +64,11 @@ def _is_remote_source(source: str) -> bool:
     return source.startswith(("http://", "https://"))
 
 
-def detect_scene_changes(video_path: str, threshold: float = 0.28, timeout_seconds: int = 900) -> list[float]:
+def detect_scene_changes(
+    video_path: str,
+    threshold: float = 0.28,
+    timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
+) -> list[float]:
     source: str | Path = video_path
     if not _is_remote_source(video_path):
         source = Path(video_path)

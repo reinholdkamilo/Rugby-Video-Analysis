@@ -242,6 +242,52 @@ def test_detect_automatic_suggestions_creates_review_items(monkeypatch) -> None:
     assert {item["video_asset_id"] for item in suggestions} == {video["id"]}
 
 
+def test_detect_automatic_suggestions_timeout_creates_opening_item(monkeypatch) -> None:
+    unique = uuid4().hex[:8]
+
+    def raise_timeout(*_args, **_kwargs) -> list[float]:
+        raise TimeoutError
+
+    monkeypatch.setattr("app.api.suggestions.detect_scene_changes", raise_timeout)
+    monkeypatch.setattr("app.api.suggestions.probe_video", lambda *_args, **_kwargs: SimpleNamespace(duration_seconds=60.0))
+
+    with TestClient(app) as client:
+        organisation_id = client.post(
+            "/api/organisations", json={"name": f"Detection Timeout {unique}"}
+        ).json()["id"]
+        home_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"Home {unique}"},
+        ).json()["id"]
+        away_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"Away {unique}"},
+        ).json()["id"]
+        match_id = client.post(
+            "/api/matches",
+            json={
+                "organisation_id": organisation_id,
+                "home_team_id": home_id,
+                "away_team_id": away_id,
+                "match_date": "2026-07-12",
+            },
+        ).json()["id"]
+        video = client.post(
+            f"/api/matches/{match_id}/videos",
+            files={"file": ("sample-timeout.mp4", b"not a real video", "video/mp4")},
+        ).json()
+
+        response = client.post(
+            "/api/automatic-suggestions/detect",
+            json={"video_asset_id": video["id"], "replace_pending": True, "scene_threshold": 0.3},
+        )
+
+    assert response.status_code == 201
+    suggestions = response.json()
+    assert len(suggestions) == 1
+    assert suggestions[0]["event_type"] == "kickoff"
+
+
 def test_detection_job_completes_and_creates_suggestions(monkeypatch) -> None:
     unique = uuid4().hex[:8]
     monkeypatch.setattr("app.api.suggestions.detect_scene_changes", lambda *_args, **_kwargs: [8.0])

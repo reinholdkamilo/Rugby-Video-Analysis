@@ -140,7 +140,7 @@ def test_multipart_upload_session_is_reused_and_records_parts(monkeypatch) -> No
             "match_id": match_id,
             "filename": "full-match.mp4",
             "content_type": "video/mp4",
-            "size_bytes": 20 * 1024 * 1024,
+            "size_bytes": 4_800_000_000,
         }
 
         created = client.post("/api/multipart-uploads", json=payload)
@@ -148,7 +148,7 @@ def test_multipart_upload_session_is_reused_and_records_parts(monkeypatch) -> No
         session = created.json()
         assert session["resumed"] is False
         assert session["uploaded_parts"] == []
-        assert session["total_parts"] == 2
+        assert session["total_parts"] == 287
 
         recorded = client.post(
             "/api/multipart-uploads/parts",

@@ -2,7 +2,7 @@ import enum
 import json
 from datetime import date, datetime, timezone
 
-from sqlalchemy import Boolean, Date, DateTime, Enum, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, Enum, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -92,7 +92,7 @@ class VideoAsset(Base):
     original_filename: Mapped[str] = mapped_column(String(255))
     stored_filename: Mapped[str] = mapped_column(String(255), unique=True)
     content_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    size_bytes: Mapped[int] = mapped_column(Integer)
+    size_bytes: Mapped[int] = mapped_column(BigInteger)
     storage_path: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     match: Mapped[Match] = relationship(back_populates="videos")
@@ -107,7 +107,7 @@ class MultipartUploadSession(Base):
     object_key: Mapped[str] = mapped_column(Text, unique=True)
     filename: Mapped[str] = mapped_column(String(255), index=True)
     content_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    size_bytes: Mapped[int] = mapped_column(Integer, index=True)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, index=True)
     part_size: Mapped[int] = mapped_column(Integer)
     total_parts: Mapped[int] = mapped_column(Integer)
     uploaded_parts_json: Mapped[str] = mapped_column(Text, default="[]")

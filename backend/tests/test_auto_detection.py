@@ -16,18 +16,32 @@ def test_parse_scene_times_deduplicates_close_transitions() -> None:
 
 
 def test_scene_detection_command_samples_and_scales_video() -> None:
-    command = build_scene_detection_command(Path("match.mp4"), threshold=0.35, sample_fps=1, analysis_width=480)
+    command = build_scene_detection_command(
+        Path("match.mp4"),
+        threshold=0.35,
+        sample_fps=1,
+        analysis_width=480,
+        max_scan_seconds=120,
+    )
 
     assert command[:5] == ["ffmpeg", "-hide_banner", "-nostdin", "-i", "match.mp4"]
+    assert command[command.index("-t") + 1] == "120"
     assert command[command.index("-vf") + 1] == "fps=1,scale=480:-2,select='gt(scene,0.35)',showinfo"
 
 
 def test_scene_detection_command_accepts_remote_source() -> None:
     source = "https://example.test/match.mp4?signature=abc123"
 
-    command = build_scene_detection_command(source, threshold=0.35, sample_fps=1, analysis_width=480)
+    command = build_scene_detection_command(
+        source,
+        threshold=0.35,
+        sample_fps=1,
+        analysis_width=480,
+        max_scan_seconds=0,
+    )
 
     assert command[:5] == ["ffmpeg", "-hide_banner", "-nostdin", "-i", source]
+    assert "-t" not in command
 
 
 def test_detect_scene_changes_allows_remote_source(monkeypatch) -> None:

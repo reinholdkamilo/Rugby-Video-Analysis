@@ -35,11 +35,20 @@ export type AutomaticSuggestion = { id: number; match_id: number; video_asset_id
 export type VisionObservation = { id: number; match_id: number; video_asset_id: number; timestamp_seconds: number; frame_path: string; field_green_ratio: number; field_visible: boolean; scoreboard_region: string | null; scoreboard_confidence: number; brightness: number; motion_score: number };
 export type RugbyUnderstandingObservation = { id: number; match_id: number; video_asset_id: number; timestamp_seconds: number; estimated_players: number; dominant_team_colour_1: string | null; dominant_team_colour_2: string | null; field_zone: string; activity_level: number; possession_side_candidate: string; confidence: number; source_frame_path: string };
 
+async function errorMessage(response: Response, fallback: string) {
+  const contentType = response.headers.get("content-type") ?? "";
+  if (contentType.includes("application/json")) {
+    const body = (await response.json().catch(() => null)) as { detail?: string; message?: string } | null;
+    return body?.detail ?? body?.message ?? fallback;
+  }
+  const text = (await response.text().catch(() => "")).trim();
+  return text && !text.startsWith("<") ? text : fallback;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${apiUrl}${path}`, init);
   if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { detail?: string } | null;
-    throw new Error(body?.detail ?? `Request failed with status ${response.status}`);
+    throw new Error(await errorMessage(response, `Request failed with status ${response.status}`));
   }
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
@@ -48,8 +57,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 async function directUploadRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${directUploadApiUrl}${path}`, init);
   if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { detail?: string } | null;
-    throw new Error(body?.detail ?? `Upload request failed with status ${response.status}`);
+    throw new Error(await errorMessage(response, `Upload service error (${response.status}). Please retry the upload.`));
   }
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;

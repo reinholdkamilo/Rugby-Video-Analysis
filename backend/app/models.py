@@ -1,4 +1,5 @@
 import enum
+import json
 from datetime import date, datetime, timezone
 
 from sqlalchemy import Boolean, Date, DateTime, Enum, Float, ForeignKey, Integer, String, Text
@@ -96,6 +97,42 @@ class VideoAsset(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     match: Mapped[Match] = relationship(back_populates="videos")
     processing_result: Mapped["VideoProcessingResult | None"] = relationship(back_populates="video_asset", cascade="all, delete-orphan", uselist=False)
+
+
+class MultipartUploadSession(Base):
+    __tablename__ = "multipart_upload_sessions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    match_id: Mapped[int] = mapped_column(ForeignKey("matches.id", ondelete="CASCADE"), index=True)
+    upload_id: Mapped[str] = mapped_column(Text, unique=True)
+    object_key: Mapped[str] = mapped_column(Text, unique=True)
+    filename: Mapped[str] = mapped_column(String(255), index=True)
+    content_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    size_bytes: Mapped[int] = mapped_column(Integer, index=True)
+    part_size: Mapped[int] = mapped_column(Integer)
+    total_parts: Mapped[int] = mapped_column(Integer)
+    uploaded_parts_json: Mapped[str] = mapped_column(Text, default="[]")
+    status: Mapped[str] = mapped_column(String(32), default="uploading", index=True)
+    video_asset_id: Mapped[int | None] = mapped_column(ForeignKey("video_assets.id", ondelete="SET NULL"), nullable=True)
+    analysis_job_id: Mapped[int | None] = mapped_column(ForeignKey("analysis_jobs.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+    @property
+    def uploaded_parts(self) -> list[dict[str, object]]:
+        try:
+            parsed = json.loads(self.uploaded_parts_json or "[]")
+        except json.JSONDecodeError:
+            return []
+        if not isinstance(parsed, list):
+            return []
+        return [part for part in parsed if isinstance(part, dict)]
+
+    def set_uploaded_parts(self, parts: list[dict[str, object]]) -> None:
+        cleaned = [
+            {"part_number": int(part["part_number"]), "etag": str(part["etag"])}
+            for part in sorted(parts, key=lambda item: int(item["part_number"]))
+        ]
+        self.uploaded_parts_json = json.dumps(cleaned)
 
 
 class AnalysisJob(Base):

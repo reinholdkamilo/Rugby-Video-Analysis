@@ -7,8 +7,9 @@ from pathlib import Path
 from app.models import EventType
 
 PTS_TIME_PATTERN = re.compile(r"pts_time:([0-9]+(?:\.[0-9]+)?)")
-DEFAULT_SAMPLE_FPS = float(os.getenv("AUTO_DETECTION_SAMPLE_FPS", "2"))
-DEFAULT_ANALYSIS_WIDTH = int(os.getenv("AUTO_DETECTION_ANALYSIS_WIDTH", "640"))
+DEFAULT_SAMPLE_FPS = float(os.getenv("AUTO_DETECTION_SAMPLE_FPS", "0.5"))
+DEFAULT_ANALYSIS_WIDTH = int(os.getenv("AUTO_DETECTION_ANALYSIS_WIDTH", "426"))
+DEFAULT_MAX_SCAN_SECONDS = float(os.getenv("AUTO_DETECTION_MAX_SCAN_SECONDS", "900"))
 
 
 @dataclass(frozen=True)
@@ -36,25 +37,24 @@ def build_scene_detection_command(
     threshold: float,
     sample_fps: float = DEFAULT_SAMPLE_FPS,
     analysis_width: int = DEFAULT_ANALYSIS_WIDTH,
+    max_scan_seconds: float = DEFAULT_MAX_SCAN_SECONDS,
 ) -> list[str]:
     filter_chain = (
         f"fps={sample_fps},"
         f"scale={analysis_width}:-2,"
         f"select='gt(scene,{threshold})',showinfo"
     )
-    return [
+    command = [
         "ffmpeg",
         "-hide_banner",
         "-nostdin",
         "-i",
         str(source),
-        "-vf",
-        filter_chain,
-        "-an",
-        "-f",
-        "null",
-        "-",
     ]
+    if max_scan_seconds > 0:
+        command.extend(["-t", str(max_scan_seconds)])
+    command.extend(["-vf", filter_chain, "-an", "-f", "null", "-"])
+    return command
 
 
 def _is_remote_source(source: str) -> bool:

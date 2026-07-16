@@ -9,7 +9,7 @@ from app.models import EventType
 PTS_TIME_PATTERN = re.compile(r"pts_time:([0-9]+(?:\.[0-9]+)?)")
 DEFAULT_SAMPLE_FPS = float(os.getenv("AUTO_DETECTION_SAMPLE_FPS", "0.5"))
 DEFAULT_ANALYSIS_WIDTH = int(os.getenv("AUTO_DETECTION_ANALYSIS_WIDTH", "426"))
-DEFAULT_MAX_SCAN_SECONDS = float(os.getenv("AUTO_DETECTION_MAX_SCAN_SECONDS", "900"))
+DEFAULT_MAX_SCAN_SECONDS = float(os.getenv("AUTO_DETECTION_MAX_SCAN_SECONDS", "120"))
 
 
 @dataclass(frozen=True)
@@ -48,11 +48,13 @@ def build_scene_detection_command(
         "ffmpeg",
         "-hide_banner",
         "-nostdin",
-        "-i",
-        str(source),
     ]
     if max_scan_seconds > 0:
         command.extend(["-t", str(max_scan_seconds)])
+    command.extend([
+        "-i",
+        str(source),
+    ])
     command.extend(["-vf", filter_chain, "-an", "-f", "null", "-"])
     return command
 

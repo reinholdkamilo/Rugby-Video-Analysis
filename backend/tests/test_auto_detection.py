@@ -24,7 +24,7 @@ def test_scene_detection_command_samples_and_scales_video() -> None:
         max_scan_seconds=120,
     )
 
-    assert command[:5] == ["ffmpeg", "-hide_banner", "-nostdin", "-i", "match.mp4"]
+    assert command[:7] == ["ffmpeg", "-hide_banner", "-nostdin", "-t", "120", "-i", "match.mp4"]
     assert command[command.index("-t") + 1] == "120"
     assert command[command.index("-vf") + 1] == "fps=1,scale=480:-2,select='gt(scene,0.35)',showinfo"
 
@@ -56,7 +56,7 @@ def test_detect_scene_changes_allows_remote_source(monkeypatch) -> None:
     result = detect_scene_changes("https://example.test/match.mp4?signature=abc123", threshold=0.35)
 
     assert result == [12.5]
-    assert calls[0][4].startswith("https://example.test/match.mp4")
+    assert calls[0][calls[0].index("-i") + 1].startswith("https://example.test/match.mp4")
 
 
 def test_build_candidates_creates_opening_restart_and_review_items() -> None:

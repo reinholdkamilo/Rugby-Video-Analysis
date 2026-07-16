@@ -3,7 +3,9 @@ from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
+from app.database import SessionLocal
 from app.main import app
+from app.models import VideoAsset
 
 
 def test_create_match_and_analysis_job() -> None:
@@ -330,6 +332,66 @@ def test_detection_job_completes_and_creates_suggestions(monkeypatch) -> None:
     assert job["status"] == "completed"
     assert job["progress_percent"] == 100
     assert len(suggestions) == 2
+
+
+def test_accept_suggestion_uses_video_storage_reference_for_clip(monkeypatch) -> None:
+    unique = uuid4().hex[:8]
+    monkeypatch.setattr("app.api.suggestions.detect_scene_changes", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr("app.api.suggestions.probe_video", lambda *_args, **_kwargs: SimpleNamespace(duration_seconds=60.0))
+    captured_sources: list[str] = []
+
+    def fake_generate_event_clip(source_path: str, event_id: int, start_seconds: float, end_seconds: float) -> tuple[str, float]:
+        captured_sources.append(source_path)
+        return f"clips/event-{event_id}.mp4", end_seconds - start_seconds
+
+    monkeypatch.setattr("app.api.suggestions.generate_event_clip", fake_generate_event_clip)
+    with TestClient(app) as client:
+        organisation_id = client.post(
+            "/api/organisations", json={"name": f"Accept Suggestion {unique}"}
+        ).json()["id"]
+        home_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"Home {unique}"},
+        ).json()["id"]
+        away_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"Away {unique}"},
+        ).json()["id"]
+        match_id = client.post(
+            "/api/matches",
+            json={
+                "organisation_id": organisation_id,
+                "home_team_id": home_id,
+                "away_team_id": away_id,
+                "match_date": "2026-07-12",
+            },
+        ).json()["id"]
+        video = client.post(
+            f"/api/matches/{match_id}/videos",
+            files={"file": ("sample-accept.mp4", b"not a real video", "video/mp4")},
+        ).json()
+        created = client.post(
+            "/api/automatic-suggestions/detect",
+            json={"video_asset_id": video["id"], "replace_pending": True, "scene_threshold": 0.3},
+        )
+        suggestion_id = created.json()[0]["id"]
+
+        r2_uri = f"r2://rugby-video-analysis/source-videos/{video['id']}/sample-accept.mp4"
+        with SessionLocal() as db:
+            asset = db.get(VideoAsset, video["id"])
+            assert asset is not None
+            asset.storage_path = r2_uri
+            db.commit()
+
+        monkeypatch.setattr(
+            "app.api.suggestions._materialized_video_path",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("Accept should not materialize the R2 source")),
+        )
+        accepted = client.post(f"/api/automatic-suggestions/{suggestion_id}/accept")
+
+    assert accepted.status_code == 200
+    assert accepted.json()["status"] == "accepted"
+    assert captured_sources == [r2_uri]
 
 
 def test_multipart_upload_session_is_reused_and_records_parts(monkeypatch) -> None:

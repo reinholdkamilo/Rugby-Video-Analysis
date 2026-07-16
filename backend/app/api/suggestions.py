@@ -303,9 +303,8 @@ def accept_suggestion(suggestion_id: int, db: Session = Depends(get_db)) -> Auto
     video = db.get(VideoAsset, suggestion.video_asset_id)
     if video is not None:
         try:
-            source_path = _materialized_video_path(video)
             clip_path, duration = generate_event_clip(
-                str(source_path),
+                video.storage_path,
                 event.id,
                 event.start_seconds,
                 event.end_seconds,

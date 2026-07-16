@@ -4,14 +4,10 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const links = [
-  ["/", "Workspace"],
-  ["/catalog", "Programme"],
+  ["/", "Home"],
+  ["/upload", "Upload Match"],
   ["/coding", "Coding"],
-  ["/timeline", "Timeline"],
-  ["/suggestions", "Suggestions"],
-  ["/vision", "Vision"],
-  ["/understanding", "Understanding"],
-  ["/intelligence", "Intelligence"],
+  ["/reports", "Reports"],
 ] as const;
 
 export function AppNav() {
@@ -46,7 +42,7 @@ export function AppNav() {
             })}
           </div>
 
-          <Link href="/coding" className="nav-cta">Open analysis</Link>
+          <Link href="/upload" className="nav-cta">Upload match</Link>
         </div>
       </nav>
     </>

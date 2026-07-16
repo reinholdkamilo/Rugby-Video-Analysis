@@ -22,8 +22,8 @@ export type AnalysisJob = { id: number; match_id: number; video_asset_id: number
 export type VideoProcessingResult = { id: number; analysis_job_id: number; video_asset_id: number; duration_seconds: number; width: number; height: number; frame_rate: number; video_codec: string | null; audio_codec: string | null; thumbnail_path: string; created_at: string };
 export type UploadSession = { upload_id: string; match_id: number; filename: string; size_bytes: number; chunk_size: number; total_chunks: number; uploaded_chunks: number[]; completed: boolean; video_asset_id: number | null; analysis_job_id: number | null };
 
-type MultipartSession = { upload_id: string; object_key: string; part_size: number; total_parts: number };
 type MultipartPart = { part_number: number; etag: string };
+type MultipartSession = { upload_id: string; object_key: string; part_size: number; total_parts: number; uploaded_parts: MultipartPart[]; resumed: boolean };
 const TEMPORARY_UPLOAD_LIMIT_BYTES = 100 * 1024 * 1024;
 
 export type EventType = "kickoff" | "scrum" | "lineout" | "carry" | "tackle" | "ruck" | "maul" | "pass" | "kick" | "turnover" | "penalty" | "try" | "conversion" | "card" | "stoppage" | "custom";
@@ -102,61 +102,67 @@ async function uploadDirectToR2(
     signal,
   });
 
-  const completedParts: MultipartPart[] = [];
-  try {
-    for (let partNumber = 1; partNumber <= session.total_parts; partNumber += 1) {
-      const start = (partNumber - 1) * session.part_size;
-      const end = Math.min(file.size, start + session.part_size);
-      const part = file.slice(start, end);
-      const signed = await directUploadRequest<{ part_number: number; url: string }>(
-        `/api/multipart-uploads/part-url?object_key=${encodeURIComponent(session.object_key)}&upload_id=${encodeURIComponent(session.upload_id)}&part_number=${partNumber}`,
-        { signal },
-      );
-      const response = await withRetry(() => fetch(signed.url, { method: "PUT", body: part, signal }));
-      if (!response.ok) throw new Error(`R2 rejected part ${partNumber} with status ${response.status}`);
-      const etag = response.headers.get("etag");
-      if (!etag) throw new Error("Cloudflare R2 did not expose the ETag header. Check the bucket CORS configuration.");
-      completedParts.push({ part_number: partNumber, etag });
-      const percent = Math.round((partNumber / session.total_parts) * 95);
-      onProgress(percent, `Uploaded ${partNumber} of ${session.total_parts} full-match parts`);
-    }
+  const completedParts = new Map<number, MultipartPart>();
+  for (const part of session.uploaded_parts ?? []) completedParts.set(part.part_number, part);
+  if (session.resumed && completedParts.size) {
+    const percent = Math.round((completedParts.size / session.total_parts) * 95);
+    onProgress(percent, `Resuming full-match upload from part ${completedParts.size + 1} of ${session.total_parts}`);
+  }
 
-    onProgress(97, "Finalising persistent full-match upload");
-    const completed = await directUploadRequest<{ video_asset_id: number; analysis_job_id: number }>("/api/multipart-uploads/complete", {
+  for (let partNumber = 1; partNumber <= session.total_parts; partNumber += 1) {
+    if (completedParts.has(partNumber)) continue;
+    const start = (partNumber - 1) * session.part_size;
+    const end = Math.min(file.size, start + session.part_size);
+    const part = file.slice(start, end);
+    const signed = await directUploadRequest<{ part_number: number; url: string }>(
+      `/api/multipart-uploads/part-url?object_key=${encodeURIComponent(session.object_key)}&upload_id=${encodeURIComponent(session.upload_id)}&part_number=${partNumber}`,
+      { signal },
+    );
+    const response = await withRetry(() => fetch(signed.url, { method: "PUT", body: part, signal }));
+    if (!response.ok) throw new Error(`R2 rejected part ${partNumber} with status ${response.status}`);
+    const etag = response.headers.get("etag");
+    if (!etag) throw new Error("Cloudflare R2 did not expose the ETag header. Check the bucket CORS configuration.");
+    const uploadedPart = { part_number: partNumber, etag };
+    completedParts.set(partNumber, uploadedPart);
+    await directUploadRequest<MultipartSession>("/api/multipart-uploads/parts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        match_id: matchId,
-        filename: file.name,
-        content_type: file.type || null,
-        size_bytes: file.size,
-        object_key: session.object_key,
-        upload_id: session.upload_id,
-        parts: completedParts,
-      }),
+      body: JSON.stringify({ object_key: session.object_key, upload_id: session.upload_id, part: uploadedPart }),
       signal,
     });
-    onProgress(100, "Full match stored permanently and analysis queued");
-    return {
-      upload_id: session.upload_id,
+    const percent = Math.round((completedParts.size / session.total_parts) * 95);
+    onProgress(percent, `Uploaded ${completedParts.size} of ${session.total_parts} full-match parts`);
+  }
+
+  onProgress(97, "Finalising persistent full-match upload");
+  const parts = Array.from(completedParts.values()).sort((a, b) => a.part_number - b.part_number);
+  const completed = await directUploadRequest<{ video_asset_id: number; analysis_job_id: number }>("/api/multipart-uploads/complete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
       match_id: matchId,
       filename: file.name,
+      content_type: file.type || null,
       size_bytes: file.size,
-      chunk_size: session.part_size,
-      total_chunks: session.total_parts,
-      uploaded_chunks: completedParts.map((part) => part.part_number - 1),
-      completed: true,
-      video_asset_id: completed.video_asset_id,
-      analysis_job_id: completed.analysis_job_id,
-    };
-  } catch (error) {
-    await directUploadRequest<void>("/api/multipart-uploads/abort", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ object_key: session.object_key, upload_id: session.upload_id }),
-    }).catch(() => undefined);
-    throw error;
-  }
+      object_key: session.object_key,
+      upload_id: session.upload_id,
+      parts,
+    }),
+    signal,
+  });
+  onProgress(100, "Full match stored permanently and analysis queued");
+  return {
+    upload_id: session.upload_id,
+    match_id: matchId,
+    filename: file.name,
+    size_bytes: file.size,
+    chunk_size: session.part_size,
+    total_chunks: session.total_parts,
+    uploaded_chunks: parts.map((part) => part.part_number - 1),
+    completed: true,
+    video_asset_id: completed.video_asset_id,
+    analysis_job_id: completed.analysis_job_id,
+  };
 }
 
 async function uploadThroughBackendChunks(

@@ -18,6 +18,15 @@ exec > >(tee -a "$STARTUP_LOG") 2>&1
 
 echo "Starting Rugby Video Analysis at $(date -Iseconds)"
 
+set -a
+for env_file in "$PROJECT_ROOT/.env" "$PROJECT_ROOT/.env.local" "$PROJECT_ROOT/backend/.env" "$PROJECT_ROOT/backend/.env.local"; do
+  if [ -f "$env_file" ]; then
+    # shellcheck disable=SC1090
+    source "$env_file"
+  fi
+done
+set +a
+
 REQUIREMENTS_STAMP="$PROJECT_ROOT/.venv/.requirements.sha256"
 CURRENT_REQUIREMENTS_HASH="$({ sha256sum backend/requirements.txt; [ -f backend/requirements-dev.txt ] && sha256sum backend/requirements-dev.txt || true; } | sha256sum | awk '{print $1}')"
 INSTALLED_REQUIREMENTS_HASH=""

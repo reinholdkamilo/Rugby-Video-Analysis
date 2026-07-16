@@ -4,6 +4,7 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .venv/
+*.db
 
 # Environment variables
 .env
@@ -15,6 +16,7 @@ node_modules/
 .next/
 out/
 npm-debug.log*
+.dev-logs/
 
 # Video and generated analysis files
 uploads/

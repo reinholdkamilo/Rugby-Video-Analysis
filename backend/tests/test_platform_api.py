@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
@@ -198,6 +199,49 @@ def test_delete_catalogue_records() -> None:
         assert catalog == {"seasons": [], "competitions": [], "players": []}
 
 
+def test_detect_automatic_suggestions_creates_review_items(monkeypatch) -> None:
+    unique = uuid4().hex[:8]
+    monkeypatch.setattr("app.api.suggestions.detect_scene_changes", lambda *_args, **_kwargs: [5.0, 30.0])
+    monkeypatch.setattr("app.api.suggestions.probe_video", lambda *_args, **_kwargs: SimpleNamespace(duration_seconds=60.0))
+
+    with TestClient(app) as client:
+        organisation_id = client.post(
+            "/api/organisations", json={"name": f"Detection {unique}"}
+        ).json()["id"]
+        home_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"Home {unique}"},
+        ).json()["id"]
+        away_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"Away {unique}"},
+        ).json()["id"]
+        match_id = client.post(
+            "/api/matches",
+            json={
+                "organisation_id": organisation_id,
+                "home_team_id": home_id,
+                "away_team_id": away_id,
+                "match_date": "2026-07-12",
+            },
+        ).json()["id"]
+        video = client.post(
+            f"/api/matches/{match_id}/videos",
+            files={"file": ("sample.mp4", b"not a real video", "video/mp4")},
+        ).json()
+
+        response = client.post(
+            "/api/automatic-suggestions/detect",
+            json={"video_asset_id": video["id"], "replace_pending": True, "scene_threshold": 0.3},
+        )
+
+    assert response.status_code == 201
+    suggestions = response.json()
+    assert len(suggestions) == 3
+    assert suggestions[0]["event_type"] == "kickoff"
+    assert {item["video_asset_id"] for item in suggestions} == {video["id"]}
+
+
 def test_multipart_upload_session_is_reused_and_records_parts(monkeypatch) -> None:
     unique = uuid4().hex[:8]
     upload_ids: list[str] = []
@@ -205,7 +249,7 @@ def test_multipart_upload_session_is_reused_and_records_parts(monkeypatch) -> No
     monkeypatch.setattr("app.api.multipart_uploads.is_object_storage_enabled", lambda: True)
 
     def fake_create_multipart_upload(object_key: str, content_type: str | None = None) -> str:
-        upload_id = f"upload-{len(upload_ids) + 1}"
+        upload_id = f"upload-{unique}-{len(upload_ids) + 1}"
         upload_ids.append(upload_id)
         return upload_id
 
@@ -264,4 +308,4 @@ def test_multipart_upload_session_is_reused_and_records_parts(monkeypatch) -> No
         assert resumed.json()["upload_id"] == session["upload_id"]
         assert resumed.json()["object_key"] == session["object_key"]
         assert resumed.json()["uploaded_parts"] == [{"part_number": 1, "etag": '"etag-1"'}]
-        assert upload_ids == ["upload-1"]
+        assert upload_ids == [f"upload-{unique}-1"]

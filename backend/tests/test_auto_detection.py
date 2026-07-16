@@ -1,4 +1,6 @@
-from app.auto_detection import build_candidates, parse_scene_times
+from pathlib import Path
+
+from app.auto_detection import build_candidates, build_scene_detection_command, parse_scene_times
 from app.models import EventType
 
 
@@ -10,6 +12,13 @@ def test_parse_scene_times_deduplicates_close_transitions() -> None:
     """
 
     assert parse_scene_times(stderr) == [1.0, 4.0]
+
+
+def test_scene_detection_command_samples_and_scales_video() -> None:
+    command = build_scene_detection_command(Path("match.mp4"), threshold=0.35, sample_fps=1, analysis_width=480)
+
+    assert command[:5] == ["ffmpeg", "-hide_banner", "-nostdin", "-i", "match.mp4"]
+    assert command[command.index("-vf") + 1] == "fps=1,scale=480:-2,select='gt(scene,0.35)',showinfo"
 
 
 def test_build_candidates_creates_opening_restart_and_review_items() -> None:

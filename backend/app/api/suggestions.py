@@ -1,14 +1,16 @@
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.auto_detection import build_candidates, detect_scene_changes
 from app.clips import generate_event_clip
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.models import (
+    AnalysisJob,
+    AnalysisStatus,
     AutomaticEventSuggestion,
     EventClip,
     EventTeam,
@@ -19,6 +21,7 @@ from app.models import (
     VideoProcessingResult,
 )
 from app.object_storage import materialize
+from app.schemas import AnalysisJobRead
 from app.video_processing import probe_video
 
 router = APIRouter(prefix="/api/automatic-suggestions", tags=["automatic suggestions"])
@@ -89,11 +92,19 @@ def _materialized_video_path(video: VideoAsset) -> Path:
         ) from exc
 
 
-@router.post("/detect", response_model=list[SuggestionRead], status_code=status.HTTP_201_CREATED)
-def detect_suggestions(payload: DetectionRequest, db: Session = Depends(get_db)) -> list[AutomaticEventSuggestion]:
+def _create_suggestions(
+    payload: DetectionRequest,
+    db: Session,
+    job: AnalysisJob | None = None,
+) -> list[AutomaticEventSuggestion]:
     video = db.get(VideoAsset, payload.video_asset_id)
     if video is None:
         raise HTTPException(status_code=404, detail="Video not found.")
+
+    if job is not None:
+        job.progress_percent = 10
+        job.message = "Retrieving source footage for automatic detection."
+        db.commit()
 
     source_path = _materialized_video_path(video)
     processing = db.scalar(
@@ -110,6 +121,11 @@ def detect_suggestions(payload: DetectionRequest, db: Session = Depends(get_db))
         )
         db.commit()
 
+    if job is not None:
+        job.progress_percent = 35
+        job.message = "Detecting camera and scene transitions."
+        db.commit()
+
     try:
         scene_times = detect_scene_changes(str(source_path), threshold=payload.scene_threshold)
     except TimeoutError as exc:
@@ -119,6 +135,11 @@ def detect_suggestions(payload: DetectionRequest, db: Session = Depends(get_db))
         ) from exc
     except (RuntimeError, FileNotFoundError) as exc:
         raise HTTPException(status_code=500, detail=f"Automatic detection failed: {exc}") from exc
+
+    if job is not None:
+        job.progress_percent = 80
+        job.message = "Creating reviewable event suggestions."
+        db.commit()
 
     records = [
         AutomaticEventSuggestion(
@@ -139,6 +160,68 @@ def detect_suggestions(payload: DetectionRequest, db: Session = Depends(get_db))
     for record in records:
         db.refresh(record)
     return records
+
+
+def _run_detection_job(job_id: int, payload: dict[str, object]) -> None:
+    with SessionLocal() as db:
+        job = db.get(AnalysisJob, job_id)
+        if job is None:
+            return
+        try:
+            _create_suggestions(DetectionRequest.model_validate(payload), db, job)
+            job.status = AnalysisStatus.completed
+            job.progress_percent = 100
+            job.message = "Automatic suggestions are ready for review."
+            db.commit()
+        except HTTPException as exc:
+            db.rollback()
+            failed = db.get(AnalysisJob, job_id)
+            if failed is not None:
+                failed.status = AnalysisStatus.failed
+                failed.progress_percent = 100
+                failed.message = str(exc.detail)[:1000]
+                db.commit()
+        except Exception as exc:  # pragma: no cover - provider/runtime dependent
+            db.rollback()
+            failed = db.get(AnalysisJob, job_id)
+            if failed is not None:
+                failed.status = AnalysisStatus.failed
+                failed.progress_percent = 100
+                failed.message = str(exc)[:1000]
+                db.commit()
+
+
+@router.post("/detect", response_model=list[SuggestionRead], status_code=status.HTTP_201_CREATED)
+def detect_suggestions(payload: DetectionRequest, db: Session = Depends(get_db)) -> list[AutomaticEventSuggestion]:
+    video = db.get(VideoAsset, payload.video_asset_id)
+    if video is None:
+        raise HTTPException(status_code=404, detail="Video not found.")
+
+    return _create_suggestions(payload, db)
+
+
+@router.post("/detect-jobs", response_model=AnalysisJobRead, status_code=status.HTTP_202_ACCEPTED)
+def start_detection_job(
+    payload: DetectionRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> AnalysisJob:
+    video = db.get(VideoAsset, payload.video_asset_id)
+    if video is None:
+        raise HTTPException(status_code=404, detail="Video not found.")
+
+    job = AnalysisJob(
+        match_id=video.match_id,
+        video_asset_id=video.id,
+        status=AnalysisStatus.processing,
+        progress_percent=5,
+        message="Automatic detection has started.",
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    background_tasks.add_task(_run_detection_job, job.id, payload.model_dump())
+    return job
 
 
 @router.get("", response_model=list[SuggestionRead])

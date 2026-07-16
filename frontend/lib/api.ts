@@ -13,12 +13,6 @@ const directUploadApiUrl = (
     ? "https://rugby-video-analysis-api-free.onrender.com"
     : apiUrl)
 ).replace(/\/$/, "");
-const longRunningApiUrl = (
-  process.env.NEXT_PUBLIC_LONG_RUNNING_API_URL ||
-  (typeof window !== "undefined" && window.location.hostname.endsWith("vercel.app")
-    ? "https://rugby-video-analysis-api-free.onrender.com"
-    : apiUrl)
-).replace(/\/$/, "");
 
 export type Organisation = { id: number; name: string; created_at: string };
 export type Team = { id: number; organisation_id: number; name: string; age_group: string | null; created_at: string };
@@ -64,15 +58,6 @@ async function directUploadRequest<T>(path: string, init?: RequestInit): Promise
   const response = await fetch(`${directUploadApiUrl}${path}`, init);
   if (!response.ok) {
     throw new Error(await errorMessage(response, `Upload service error (${response.status}). Please retry the upload.`));
-  }
-  if (response.status === 204) return undefined as T;
-  return (await response.json()) as T;
-}
-
-async function longRunningRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${longRunningApiUrl}${path}`, init);
-  if (!response.ok) {
-    throw new Error(await errorMessage(response, `Request failed with status ${response.status}`));
   }
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
@@ -250,6 +235,18 @@ export async function uploadVideoInChunks(
   }
 }
 
+async function waitForDetectionJob(jobId: number, videoAssetId: number): Promise<AutomaticSuggestion[]> {
+  const startedAt = Date.now();
+  const timeoutMs = 30 * 60 * 1000;
+  while (Date.now() - startedAt < timeoutMs) {
+    const job = await api.jobs.get(jobId);
+    if (job.status === "completed") return api.suggestions.list(videoAssetId);
+    if (job.status === "failed") throw new Error(job.message ?? "Automatic detection failed");
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+  }
+  throw new Error("Automatic detection is still running. Refresh the suggestions list in a few minutes.");
+}
+
 export const api = {
   health: () => request<{ status: string }>("/health"),
   organisations: { list: () => request<Organisation[]>("/api/organisations"), create: (name: string) => request<Organisation>("/api/organisations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }), delete: (organisationId: number) => request<void>(`/api/organisations/${organisationId}`, { method: "DELETE" }) },
@@ -258,7 +255,7 @@ export const api = {
   videos: { processingResult: (videoAssetId: number) => request<VideoProcessingResult>(`/api/videos/${videoAssetId}/processing-result`) },
   jobs: { list: () => request<AnalysisJob[]>("/api/analysis-jobs"), create: (payload: { match_id: number; video_asset_id?: number }) => request<AnalysisJob>("/api/analysis-jobs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }), get: (jobId: number) => request<AnalysisJob>(`/api/analysis-jobs/${jobId}`) },
   timeline: { list: (matchId?: number, videoAssetId?: number) => { const query = new URLSearchParams(); if (matchId) query.set("match_id", String(matchId)); if (videoAssetId) query.set("video_asset_id", String(videoAssetId)); return request<TimelineEvent[]>(`/api/timeline-events${query.size ? `?${query}` : ""}`); }, create: (payload: Omit<TimelineEvent, "id" | "created_at" | "updated_at" | "clip">) => request<TimelineEvent>("/api/timeline-events", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }), update: (eventId: number, payload: Partial<TimelineEvent>) => request<TimelineEvent>(`/api/timeline-events/${eventId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }), regenerateClip: (eventId: number) => request<EventClip>(`/api/timeline-events/${eventId}/clip`, { method: "POST" }) },
-  suggestions: { detect: (videoAssetId: number, sceneThreshold = 0.28) => longRunningRequest<AutomaticSuggestion[]>("/api/automatic-suggestions/detect", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ video_asset_id: videoAssetId, replace_pending: true, scene_threshold: sceneThreshold }) }), list: (videoAssetId?: number, status?: SuggestionStatus) => { const query = new URLSearchParams(); if (videoAssetId) query.set("video_asset_id", String(videoAssetId)); if (status) query.set("suggestion_status", status); return request<AutomaticSuggestion[]>(`/api/automatic-suggestions${query.size ? `?${query}` : ""}`); }, update: (suggestionId: number, payload: Partial<Pick<AutomaticSuggestion, "event_type" | "team" | "start_seconds" | "end_seconds" | "label">>) => request<AutomaticSuggestion>(`/api/automatic-suggestions/${suggestionId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }), accept: (suggestionId: number) => request<AutomaticSuggestion>(`/api/automatic-suggestions/${suggestionId}/accept`, { method: "POST" }), reject: (suggestionId: number) => request<AutomaticSuggestion>(`/api/automatic-suggestions/${suggestionId}/reject`, { method: "POST" }) },
+  suggestions: { detect: async (videoAssetId: number, sceneThreshold = 0.28) => { const job = await request<AnalysisJob>("/api/automatic-suggestions/detect-jobs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ video_asset_id: videoAssetId, replace_pending: true, scene_threshold: sceneThreshold }) }); return waitForDetectionJob(job.id, videoAssetId); }, list: (videoAssetId?: number, status?: SuggestionStatus) => { const query = new URLSearchParams(); if (videoAssetId) query.set("video_asset_id", String(videoAssetId)); if (status) query.set("suggestion_status", status); return request<AutomaticSuggestion[]>(`/api/automatic-suggestions${query.size ? `?${query}` : ""}`); }, update: (suggestionId: number, payload: Partial<Pick<AutomaticSuggestion, "event_type" | "team" | "start_seconds" | "end_seconds" | "label">>) => request<AutomaticSuggestion>(`/api/automatic-suggestions/${suggestionId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }), accept: (suggestionId: number) => request<AutomaticSuggestion>(`/api/automatic-suggestions/${suggestionId}/accept`, { method: "POST" }), reject: (suggestionId: number) => request<AutomaticSuggestion>(`/api/automatic-suggestions/${suggestionId}/reject`, { method: "POST" }) },
   vision: { run: (videoAssetId: number, intervalSeconds = 2) => request<VisionObservation[]>("/api/vision/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ video_asset_id: videoAssetId, interval_seconds: intervalSeconds, max_frames: 240, replace_existing: true }) }), list: (videoAssetId: number) => request<VisionObservation[]>(`/api/vision/observations?video_asset_id=${videoAssetId}`) },
   understanding: { run: (videoAssetId: number) => request<RugbyUnderstandingObservation[]>(`/api/understanding/run/${videoAssetId}`, { method: "POST" }), list: (videoAssetId: number) => request<RugbyUnderstandingObservation[]>(`/api/understanding/${videoAssetId}`) },
 };

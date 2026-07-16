@@ -20,7 +20,7 @@ from app.models import (
     VideoAsset,
     VideoProcessingResult,
 )
-from app.object_storage import materialize
+from app.object_storage import create_presigned_get_url, is_object_uri, materialize
 from app.schemas import AnalysisJobRead
 from app.video_processing import probe_video
 
@@ -92,6 +92,23 @@ def _materialized_video_path(video: VideoAsset) -> Path:
         ) from exc
 
 
+def _detection_source(video: VideoAsset) -> str:
+    if is_object_uri(video.storage_path):
+        try:
+            return create_presigned_get_url(video.storage_path, expires_in=7200)
+        except RuntimeError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Persistent video storage is unavailable: {exc}",
+            ) from exc
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Unable to retrieve the source video from storage: {exc}",
+            ) from exc
+    return str(_materialized_video_path(video))
+
+
 def _create_suggestions(
     payload: DetectionRequest,
     db: Session,
@@ -106,11 +123,11 @@ def _create_suggestions(
         job.message = "Retrieving source footage for automatic detection."
         db.commit()
 
-    source_path = _materialized_video_path(video)
     processing = db.scalar(
         select(VideoProcessingResult).where(VideoProcessingResult.video_asset_id == video.id)
     )
-    duration = processing.duration_seconds if processing is not None else probe_video(str(source_path)).duration_seconds
+    source = _detection_source(video)
+    duration = processing.duration_seconds if processing is not None else probe_video(source).duration_seconds
 
     if payload.replace_pending:
         db.execute(
@@ -127,7 +144,7 @@ def _create_suggestions(
         db.commit()
 
     try:
-        scene_times = detect_scene_changes(str(source_path), threshold=payload.scene_threshold)
+        scene_times = detect_scene_changes(source, threshold=payload.scene_threshold)
     except TimeoutError as exc:
         raise HTTPException(
             status_code=504,

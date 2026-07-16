@@ -32,7 +32,7 @@ def parse_scene_times(stderr: str) -> list[float]:
 
 
 def build_scene_detection_command(
-    source: Path,
+    source: str | Path,
     threshold: float,
     sample_fps: float = DEFAULT_SAMPLE_FPS,
     analysis_width: int = DEFAULT_ANALYSIS_WIDTH,
@@ -57,9 +57,16 @@ def build_scene_detection_command(
     ]
 
 
+def _is_remote_source(source: str) -> bool:
+    return source.startswith(("http://", "https://"))
+
+
 def detect_scene_changes(video_path: str, threshold: float = 0.28, timeout_seconds: int = 900) -> list[float]:
-    source = Path(video_path)
-    if not source.is_file():
+    source: str | Path = video_path
+    if not _is_remote_source(video_path):
+        source = Path(video_path)
+
+    if isinstance(source, Path) and not source.is_file():
         raise FileNotFoundError(f"Video file not found: {video_path}")
 
     command = build_scene_detection_command(source, threshold)

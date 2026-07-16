@@ -1,6 +1,7 @@
 from pathlib import Path
+from types import SimpleNamespace
 
-from app.auto_detection import build_candidates, build_scene_detection_command, parse_scene_times
+from app.auto_detection import build_candidates, build_scene_detection_command, detect_scene_changes, parse_scene_times
 from app.models import EventType
 
 
@@ -19,6 +20,29 @@ def test_scene_detection_command_samples_and_scales_video() -> None:
 
     assert command[:5] == ["ffmpeg", "-hide_banner", "-nostdin", "-i", "match.mp4"]
     assert command[command.index("-vf") + 1] == "fps=1,scale=480:-2,select='gt(scene,0.35)',showinfo"
+
+
+def test_scene_detection_command_accepts_remote_source() -> None:
+    source = "https://example.test/match.mp4?signature=abc123"
+
+    command = build_scene_detection_command(source, threshold=0.35, sample_fps=1, analysis_width=480)
+
+    assert command[:5] == ["ffmpeg", "-hide_banner", "-nostdin", "-i", source]
+
+
+def test_detect_scene_changes_allows_remote_source(monkeypatch) -> None:
+    calls: list[list[str]] = []
+
+    def fake_run(command: list[str], **_kwargs: object) -> SimpleNamespace:
+        calls.append(command)
+        return SimpleNamespace(returncode=0, stderr="[showinfo] pts_time:12.500")
+
+    monkeypatch.setattr("app.auto_detection.subprocess.run", fake_run)
+
+    result = detect_scene_changes("https://example.test/match.mp4?signature=abc123", threshold=0.35)
+
+    assert result == [12.5]
+    assert calls[0][4].startswith("https://example.test/match.mp4")
 
 
 def test_build_candidates_creates_opening_restart_and_review_items() -> None:

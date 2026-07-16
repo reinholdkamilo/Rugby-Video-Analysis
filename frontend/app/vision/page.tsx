@@ -47,7 +47,7 @@ export default function VisionPage() {
     setBusy(true);
     setNotice("Sampling frames and measuring field, motion and scoreboard evidence…");
     try {
-      const data = await api.vision.run(videoId, 2);
+      const data = await api.vision.run(videoId);
       setObservations(data);
       setNotice(`${data.length} frames analysed. Review the visual evidence below.`);
     } catch (error) {

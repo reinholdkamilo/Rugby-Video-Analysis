@@ -8,6 +8,9 @@ import cv2
 import numpy as np
 
 VISION_DIR = Path(os.getenv("VISION_FRAME_DIR", "vision_frames"))
+VISION_PROBE_TIMEOUT_SECONDS = int(os.getenv("VISION_PROBE_TIMEOUT_SECONDS", "20"))
+VISION_FRAME_TIMEOUT_SECONDS = int(os.getenv("VISION_FRAME_TIMEOUT_SECONDS", "20"))
+VISION_ANALYSIS_WIDTH = int(os.getenv("VISION_ANALYSIS_WIDTH", "640"))
 VISION_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -57,7 +60,7 @@ def _probe_duration(video_path: str) -> float:
         "default=noprint_wrappers=1:nokey=1",
         video_path,
     ]
-    completed = subprocess.run(command, capture_output=True, text=True, timeout=30, check=False)
+    completed = subprocess.run(command, capture_output=True, text=True, timeout=VISION_PROBE_TIMEOUT_SECONDS, check=False)
     if completed.returncode != 0:
         raise RuntimeError(completed.stderr.strip() or "FFprobe could not read the video duration.")
     try:
@@ -79,16 +82,27 @@ def _extract_frame_with_ffmpeg(video_path: str, timestamp: float, output_path: P
         "-frames:v",
         "1",
         "-vf",
-        "scale='min(1280,iw)':-2",
+        f"scale='min({VISION_ANALYSIS_WIDTH},iw)':-2",
         "-q:v",
         "3",
         "-y",
         str(output_path),
     ]
-    completed = subprocess.run(command, capture_output=True, text=True, timeout=60, check=False)
+    completed = subprocess.run(command, capture_output=True, text=True, timeout=VISION_FRAME_TIMEOUT_SECONDS, check=False)
     if completed.returncode != 0 or not output_path.is_file():
         return None
     return cv2.imread(str(output_path))
+
+
+def _is_remote_source(video_path: str) -> bool:
+    return video_path.startswith(("http://", "https://"))
+
+
+def _sample_timestamps(duration: float, interval_seconds: float, max_frames: int) -> np.ndarray:
+    interval = max(0.5, interval_seconds)
+    if duration <= interval * max_frames:
+        return np.arange(0.0, duration + 0.001, interval)[:max_frames]
+    return np.linspace(0.0, max(0.0, duration - 1.0), num=max_frames)
 
 
 def analyse_video_frames(
@@ -97,17 +111,18 @@ def analyse_video_frames(
     interval_seconds: float = 2.0,
     max_frames: int = 240,
 ) -> list[FrameObservation]:
-    capture = cv2.VideoCapture(video_path)
-    capture_available = capture.isOpened()
+    capture = cv2.VideoCapture(video_path) if not _is_remote_source(video_path) else None
+    capture_available = bool(capture is not None and capture.isOpened())
 
     fps = capture.get(cv2.CAP_PROP_FPS) if capture_available else 0.0
     total_frames = capture.get(cv2.CAP_PROP_FRAME_COUNT) if capture_available else 0.0
     duration = total_frames / fps if fps and total_frames else _probe_duration(video_path)
     if duration <= 0:
-        capture.release()
+        if capture is not None:
+            capture.release()
         raise RuntimeError("The uploaded video has no readable duration.")
 
-    timestamps = np.arange(0.0, duration + 0.001, max(0.5, interval_seconds))[:max_frames]
+    timestamps = _sample_timestamps(duration, interval_seconds, max_frames)
     output_dir = VISION_DIR / f"video-{video_asset_id}"
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -121,7 +136,7 @@ def analyse_video_frames(
         frame_path = output_dir / frame_name
         frame: np.ndarray | None = None
 
-        if capture_available:
+        if capture_available and capture is not None:
             capture.set(cv2.CAP_PROP_POS_MSEC, timestamp * 1000.0)
             ok, decoded = capture.read()
             if ok and decoded is not None:
@@ -170,7 +185,8 @@ def analyse_video_frames(
             )
         )
 
-    capture.release()
+    if capture is not None:
+        capture.release()
     if not observations:
         raise RuntimeError(
             f"No frames could be decoded from the uploaded video. {failed_frames} frame extractions failed."

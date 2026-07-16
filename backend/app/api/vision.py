@@ -1,3 +1,5 @@
+import os
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import delete, select
@@ -5,15 +7,17 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import VideoAsset, VisionFrameObservation
-from app.object_storage import materialize, persist_generated_file
+from app.object_storage import create_presigned_get_url, is_object_uri, materialize, persist_generated_file
 from app.vision_analysis import analyse_video_frames
 
 router = APIRouter(prefix="/api/vision", tags=["vision"])
+MAX_VISION_FRAMES = int(os.getenv("MAX_VISION_FRAMES", "12"))
+MIN_VISION_INTERVAL_SECONDS = float(os.getenv("MIN_VISION_INTERVAL_SECONDS", "30"))
 
 
 class VisionRunRequest(BaseModel):
     video_asset_id: int
-    interval_seconds: float = Field(default=2.0, ge=0.5, le=15.0)
+    interval_seconds: float = Field(default=30.0, ge=0.5, le=120.0)
     max_frames: int = Field(default=240, ge=1, le=1000)
     replace_existing: bool = True
 
@@ -34,6 +38,12 @@ class VisionObservationRead(BaseModel):
     motion_score: float
 
 
+def _vision_source(video: VideoAsset) -> str:
+    if is_object_uri(video.storage_path):
+        return create_presigned_get_url(video.storage_path, expires_in=7200)
+    return str(materialize(video.storage_path))
+
+
 @router.post("/run", response_model=list[VisionObservationRead], status_code=status.HTTP_201_CREATED)
 def run_vision(payload: VisionRunRequest, db: Session = Depends(get_db)) -> list[VisionFrameObservation]:
     video = db.get(VideoAsset, payload.video_asset_id)
@@ -45,12 +55,12 @@ def run_vision(payload: VisionRunRequest, db: Session = Depends(get_db)) -> list
         db.commit()
 
     try:
-        source_path = materialize(video.storage_path)
+        source = _vision_source(video)
         analysed = analyse_video_frames(
-            str(source_path),
+            source,
             video.id,
-            interval_seconds=payload.interval_seconds,
-            max_frames=payload.max_frames,
+            interval_seconds=max(payload.interval_seconds, MIN_VISION_INTERVAL_SECONDS),
+            max_frames=min(payload.max_frames, MAX_VISION_FRAMES),
         )
         for observation in analysed:
             frame_name = observation.frame_path.rsplit("/", maxsplit=1)[-1]

@@ -24,6 +24,7 @@ export type UploadSession = { upload_id: string; match_id: number; filename: str
 
 type MultipartSession = { upload_id: string; object_key: string; part_size: number; total_parts: number };
 type MultipartPart = { part_number: number; etag: string };
+const TEMPORARY_UPLOAD_LIMIT_BYTES = 100 * 1024 * 1024;
 
 export type EventType = "kickoff" | "scrum" | "lineout" | "carry" | "tackle" | "ruck" | "maul" | "pass" | "kick" | "turnover" | "penalty" | "try" | "conversion" | "card" | "stoppage" | "custom";
 export type EventTeam = "home" | "away" | "neutral";
@@ -210,6 +211,11 @@ export async function uploadVideoInChunks(
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
     if (!message.includes("not configured") && !message.includes("503")) throw error;
+    if (file.size > TEMPORARY_UPLOAD_LIMIT_BYTES) {
+      throw new Error(
+        "Full-match uploads require persistent Cloudflare R2 storage. The temporary upload path is limited to 100 MB because its sessions can disappear if the backend sleeps or restarts.",
+      );
+    }
     onProgress(0, "Persistent storage unavailable; using temporary upload mode");
     return uploadThroughBackendChunks(matchId, file, onProgress, signal);
   }

@@ -60,3 +60,42 @@ def test_create_match_and_analysis_job() -> None:
         assert updated.status_code == 200
         assert updated.json()["status"] == "processing"
         assert updated.json()["progress_percent"] == 25
+
+
+def test_large_temporary_upload_session_is_rejected() -> None:
+    unique = uuid4().hex[:8]
+    with TestClient(app) as client:
+        organisation_id = client.post(
+            "/api/organisations", json={"name": f"Upload Limit {unique}"}
+        ).json()["id"]
+        home_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"Home {unique}"},
+        ).json()["id"]
+        away_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"Away {unique}"},
+        ).json()["id"]
+        match_id = client.post(
+            "/api/matches",
+            json={
+                "organisation_id": organisation_id,
+                "home_team_id": home_id,
+                "away_team_id": away_id,
+                "match_date": "2026-07-12",
+            },
+        ).json()["id"]
+
+        response = client.post(
+            "/api/uploads",
+            json={
+                "match_id": match_id,
+                "filename": "full-match.mp4",
+                "content_type": "video/mp4",
+                "size_bytes": 101 * 1024 * 1024,
+                "chunk_size": 4 * 1024 * 1024,
+            },
+        )
+
+    assert response.status_code == 413
+    assert "persistent object storage" in response.json()["detail"]

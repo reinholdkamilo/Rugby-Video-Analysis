@@ -18,6 +18,7 @@ UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "uploads"))
 SESSION_DIR = Path(os.getenv("UPLOAD_SESSION_DIR", "upload_sessions"))
 MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(20 * 1024 * 1024 * 1024)))
 MAX_CHUNK_BYTES = int(os.getenv("MAX_CHUNK_BYTES", str(16 * 1024 * 1024)))
+TEMPORARY_UPLOAD_MAX_BYTES = int(os.getenv("TEMPORARY_UPLOAD_MAX_BYTES", str(100 * 1024 * 1024)))
 ALLOWED_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".m4v"}
 
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -80,6 +81,15 @@ def create_upload_session(payload: UploadSessionCreate, db: Session = Depends(ge
     if payload.size_bytes > MAX_UPLOAD_BYTES:
         limit_gb = MAX_UPLOAD_BYTES / (1024 ** 3)
         raise HTTPException(status_code=413, detail=f"Video exceeds the {limit_gb:g} GB upload limit.")
+    if payload.size_bytes > TEMPORARY_UPLOAD_MAX_BYTES:
+        limit_mb = TEMPORARY_UPLOAD_MAX_BYTES / (1024 ** 2)
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                "Large uploads require persistent object storage. "
+                f"The temporary backend upload path is limited to {limit_mb:g} MB."
+            ),
+        )
 
     upload_id = str(uuid.uuid4())
     session_path = _session_path(upload_id)

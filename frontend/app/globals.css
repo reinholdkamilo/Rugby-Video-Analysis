@@ -58,6 +58,8 @@ main { min-height: calc(100vh - 100px); }
 .button--gold { background: var(--yellow); color: #17221d; box-shadow: 0 14px 30px rgba(245,180,0,.24); }
 .button--gold:hover { background: var(--yellow-hover); }
 .button--secondary { border: 1px solid var(--line-strong); background: #fff; color: var(--ink); }
+.button--danger { border: 1px solid rgba(189,60,69,.26); background: #fff5f5; color: var(--danger); }
+.button--compact { min-height: 34px; padding: 7px 11px; font-size: .72rem; }
 .button--ghost-light { border: 1px solid rgba(255,255,255,.28); background: rgba(255,255,255,.06); color: #fff; }
 
 /* Hero */
@@ -149,6 +151,11 @@ main { min-height: calc(100vh - 100px); }
 .setup-card__head small { display:block; color:var(--muted); font-size:.6rem; font-weight:900; letter-spacing:.1em; text-transform:uppercase; }
 .setup-card h3 { margin-top:2px; font-size:1.25rem; }
 .setup-card > p { color:var(--muted); font-size:.82rem; }
+.management-list { display:grid; gap:8px; border-top:1px solid var(--line); padding-top:12px; }
+.management-row { display:flex; align-items:center; justify-content:space-between; gap:12px; border:1px solid var(--line); border-radius:10px; background:var(--surface-soft); padding:10px 11px; }
+.management-row strong,.management-row small { display:block; }
+.management-row strong { font-size:.82rem; }
+.management-row small { margin-top:2px; color:var(--muted); font-size:.66rem; }
 .workspace-field { width:100%; min-height:46px; border:1px solid var(--line-strong); border-radius:10px; background:#fff; padding:11px 13px; color:var(--ink); outline:none; transition:.16s ease; }
 .workspace-field:focus { border-color:var(--forest); box-shadow:0 0 0 4px rgba(14,75,69,.11); }
 .field-pair,.match-form-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }

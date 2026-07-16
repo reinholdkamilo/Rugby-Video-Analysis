@@ -54,6 +54,10 @@ export default function Home() {
   }, [jobs]);
 
   const filteredTeams = useMemo(() => teams.filter((team) => team.organisation_id === selectedOrganisationId), [teams, selectedOrganisationId]);
+  const selectedOrganisation = useMemo(
+    () => organisations.find((organisation) => organisation.id === selectedOrganisationId) ?? null,
+    [organisations, selectedOrganisationId],
+  );
   const teamName = (id: number) => teams.find((team) => team.id === id)?.name ?? `Team ${id}`;
 
   async function run(action: () => Promise<void>) {
@@ -110,6 +114,37 @@ export default function Home() {
       setMatches((current) => [match, ...current]);
       formElement.reset();
       setNotice("Match created and ready for footage");
+    });
+  }
+
+  async function deleteSelectedOrganisation() {
+    if (!selectedOrganisation) return;
+    const confirmed = window.confirm(`Delete ${selectedOrganisation.name}? This removes its teams, matches, uploads, jobs and catalogue records.`);
+    if (!confirmed) return;
+    await run(async () => {
+      await api.organisations.delete(selectedOrganisation.id);
+      await loadData();
+      setNotice(`${selectedOrganisation.name} deleted`);
+    });
+  }
+
+  async function deleteTeamRecord(team: Team) {
+    const confirmed = window.confirm(`Delete ${team.name}? Matches using this team must be deleted first.`);
+    if (!confirmed) return;
+    await run(async () => {
+      await api.teams.delete(team.id);
+      await loadData();
+      setNotice(`${team.name} deleted`);
+    });
+  }
+
+  async function deleteMatchRecord(match: Match) {
+    const confirmed = window.confirm(`Delete ${teamName(match.home_team_id)} vs ${teamName(match.away_team_id)}? This removes uploads, analysis jobs, timeline events, clips and observations for this match.`);
+    if (!confirmed) return;
+    await run(async () => {
+      await api.matches.delete(match.id);
+      await loadData();
+      setNotice("Match deleted");
     });
   }
 
@@ -178,14 +213,14 @@ export default function Home() {
           <div className="workspace-content"><div className="setup-grid">
             <form id="step-1" onSubmit={createOrganisation} className="setup-card"><div className="setup-card__head"><span>01</span><div><small>Foundation</small><h3>Organisation</h3></div></div><p>Create the club, school or programme responsible for this analysis.</p><input name="name" required minLength={2} placeholder="e.g. ACT Brumbies" className={fieldClass}/><button type="submit" disabled={busy} className={buttonClass}>Create organisation</button></form>
 
-            <form id="step-2" onSubmit={createTeam} className="setup-card"><div className="setup-card__head"><span>02</span><div><small>Squads</small><h3>Teams</h3></div></div><p>Select the organisation and add the squads involved.</p><select className={fieldClass} value={selectedOrganisationId ?? ""} onChange={(event) => setSelectedOrganisationId(event.target.value ? Number(event.target.value) : null)}><option value="">Select organisation</option>{organisations.map((organisation) => <option key={organisation.id} value={organisation.id}>{organisation.name}</option>)}</select><div className="field-pair"><input name="name" required minLength={2} placeholder="Team name" className={fieldClass}/><input name="age_group" placeholder="Age group" className={fieldClass}/></div><button type="submit" disabled={busy || !selectedOrganisationId} className={buttonClass}>Add team</button></form>
+            <form id="step-2" onSubmit={createTeam} className="setup-card"><div className="setup-card__head"><span>02</span><div><small>Squads</small><h3>Teams</h3></div></div><p>Select the organisation and add the squads involved.</p><select className={fieldClass} value={selectedOrganisationId ?? ""} onChange={(event) => setSelectedOrganisationId(event.target.value ? Number(event.target.value) : null)}><option value="">Select organisation</option>{organisations.map((organisation) => <option key={organisation.id} value={organisation.id}>{organisation.name}</option>)}</select>{selectedOrganisation && <button type="button" disabled={busy} onClick={() => void deleteSelectedOrganisation()} className="button button--danger">Delete selected organisation</button>}<div className="field-pair"><input name="name" required minLength={2} placeholder="Team name" className={fieldClass}/><input name="age_group" placeholder="Age group" className={fieldClass}/></div><button type="submit" disabled={busy || !selectedOrganisationId} className={buttonClass}>Add team</button>{filteredTeams.length > 0 && <div className="management-list">{filteredTeams.map((team) => <div key={team.id} className="management-row"><div><strong>{team.name}</strong><small>{team.age_group || "Age group not set"}</small></div><button type="button" disabled={busy} onClick={() => void deleteTeamRecord(team)} className="button button--danger button--compact">Delete</button></div>)}</div>}</form>
 
             <form id="step-3" onSubmit={createMatch} className="setup-card setup-card--wide"><div className="setup-card__head"><span>03</span><div><small>Fixture</small><h3>Create match</h3></div></div><p>Add match context before attaching footage.</p><div className="match-form-grid"><select name="home_team_id" required className={fieldClass}><option value="">Home team</option>{filteredTeams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}</select><select name="away_team_id" required className={fieldClass}><option value="">Away team</option>{filteredTeams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}</select><input name="match_date" type="date" required className={fieldClass}/><input name="competition" placeholder="Competition" className={fieldClass}/><input name="venue" placeholder="Venue" className={`${fieldClass} match-form-grid__wide`}/></div><button type="submit" disabled={busy || filteredTeams.length < 2} className={buttonClass}>Create match</button></form>
           </div>
 
           <section id="step-4" className="footage-section"><div className="footage-section__head"><div><span className="eyebrow eyebrow--dark">Step 04 · Footage</span><h3>Matches ready for analysis</h3><p>Upload a short clip, monitor processing and continue into the analyst tools.</p></div><Link href="/catalog" className="button button--secondary">Programme manager</Link></div>
             {!matches.length && <div className="empty-state"><span>◌</span><strong>No matches yet</strong><p>Complete the setup above to create your first fixture.</p></div>}
-            <div className="match-list">{matches.map((match) => { const job = jobs.find((item) => item.match_id === match.id); const progress = uploadProgress[match.id]; return <article key={match.id} className="match-card"><div className="match-card__content"><div className="match-meta"><span>{match.match_date}</span><span>{match.competition || "Competition not set"}</span></div><h4>{teamName(match.home_team_id)} <em>vs</em> {teamName(match.away_team_id)}</h4><p>{match.venue || "Venue not set"}</p>{job && <div className="job-progress"><div><span>{job.status}</span><strong>{job.progress_percent}%</strong></div><div className="progress-track"><i style={{ width: `${job.progress_percent}%` }}/></div><small>{job.message}</small></div>}<div className="match-actions"><Link href="/coding" className="button button--secondary">Open coding</Link><Link href="/timeline" className="button button--secondary">View timeline</Link></div></div><form onSubmit={(event) => uploadAndAnalyse(event, match.id)} className="upload-card"><span className="upload-card__icon">↑</span><strong>Upload match footage</strong><p>Full-match uploads use persistent R2 storage.</p><input name="video" type="file" accept="video/mp4,video/quicktime,video/x-msvideo,video/x-matroska,video/x-m4v" required/>{progress && <div className="job-progress"><div><span>{progress.message}</span><strong>{progress.percent}%</strong></div><div className="progress-track"><i style={{ width: `${progress.percent}%` }}/></div></div>}<button type="submit" disabled={busy} className={buttonClass}>{busy && progress ? "Uploading…" : "Upload and start analysis"}</button></form></article>; })}</div>
+            <div className="match-list">{matches.map((match) => { const job = jobs.find((item) => item.match_id === match.id); const progress = uploadProgress[match.id]; return <article key={match.id} className="match-card"><div className="match-card__content"><div className="match-meta"><span>{match.match_date}</span><span>{match.competition || "Competition not set"}</span></div><h4>{teamName(match.home_team_id)} <em>vs</em> {teamName(match.away_team_id)}</h4><p>{match.venue || "Venue not set"}</p>{job && <div className="job-progress"><div><span>{job.status}</span><strong>{job.progress_percent}%</strong></div><div className="progress-track"><i style={{ width: `${job.progress_percent}%` }}/></div><small>{job.message}</small></div>}<div className="match-actions"><Link href="/coding" className="button button--secondary">Open coding</Link><Link href="/timeline" className="button button--secondary">View timeline</Link><button type="button" disabled={busy} onClick={() => void deleteMatchRecord(match)} className="button button--danger">Delete match</button></div></div><form onSubmit={(event) => uploadAndAnalyse(event, match.id)} className="upload-card"><span className="upload-card__icon">↑</span><strong>Upload match footage</strong><p>Full-match uploads use persistent R2 storage.</p><input name="video" type="file" accept="video/mp4,video/quicktime,video/x-msvideo,video/x-matroska,video/x-m4v" required/>{progress && <div className="job-progress"><div><span>{progress.message}</span><strong>{progress.percent}%</strong></div><div className="progress-track"><i style={{ width: `${progress.percent}%` }}/></div></div>}<button type="submit" disabled={busy} className={buttonClass}>{busy && progress ? "Uploading…" : "Upload and start analysis"}</button></form></article>; })}</div>
           </section></div></div></div></section>
 
       <section className="tools-section"><div className="site-container"><div className="section-heading section-heading--center"><span className="eyebrow">Connected analysis tools</span><h2>Everything stays linked to the match.</h2></div><div className="tool-grid">{[["Coding","Tag rugby events quickly and consistently.","/coding"],["Timeline","Review every coded moment chronologically.","/timeline"],["Suggestions","Compare automated candidates with analyst judgement.","/suggestions"],["Intelligence","Turn coded evidence into a coaching report.","/intelligence"]].map(([title,text,href]) => <Link href={href} key={title} className="tool-card"><span>↗</span><h3>{title}</h3><p>{text}</p></Link>)}</div></div></section>

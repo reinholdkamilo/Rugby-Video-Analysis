@@ -1,17 +1,30 @@
+import logging
+
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
-from sqlalchemy import select
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import (
     AnalysisJob,
+    AutomaticEventSuggestion,
+    Competition,
+    EventClip,
     Match,
+    MatchContext,
+    MultipartUploadSession,
     Organisation,
+    Player,
+    RugbyUnderstandingObservation,
+    Season,
     Team,
+    TimelineEvent,
     VideoAsset,
     VideoProcessingResult,
+    VisionFrameObservation,
 )
+from app.object_storage import abort_multipart_upload, delete_object, is_object_uri
 from app.schemas import (
     AnalysisJobCreate,
     AnalysisJobRead,
@@ -28,6 +41,75 @@ from app.schemas import (
 from app.storage import delete_stored_file, save_video_upload
 
 router = APIRouter(prefix="/api")
+logger = logging.getLogger(__name__)
+
+
+def _delete_media_reference(storage_path: str) -> None:
+    try:
+        if is_object_uri(storage_path):
+            delete_object(storage_path)
+        else:
+            delete_stored_file(storage_path)
+    except Exception as exc:  # pragma: no cover - filesystem/provider dependent
+        logger.warning("Could not delete stored media %s: %s", storage_path, exc)
+
+
+def _delete_match_tree(match: Match, db: Session) -> None:
+    videos = list(db.scalars(select(VideoAsset).where(VideoAsset.match_id == match.id)))
+    video_ids = [video.id for video in videos]
+    event_ids = list(db.scalars(select(TimelineEvent.id).where(TimelineEvent.match_id == match.id)))
+    clip_paths = (
+        list(db.scalars(select(EventClip.file_path).where(EventClip.event_id.in_(event_ids)))) if event_ids else []
+    )
+    processing_results = (
+        list(db.scalars(select(VideoProcessingResult).where(VideoProcessingResult.video_asset_id.in_(video_ids))))
+        if video_ids
+        else []
+    )
+    vision_frame_paths = list(
+        db.scalars(select(VisionFrameObservation.frame_path).where(VisionFrameObservation.match_id == match.id))
+    )
+    understanding_frame_paths = list(
+        db.scalars(
+            select(RugbyUnderstandingObservation.source_frame_path).where(
+                RugbyUnderstandingObservation.match_id == match.id
+            )
+        )
+    )
+    upload_sessions = list(
+        db.scalars(select(MultipartUploadSession).where(MultipartUploadSession.match_id == match.id))
+    )
+
+    for session in upload_sessions:
+        if session.status == "uploading":
+            try:
+                abort_multipart_upload(session.object_key, session.upload_id)
+            except Exception as exc:  # pragma: no cover - provider dependent
+                logger.warning("Could not abort multipart upload %s: %s", session.upload_id, exc)
+
+    for video in videos:
+        _delete_media_reference(video.storage_path)
+    for media_path in [
+        *clip_paths,
+        *[result.thumbnail_path for result in processing_results],
+        *vision_frame_paths,
+        *understanding_frame_paths,
+    ]:
+        _delete_media_reference(media_path)
+
+    if event_ids:
+        db.execute(delete(EventClip).where(EventClip.event_id.in_(event_ids)))
+    db.execute(delete(TimelineEvent).where(TimelineEvent.match_id == match.id))
+    db.execute(delete(MatchContext).where(MatchContext.match_id == match.id))
+    db.execute(delete(AutomaticEventSuggestion).where(AutomaticEventSuggestion.match_id == match.id))
+    db.execute(delete(VisionFrameObservation).where(VisionFrameObservation.match_id == match.id))
+    db.execute(delete(RugbyUnderstandingObservation).where(RugbyUnderstandingObservation.match_id == match.id))
+    db.execute(delete(MultipartUploadSession).where(MultipartUploadSession.match_id == match.id))
+    if video_ids:
+        db.execute(delete(VideoProcessingResult).where(VideoProcessingResult.video_asset_id.in_(video_ids)))
+    db.execute(delete(AnalysisJob).where(AnalysisJob.match_id == match.id))
+    db.execute(delete(VideoAsset).where(VideoAsset.match_id == match.id))
+    db.delete(match)
 
 
 @router.post("/organisations", response_model=OrganisationRead, status_code=status.HTTP_201_CREATED)
@@ -48,6 +130,24 @@ def list_organisations(db: Session = Depends(get_db)) -> list[Organisation]:
     return list(db.scalars(select(Organisation).order_by(Organisation.name)))
 
 
+@router.delete("/organisations/{organisation_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_organisation(organisation_id: int, db: Session = Depends(get_db)) -> None:
+    organisation = db.get(Organisation, organisation_id)
+    if organisation is None:
+        raise HTTPException(status_code=404, detail="Organisation not found.")
+
+    matches = list(db.scalars(select(Match).where(Match.organisation_id == organisation_id)))
+    for match in matches:
+        _delete_match_tree(match, db)
+
+    db.execute(delete(Player).where(Player.organisation_id == organisation_id))
+    db.execute(delete(Competition).where(Competition.organisation_id == organisation_id))
+    db.execute(delete(Season).where(Season.organisation_id == organisation_id))
+    db.execute(delete(Team).where(Team.organisation_id == organisation_id))
+    db.delete(organisation)
+    db.commit()
+
+
 @router.post("/teams", response_model=TeamRead, status_code=status.HTTP_201_CREATED)
 def create_team(payload: TeamCreate, db: Session = Depends(get_db)) -> Team:
     if db.get(Organisation, payload.organisation_id) is None:
@@ -65,6 +165,22 @@ def list_teams(organisation_id: int | None = None, db: Session = Depends(get_db)
     if organisation_id is not None:
         statement = statement.where(Team.organisation_id == organisation_id)
     return list(db.scalars(statement))
+
+
+@router.delete("/teams/{team_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_team(team_id: int, db: Session = Depends(get_db)) -> None:
+    team = db.get(Team, team_id)
+    if team is None:
+        raise HTTPException(status_code=404, detail="Team not found.")
+    match_exists = db.scalar(
+        select(Match.id).where(or_(Match.home_team_id == team_id, Match.away_team_id == team_id)).limit(1)
+    )
+    if match_exists is not None:
+        raise HTTPException(status_code=409, detail="Delete matches using this team before deleting the team.")
+
+    db.execute(update(Player).where(Player.team_id == team_id).values(team_id=None))
+    db.delete(team)
+    db.commit()
 
 
 @router.post("/matches", response_model=MatchRead, status_code=status.HTTP_201_CREATED)
@@ -99,6 +215,15 @@ def get_match(match_id: int, db: Session = Depends(get_db)) -> Match:
     if match is None:
         raise HTTPException(status_code=404, detail="Match not found.")
     return match
+
+
+@router.delete("/matches/{match_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_match(match_id: int, db: Session = Depends(get_db)) -> None:
+    match = db.get(Match, match_id)
+    if match is None:
+        raise HTTPException(status_code=404, detail="Match not found.")
+    _delete_match_tree(match, db)
+    db.commit()
 
 
 @router.post("/matches/{match_id}/videos", response_model=VideoAssetRead, status_code=status.HTTP_201_CREATED)

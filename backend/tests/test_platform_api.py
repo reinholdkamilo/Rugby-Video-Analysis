@@ -101,6 +101,103 @@ def test_large_temporary_upload_session_is_rejected() -> None:
     assert "persistent object storage" in response.json()["detail"]
 
 
+def test_delete_match_before_deleting_teams() -> None:
+    unique = uuid4().hex[:8]
+    with TestClient(app) as client:
+        organisation_id = client.post(
+            "/api/organisations", json={"name": f"Delete Flow {unique}"}
+        ).json()["id"]
+        home_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"Home {unique}"},
+        ).json()["id"]
+        away_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"Away {unique}"},
+        ).json()["id"]
+        match_id = client.post(
+            "/api/matches",
+            json={
+                "organisation_id": organisation_id,
+                "home_team_id": home_id,
+                "away_team_id": away_id,
+                "match_date": "2026-07-12",
+            },
+        ).json()["id"]
+
+        blocked = client.delete(f"/api/teams/{home_id}")
+        assert blocked.status_code == 409
+
+        deleted_match = client.delete(f"/api/matches/{match_id}")
+        assert deleted_match.status_code == 204
+        assert client.get(f"/api/matches/{match_id}").status_code == 404
+
+        deleted_home = client.delete(f"/api/teams/{home_id}")
+        deleted_away = client.delete(f"/api/teams/{away_id}")
+        assert deleted_home.status_code == 204
+        assert deleted_away.status_code == 204
+
+
+def test_delete_organisation_cascades_workspace_and_catalogue() -> None:
+    unique = uuid4().hex[:8]
+    with TestClient(app) as client:
+        organisation_id = client.post(
+            "/api/organisations", json={"name": f"Cascade Delete {unique}"}
+        ).json()["id"]
+        team_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"Team {unique}"},
+        ).json()["id"]
+        season_id = client.post(
+            "/api/catalog/seasons",
+            json={"organisation_id": organisation_id, "name": f"Season {unique}", "is_active": True},
+        ).json()["id"]
+        client.post(
+            "/api/catalog/competitions",
+            json={"organisation_id": organisation_id, "season_id": season_id, "name": f"Cup {unique}"},
+        )
+        client.post(
+            "/api/catalog/players",
+            json={"organisation_id": organisation_id, "team_id": team_id, "first_name": "Delete", "last_name": unique},
+        )
+
+        deleted = client.delete(f"/api/organisations/{organisation_id}")
+        assert deleted.status_code == 204
+        assert client.get(f"/api/catalog/bootstrap?organisation_id={organisation_id}").status_code == 404
+        teams = client.get("/api/teams").json()
+        assert all(team["organisation_id"] != organisation_id for team in teams)
+
+
+def test_delete_catalogue_records() -> None:
+    unique = uuid4().hex[:8]
+    with TestClient(app) as client:
+        organisation_id = client.post(
+            "/api/organisations", json={"name": f"Catalogue Delete {unique}"}
+        ).json()["id"]
+        team_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"Team {unique}"},
+        ).json()["id"]
+        season_id = client.post(
+            "/api/catalog/seasons",
+            json={"organisation_id": organisation_id, "name": f"Season {unique}", "is_active": True},
+        ).json()["id"]
+        competition_id = client.post(
+            "/api/catalog/competitions",
+            json={"organisation_id": organisation_id, "season_id": season_id, "name": f"Cup {unique}"},
+        ).json()["id"]
+        player_id = client.post(
+            "/api/catalog/players",
+            json={"organisation_id": organisation_id, "team_id": team_id, "first_name": "Player", "last_name": unique},
+        ).json()["id"]
+
+        assert client.delete(f"/api/catalog/players/{player_id}").status_code == 204
+        assert client.delete(f"/api/catalog/competitions/{competition_id}").status_code == 204
+        assert client.delete(f"/api/catalog/seasons/{season_id}").status_code == 204
+        catalog = client.get(f"/api/catalog/bootstrap?organisation_id={organisation_id}").json()
+        assert catalog == {"seasons": [], "competitions": [], "players": []}
+
+
 def test_multipart_upload_session_is_reused_and_records_parts(monkeypatch) -> None:
     unique = uuid4().hex[:8]
     upload_ids: list[str] = []

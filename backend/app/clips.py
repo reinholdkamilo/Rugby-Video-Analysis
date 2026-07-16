@@ -6,6 +6,7 @@ from app.object_storage import create_presigned_get_url, is_object_uri, material
 
 CLIP_DIR = Path(os.getenv("CLIP_DIR", "clips"))
 CLIP_SOURCE_CACHE_DIR = Path(os.getenv("OBJECT_CACHE_DIR", "cache/object_storage")) / "clip_sources"
+CLIP_TIMEOUT_SECONDS = int(os.getenv("CLIP_TIMEOUT_SECONDS", "45"))
 
 
 def _clip_source(source_path: str) -> str:
@@ -31,19 +32,18 @@ def generate_event_clip(source_path: str, event_id: int, start_seconds: float, e
         source,
         "-t",
         f"{duration:.3f}",
-        "-c:v",
-        "libx264",
-        "-preset",
-        "veryfast",
-        "-crf",
-        "23",
-        "-c:a",
-        "aac",
+        "-c",
+        "copy",
+        "-avoid_negative_ts",
+        "make_zero",
         "-movflags",
         "+faststart",
         str(output_path),
     ]
-    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, check=False, timeout=CLIP_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("FFmpeg timed out while generating the event clip.") from exc
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or "FFmpeg could not generate the event clip.")
     stored_path = persist_generated_file(

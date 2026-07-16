@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -79,6 +79,17 @@ def list_seasons(organisation_id: int, db: Session = Depends(get_db)) -> list[Se
     )
 
 
+@router.delete("/seasons/{season_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_season(season_id: int, db: Session = Depends(get_db)) -> None:
+    season = db.get(Season, season_id)
+    if season is None:
+        raise HTTPException(status_code=404, detail="Season not found.")
+    db.execute(update(Competition).where(Competition.season_id == season_id).values(season_id=None))
+    db.execute(update(MatchContext).where(MatchContext.season_id == season_id).values(season_id=None))
+    db.delete(season)
+    db.commit()
+
+
 @router.post("/competitions", response_model=CompetitionRead, status_code=status.HTTP_201_CREATED)
 def create_competition(payload: CompetitionCreate, db: Session = Depends(get_db)) -> Competition:
     _organisation_or_404(db, payload.organisation_id)
@@ -103,6 +114,16 @@ def list_competitions(organisation_id: int, db: Session = Depends(get_db)) -> li
             .order_by(Competition.name)
         )
     )
+
+
+@router.delete("/competitions/{competition_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_competition(competition_id: int, db: Session = Depends(get_db)) -> None:
+    competition = db.get(Competition, competition_id)
+    if competition is None:
+        raise HTTPException(status_code=404, detail="Competition not found.")
+    db.execute(update(MatchContext).where(MatchContext.competition_id == competition_id).values(competition_id=None))
+    db.delete(competition)
+    db.commit()
 
 
 @router.post("/players", response_model=PlayerRead, status_code=status.HTTP_201_CREATED)
@@ -133,6 +154,14 @@ def list_players(
     if active_only:
         statement = statement.where(Player.is_active.is_(True))
     return list(db.scalars(statement.order_by(Player.last_name, Player.first_name)))
+
+
+@router.delete("/players/{player_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_player(player_id: int, db: Session = Depends(get_db)) -> None:
+    result = db.execute(delete(Player).where(Player.id == player_id))
+    if result.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Player not found.")
+    db.commit()
 
 
 @router.put("/matches/{match_id}/context", response_model=MatchContextRead)

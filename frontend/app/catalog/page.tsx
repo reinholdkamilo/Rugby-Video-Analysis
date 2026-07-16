@@ -19,6 +19,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const body = (await response.json().catch(() => null)) as { detail?: string } | null;
     throw new Error(body?.detail ?? `Request failed with status ${response.status}`);
   }
+  if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
 }
 
@@ -152,6 +153,16 @@ export default function CatalogPage() {
     });
   }
 
+  async function deleteCatalogRecord(path: string, label: string) {
+    const confirmed = window.confirm(`Delete ${label}?`);
+    if (!confirmed || !selectedOrganisationId) return;
+    await run(async () => {
+      await request<void>(path, { method: "DELETE" });
+      await loadCatalog(selectedOrganisationId);
+      setNotice(`${label} deleted`);
+    });
+  }
+
   const teamName = (teamId: number | null) => selectedTeams.find((team) => team.id === teamId)?.name ?? "Unassigned";
 
   return (
@@ -199,9 +210,9 @@ export default function CatalogPage() {
         </section>
 
         <section className="mt-8 grid gap-6 lg:grid-cols-3">
-          <div className="rounded-xl border border-slate-800 bg-slate-900 p-5"><h2 className="text-lg font-bold">Seasons <span className="text-slate-500">({catalog.seasons.length})</span></h2><div className="mt-4 space-y-2">{catalog.seasons.map((season) => <div key={season.id} className="rounded-lg bg-slate-950 p-3"><p className="font-semibold">{season.name}</p><p className="text-xs text-slate-500">{season.start_date || "No start date"} → {season.end_date || "Open ended"}</p></div>)}</div></div>
-          <div className="rounded-xl border border-slate-800 bg-slate-900 p-5"><h2 className="text-lg font-bold">Competitions <span className="text-slate-500">({catalog.competitions.length})</span></h2><div className="mt-4 space-y-2">{catalog.competitions.map((competition) => <div key={competition.id} className="rounded-lg bg-slate-950 p-3"><p className="font-semibold">{competition.name}</p><p className="text-xs text-slate-500">{competition.level || "Level not set"}</p></div>)}</div></div>
-          <div className="rounded-xl border border-slate-800 bg-slate-900 p-5"><h2 className="text-lg font-bold">Players <span className="text-slate-500">({catalog.players.length})</span></h2><div className="mt-4 max-h-[420px] space-y-2 overflow-y-auto">{catalog.players.map((player) => <div key={player.id} className="rounded-lg bg-slate-950 p-3"><p className="font-semibold">{player.jersey_number ? `${player.jersey_number}. ` : ""}{player.preferred_name || `${player.first_name} ${player.last_name}`}</p><p className="text-xs text-slate-500">{player.position || "Position not set"} · {teamName(player.team_id)}</p></div>)}</div></div>
+          <div className="rounded-xl border border-slate-800 bg-slate-900 p-5"><h2 className="text-lg font-bold">Seasons <span className="text-slate-500">({catalog.seasons.length})</span></h2><div className="mt-4 space-y-2">{catalog.seasons.map((season) => <div key={season.id} className="flex items-center justify-between gap-3 rounded-lg bg-slate-950 p-3"><div><p className="font-semibold">{season.name}</p><p className="text-xs text-slate-500">{season.start_date || "No start date"} → {season.end_date || "Open ended"}</p></div><button type="button" disabled={busy} onClick={() => void deleteCatalogRecord(`/api/catalog/seasons/${season.id}`, season.name)} className="rounded-md border border-red-400/30 px-3 py-1.5 text-xs font-bold text-red-300 hover:bg-red-400/10">Delete</button></div>)}</div></div>
+          <div className="rounded-xl border border-slate-800 bg-slate-900 p-5"><h2 className="text-lg font-bold">Competitions <span className="text-slate-500">({catalog.competitions.length})</span></h2><div className="mt-4 space-y-2">{catalog.competitions.map((competition) => <div key={competition.id} className="flex items-center justify-between gap-3 rounded-lg bg-slate-950 p-3"><div><p className="font-semibold">{competition.name}</p><p className="text-xs text-slate-500">{competition.level || "Level not set"}</p></div><button type="button" disabled={busy} onClick={() => void deleteCatalogRecord(`/api/catalog/competitions/${competition.id}`, competition.name)} className="rounded-md border border-red-400/30 px-3 py-1.5 text-xs font-bold text-red-300 hover:bg-red-400/10">Delete</button></div>)}</div></div>
+          <div className="rounded-xl border border-slate-800 bg-slate-900 p-5"><h2 className="text-lg font-bold">Players <span className="text-slate-500">({catalog.players.length})</span></h2><div className="mt-4 max-h-[420px] space-y-2 overflow-y-auto">{catalog.players.map((player) => <div key={player.id} className="flex items-center justify-between gap-3 rounded-lg bg-slate-950 p-3"><div><p className="font-semibold">{player.jersey_number ? `${player.jersey_number}. ` : ""}{player.preferred_name || `${player.first_name} ${player.last_name}`}</p><p className="text-xs text-slate-500">{player.position || "Position not set"} · {teamName(player.team_id)}</p></div><button type="button" disabled={busy} onClick={() => void deleteCatalogRecord(`/api/catalog/players/${player.id}`, player.preferred_name || `${player.first_name} ${player.last_name}`)} className="rounded-md border border-red-400/30 px-3 py-1.5 text-xs font-bold text-red-300 hover:bg-red-400/10">Delete</button></div>)}</div></div>
         </section>
       </div>
     </main>

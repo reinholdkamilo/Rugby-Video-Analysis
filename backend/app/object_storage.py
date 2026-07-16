@@ -127,6 +127,11 @@ def abort_multipart_upload(key: str, upload_id: str) -> None:
     )
 
 
+def delete_object(uri: str) -> None:
+    bucket, key = parse_object_uri(uri)
+    client().delete_object(Bucket=bucket, Key=key)
+
+
 def materialize(uri_or_path: str, cache_dir: str | Path | None = None) -> Path:
     local = Path(uri_or_path)
     if local.is_file():

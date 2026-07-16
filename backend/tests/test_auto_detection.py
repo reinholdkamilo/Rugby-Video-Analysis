@@ -1,4 +1,5 @@
 from pathlib import Path
+import subprocess
 from types import SimpleNamespace
 
 from app.auto_detection import build_candidates, build_scene_detection_command, detect_scene_changes, parse_scene_times
@@ -57,6 +58,20 @@ def test_detect_scene_changes_allows_remote_source(monkeypatch) -> None:
 
     assert result == [12.5]
     assert calls[0][calls[0].index("-i") + 1].startswith("https://example.test/match.mp4")
+
+
+def test_detect_scene_changes_maps_subprocess_timeout(monkeypatch) -> None:
+    def fake_run(*_args: object, **_kwargs: object) -> SimpleNamespace:
+        raise subprocess.TimeoutExpired(cmd="ffmpeg", timeout=45)
+
+    monkeypatch.setattr("app.auto_detection.subprocess.run", fake_run)
+
+    try:
+        detect_scene_changes("https://example.test/match.mp4")
+    except TimeoutError:
+        pass
+    else:
+        raise AssertionError("Expected TimeoutError")
 
 
 def test_build_candidates_creates_opening_restart_and_review_items() -> None:

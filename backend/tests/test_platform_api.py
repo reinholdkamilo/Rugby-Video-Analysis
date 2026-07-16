@@ -242,6 +242,50 @@ def test_detect_automatic_suggestions_creates_review_items(monkeypatch) -> None:
     assert {item["video_asset_id"] for item in suggestions} == {video["id"]}
 
 
+def test_detection_job_completes_and_creates_suggestions(monkeypatch) -> None:
+    unique = uuid4().hex[:8]
+    monkeypatch.setattr("app.api.suggestions.detect_scene_changes", lambda *_args, **_kwargs: [8.0])
+    monkeypatch.setattr("app.api.suggestions.probe_video", lambda *_args, **_kwargs: SimpleNamespace(duration_seconds=45.0))
+
+    with TestClient(app) as client:
+        organisation_id = client.post(
+            "/api/organisations", json={"name": f"Detection Job {unique}"}
+        ).json()["id"]
+        home_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"Home {unique}"},
+        ).json()["id"]
+        away_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"Away {unique}"},
+        ).json()["id"]
+        match_id = client.post(
+            "/api/matches",
+            json={
+                "organisation_id": organisation_id,
+                "home_team_id": home_id,
+                "away_team_id": away_id,
+                "match_date": "2026-07-12",
+            },
+        ).json()["id"]
+        video = client.post(
+            f"/api/matches/{match_id}/videos",
+            files={"file": ("sample-job.mp4", b"not a real video", "video/mp4")},
+        ).json()
+
+        created = client.post(
+            "/api/automatic-suggestions/detect-jobs",
+            json={"video_asset_id": video["id"], "replace_pending": True, "scene_threshold": 0.3},
+        )
+        assert created.status_code == 202
+        job = client.get(f"/api/analysis-jobs/{created.json()['id']}").json()
+        suggestions = client.get(f"/api/automatic-suggestions?video_asset_id={video['id']}").json()
+
+    assert job["status"] == "completed"
+    assert job["progress_percent"] == 100
+    assert len(suggestions) == 2
+
+
 def test_multipart_upload_session_is_reused_and_records_parts(monkeypatch) -> None:
     unique = uuid4().hex[:8]
     upload_ids: list[str] = []

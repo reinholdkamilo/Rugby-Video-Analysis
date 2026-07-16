@@ -77,13 +77,16 @@ def detect_scene_changes(
         raise FileNotFoundError(f"Video file not found: {video_path}")
 
     command = build_scene_detection_command(source, threshold)
-    completed = subprocess.run(
-        command,
-        capture_output=True,
-        text=True,
-        timeout=timeout_seconds,
-        check=False,
-    )
+    try:
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise TimeoutError from exc
     if completed.returncode != 0:
         message = completed.stderr.strip().splitlines()[-1] if completed.stderr.strip() else "FFmpeg scene detection failed."
         raise RuntimeError(message)

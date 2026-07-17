@@ -36,7 +36,7 @@ type EventSource = "manual" | "auto" | "vision" | "imported";
 type VideoLayoutMode = "standard" | "large" | "theatre";
 type LayoutDensity = "compact" | "comfortable";
 type LayoutColumnCount = 2 | 3 | 4;
-type QuickColumnId = "home_core" | "home_variant" | "away_core" | "away_variant";
+type QuickColumnId = "home" | "away";
 
 type CodingLayout = {
   quickColumns: LayoutColumnCount;
@@ -54,7 +54,7 @@ type ReviewMeta = {
 type ShortcutBinding = {
   id: string;
   label: string;
-  group: "event" | "video";
+  group: "event" | "video" | "zone";
   shortcut: string;
   team?: EventTeam | "selected";
   eventType?: EventType;
@@ -66,6 +66,7 @@ type ShortcutBinding = {
   custom?: boolean;
   variant?: boolean;
   command?: VideoCommand;
+  zoneLength?: string;
 };
 
 const SHORTCUT_STORAGE_KEY = "rugby-video-analysis:coding-shortcuts:v1";
@@ -73,9 +74,9 @@ const REVIEW_STORAGE_KEY = "rugby-video-analysis:coding-review:v1";
 const VIDEO_LAYOUT_STORAGE_KEY = "rugby-video-analysis:coding-video-layout:v1";
 const CODING_LAYOUT_STORAGE_KEY = "rugby-video-analysis:coding-layout:v1";
 
-const DEFAULT_QUICK_COLUMN_ORDER: QuickColumnId[] = ["home_core", "home_variant", "away_core", "away_variant"];
+const DEFAULT_QUICK_COLUMN_ORDER: QuickColumnId[] = ["home", "away"];
 const DEFAULT_CODING_LAYOUT: CodingLayout = {
-  quickColumns: 4,
+  quickColumns: 2,
   mappingColumns: 4,
   density: "comfortable",
   quickColumnOrder: DEFAULT_QUICK_COLUMN_ORDER,
@@ -89,7 +90,7 @@ const EVENT_LIBRARY_CATEGORIES: { value: EventCategory; label: string }[] = [
   { value: "transition", label: "Transition" },
   { value: "kicking", label: "Kicking" },
   { value: "possession", label: "Possession" },
-  { value: "core", label: "Core" },
+  { value: "core", label: "General" },
 ];
 
 const REVIEW_STATUSES: { value: ReviewStatus; label: string }[] = [
@@ -107,6 +108,7 @@ const EVENT_SOURCES: { value: EventSource; label: string }[] = [
 
 const HOME_EVENT_KEYS = ["Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6", "Digit7", "Digit8", "Digit9", "Digit0", "Minus", "Equal", "Backquote"];
 const AWAY_EVENT_KEYS = ["KeyQ", "KeyW", "KeyE", "KeyR", "KeyT", "KeyY", "KeyU", "KeyI", "KeyO", "KeyP", "BracketLeft", "BracketRight", "Backslash"];
+const ZONE_KEYS = ["KeyA", "KeyS", "KeyD", "KeyF", "KeyG", "KeyH", "KeyJ", "KeyK"];
 const BASE_EVENT_SHORTCUTS: Omit<ShortcutBinding, "id" | "shortcut" | "team">[] = [
   { label: "Carry", group: "event", eventType: "carry", duration: 6, category: "attack" },
   { label: "Tackle", group: "event", eventType: "tackle", duration: 5, category: "defence" },
@@ -148,6 +150,14 @@ const DEFAULT_SHORTCUTS: ShortcutBinding[] = [
     { ...binding, id: `tag_home_variant_${binding.eventType}_${index}`, label: `Home ${binding.label}`, shortcut: `Shift+${HOME_EVENT_KEYS[index]}`, team: "home" as const },
     { ...binding, id: `tag_away_variant_${binding.eventType}_${index}`, label: `Away ${binding.label}`, shortcut: `Shift+${AWAY_EVENT_KEYS[index]}`, team: "away" as const },
   ]),
+  { id: "zone_own_22", label: "Own 22m", group: "zone", shortcut: ZONE_KEYS[0], fieldZone: "Own 22m", zoneLength: "Inside defensive 22m" },
+  { id: "zone_own_half", label: "Own half", group: "zone", shortcut: ZONE_KEYS[1], fieldZone: "Own half", zoneLength: "Outside own 22m to halfway" },
+  { id: "zone_outside_50m", label: "Outside 50m", group: "zone", shortcut: ZONE_KEYS[2], fieldZone: "Outside 50m", zoneLength: "Outside 50m/halfway line" },
+  { id: "zone_opposition_half", label: "Opposition half", group: "zone", shortcut: ZONE_KEYS[3], fieldZone: "Opposition half", zoneLength: "Outside opposition 50m/halfway into attacking half" },
+  { id: "zone_opposition_22", label: "Opposition 22m", group: "zone", shortcut: ZONE_KEYS[4], fieldZone: "Opposition 22m", zoneLength: "Inside attacking 22m" },
+  { id: "zone_left_5m", label: "Left 5m channel", group: "zone", shortcut: ZONE_KEYS[5], fieldZone: "Left 5m channel", zoneLength: "Inside 5m from sideline" },
+  { id: "zone_right_5m", label: "Right 5m channel", group: "zone", shortcut: ZONE_KEYS[6], fieldZone: "Right 5m channel", zoneLength: "Inside 5m from sideline" },
+  { id: "zone_15m_channel", label: "15m channel", group: "zone", shortcut: ZONE_KEYS[7], fieldZone: "15m channel", zoneLength: "Inside 15m line from sideline" },
   { id: "video_play_pause", label: "Play / pause", group: "video", shortcut: "Space", command: "play_pause" },
   { id: "video_back_5", label: "Back 5 seconds", group: "video", shortcut: "ArrowLeft", command: "seek_back_5" },
   { id: "video_forward_5", label: "Forward 5 seconds", group: "video", shortcut: "ArrowRight", command: "seek_forward_5" },
@@ -233,10 +243,9 @@ function gridColumnsClass(count: LayoutColumnCount) {
   return "xl:grid-cols-4";
 }
 
-function quickColumnTarget(columnId: QuickColumnId): Pick<ShortcutBinding, "team" | "variant"> {
+function quickColumnTarget(columnId: QuickColumnId): Pick<ShortcutBinding, "team"> {
   return {
-    team: columnId.startsWith("home") ? "home" : "away",
-    variant: columnId.endsWith("variant"),
+    team: columnId === "home" ? "home" : "away",
   };
 }
 
@@ -262,6 +271,16 @@ function displayEventLabel(binding: ShortcutBinding) {
   return binding.label.replace(/^Home\s+/i, "").replace(/^Away\s+/i, "");
 }
 
+function zoneValue(binding?: Pick<ShortcutBinding, "label" | "fieldZone" | "zoneLength"> | null) {
+  if (!binding) return "";
+  const label = binding.fieldZone || binding.label;
+  return binding.zoneLength ? `${label} - ${binding.zoneLength}` : label;
+}
+
+function categoryLabel(category?: EventCategory) {
+  return (category === "core" ? "general" : category ?? "event").replace("_", " ");
+}
+
 function loadShortcutBindings() {
   if (typeof window === "undefined") return DEFAULT_SHORTCUTS;
   const saved = window.localStorage.getItem(SHORTCUT_STORAGE_KEY);
@@ -285,7 +304,7 @@ function loadShortcutBindings() {
       .map((item) => ({
         id: String(item.id),
         label: String(item.label),
-        group: "event" as const,
+        group: item.group === "zone" ? "zone" as const : "event" as const,
         shortcut: String(item.shortcut),
         eventType: "custom" as EventType,
         duration: Number(item.duration || 8),
@@ -294,6 +313,7 @@ function loadShortcutBindings() {
         team: (item.team as ShortcutBinding["team"]) || "selected",
         fieldZone: item.fieldZone ? String(item.fieldZone) : undefined,
         notes: item.notes ? String(item.notes) : undefined,
+        zoneLength: item.zoneLength ? String(item.zoneLength) : undefined,
         custom: true,
       }));
     return [...defaults, ...custom];
@@ -348,6 +368,7 @@ export default function CodingWorkspace() {
   const [timelineCategoryFilter, setTimelineCategoryFilter] = useState<EventCategory | "all">("all");
   const [timelineReviewFilter, setTimelineReviewFilter] = useState<ReviewStatus | "all">("all");
   const [timelineSourceFilter, setTimelineSourceFilter] = useState<EventSource | "all">("all");
+  const [activeZoneId, setActiveZoneId] = useState<string | null>(null);
   const [videoLayout, setVideoLayout] = useState<VideoLayoutMode>("standard");
   const [codingLayout, setCodingLayout] = useState<CodingLayout>(DEFAULT_CODING_LAYOUT);
   const [draggingShortcutId, setDraggingShortcutId] = useState<string | null>(null);
@@ -364,8 +385,8 @@ export default function CodingWorkspace() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    window.localStorage.setItem(SHORTCUT_STORAGE_KEY, JSON.stringify(shortcuts.map(({ id, shortcut, custom, label, duration, category, eventType, outcome, team, fieldZone, notes, variant }) => (
-      { id, shortcut, custom, label, duration, category, eventType, outcome, team, fieldZone, notes, variant }
+    window.localStorage.setItem(SHORTCUT_STORAGE_KEY, JSON.stringify(shortcuts.map(({ id, shortcut, custom, label, group, duration, category, eventType, outcome, team, fieldZone, notes, variant, zoneLength }) => (
+      { id, shortcut, custom, label, group, duration, category, eventType, outcome, team, fieldZone, notes, variant, zoneLength }
     ))));
   }, [shortcuts]);
 
@@ -446,7 +467,9 @@ export default function CodingWorkspace() {
   }, [events]);
 
   const eventShortcuts = useMemo(() => shortcuts.filter((shortcut) => shortcut.group === "event"), [shortcuts]);
+  const zoneShortcuts = useMemo(() => shortcuts.filter((shortcut) => shortcut.group === "zone"), [shortcuts]);
   const videoShortcuts = useMemo(() => shortcuts.filter((shortcut) => shortcut.group === "video"), [shortcuts]);
+  const activeZone = useMemo(() => zoneShortcuts.find((zone) => zone.id === activeZoneId) ?? null, [activeZoneId, zoneShortcuts]);
   const videoShellClass = videoLayout === "theatre"
     ? "mx-auto max-w-[1500px]"
     : videoLayout === "large"
@@ -500,29 +523,17 @@ export default function CodingWorkspace() {
 
   const quickMatrixColumns = useMemo(() => {
     const columns: Record<QuickColumnId, { id: QuickColumnId; title: string; subtitle: string; items: ShortcutBinding[] }> = {
-      home_core: {
-        id: "home_core",
-        title: "Home core",
+      home: {
+        id: "home",
+        title: "Home events",
         subtitle: homeTeam?.name ?? "Home",
-        items: eventShortcuts.filter((shortcut) => shortcut.team === "home" && !shortcut.variant && !shortcut.custom),
+        items: eventShortcuts.filter((shortcut) => shortcut.team === "home" && !shortcut.custom),
       },
-      home_variant: {
-        id: "home_variant",
-        title: "Home variants",
-        subtitle: "Modifier layer",
-        items: eventShortcuts.filter((shortcut) => shortcut.team === "home" && shortcut.variant && !shortcut.custom),
-      },
-      away_core: {
-        id: "away_core",
-        title: "Away core",
+      away: {
+        id: "away",
+        title: "Away events",
         subtitle: awayTeam?.name ?? "Away",
-        items: eventShortcuts.filter((shortcut) => shortcut.team === "away" && !shortcut.variant && !shortcut.custom),
-      },
-      away_variant: {
-        id: "away_variant",
-        title: "Away variants",
-        subtitle: "Modifier layer",
-        items: eventShortcuts.filter((shortcut) => shortcut.team === "away" && shortcut.variant && !shortcut.custom),
+        items: eventShortcuts.filter((shortcut) => shortcut.team === "away" && !shortcut.custom),
       },
     };
     return codingLayout.quickColumnOrder.map((columnId) => columns[columnId]);
@@ -573,18 +584,19 @@ export default function CodingWorkspace() {
         outcome: extras?.outcome || null,
         notes: extras?.notes || null,
         phase_number: extras?.phaseNumber ?? null,
-        field_zone: extras?.fieldZone || null,
+        field_zone: extras?.fieldZone || zoneValue(activeZone) || null,
         clip_requested: false,
       });
       setEvents((current) => [...current, created].sort((a, b) => a.start_seconds - b.start_seconds));
       setSelectedEventId(created.id);
-      setNotice(type === "custom" ? `${extras?.label || extras?.outcome || "Blank event"} saved to the timeline at ${formatTime(start)} for ${team}. Reports update from saved timeline events.` : `${type} saved to the timeline at ${formatTime(start)} for ${team}. Reports update from saved timeline events.`);
+      const zoneText = created.field_zone ? ` in ${created.field_zone}` : "";
+      setNotice(type === "custom" ? `${extras?.label || extras?.outcome || "Blank event"} saved to the timeline at ${formatTime(start)} for ${team}${zoneText}. Reports update from saved timeline events.` : `${type} saved to the timeline at ${formatTime(start)} for ${team}${zoneText}. Reports update from saved timeline events.`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Unable to create event");
     } finally {
       setBusy(false);
     }
-  }, [currentTime, selectedMatchId, selectedTeam, selectedVideoId]);
+  }, [activeZone, currentTime, selectedMatchId, selectedTeam, selectedVideoId]);
 
   const createEventFromBinding = useCallback((binding: ShortcutBinding) => {
     if (!binding.eventType) return;
@@ -643,6 +655,9 @@ export default function CodingWorkspace() {
       event.preventDefault();
       if (binding.group === "event" && binding.eventType) {
         createEventFromBinding(binding);
+      } else if (binding.group === "zone") {
+        setActiveZoneId(binding.id);
+        setNotice(`Active coding zone set to ${zoneValue(binding)}.`);
       } else if (binding.group === "video" && binding.command) {
         runVideoCommand(binding.command);
       }
@@ -680,7 +695,8 @@ export default function CodingWorkspace() {
   function resetShortcuts() {
     setShortcuts(DEFAULT_SHORTCUTS);
     setEditingShortcutId(null);
-    setNotice("Keyboard shortcuts and custom library events reset to defaults.");
+    setActiveZoneId(null);
+    setNotice("Keyboard shortcuts, zone keys and custom library events reset to defaults.");
   }
 
   function updateCodingLayout(updates: Partial<CodingLayout>) {
@@ -718,7 +734,7 @@ export default function CodingWorkspace() {
       return withoutDragged;
     });
     setDraggingShortcutId(null);
-    setNotice("Quick code moved. Layout and team layer saved.");
+    setNotice("Quick code moved. Team column saved.");
   }
 
   function submitLibraryEvent(event: FormEvent<HTMLFormElement>) {
@@ -748,6 +764,30 @@ export default function CodingWorkspace() {
     event.currentTarget.reset();
   }
 
+  function submitZoneShortcut(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const label = String(form.get("label") || "").trim();
+    const fieldZone = String(form.get("field_zone") || label).trim();
+    if (!label || !fieldZone) {
+      setNotice("Name the zone before adding it.");
+      return;
+    }
+    const binding: ShortcutBinding = {
+      id: `custom_zone_${Date.now()}`,
+      label,
+      group: "zone",
+      shortcut: String(form.get("shortcut") || "").trim() || "Unassigned",
+      fieldZone,
+      zoneLength: String(form.get("zone_length") || "").trim() || undefined,
+      notes: String(form.get("notes") || "").trim() || undefined,
+      custom: true,
+    };
+    setShortcuts((current) => [...current, binding]);
+    setNotice(`${label} added to the zone keyboard map.`);
+    event.currentTarget.reset();
+  }
+
   function updateLibraryEvent(bindingId: string, updates: Partial<ShortcutBinding>) {
     setShortcuts((current) => current.map((binding) => (
       binding.id === bindingId
@@ -759,7 +799,8 @@ export default function CodingWorkspace() {
   function deleteLibraryEvent(bindingId: string) {
     const binding = shortcuts.find((item) => item.id === bindingId);
     setShortcuts((current) => current.filter((item) => item.id !== bindingId));
-    setNotice(`${binding?.label ?? "Custom event"} removed from the coding event library.`);
+    if (bindingId === activeZoneId) setActiveZoneId(null);
+    setNotice(`${binding?.label ?? "Custom item"} removed from the keyboard library.`);
   }
 
   function updateReview(eventId: number, updates: Partial<ReviewMeta>) {
@@ -894,7 +935,9 @@ export default function CodingWorkspace() {
 
         <div className="mb-5 grid gap-3 md:grid-cols-[1fr_auto]">
           <div className="rounded-xl border border-slate-800 bg-slate-900 px-4 py-3 text-sm text-slate-300">{notice}</div>
-          <div className="rounded-xl border border-emerald-900 bg-emerald-950/30 px-4 py-3 text-sm font-bold text-emerald-200">Timeline events save immediately</div>
+          <div className="rounded-xl border border-emerald-900 bg-emerald-950/30 px-4 py-3 text-sm font-bold text-emerald-200">
+            {activeZone ? `Active zone: ${zoneValue(activeZone)}` : "Timeline events save immediately"}
+          </div>
         </div>
 
         <section className="space-y-5">
@@ -907,7 +950,7 @@ export default function CodingWorkspace() {
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="font-bold">Workspace layout</h2>
-                <p className="text-xs text-slate-500">Design the coding surface for the way you review rugby: columns, density and drag order are saved in this browser.</p>
+                <p className="text-xs text-slate-500">Design the coding surface for the way you review rugby: home/away columns, zone keys, density and drag order are saved in this browser.</p>
               </div>
               <button type="button" onClick={resetCodingLayout} className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-bold">Reset layout</button>
             </div>
@@ -938,7 +981,7 @@ export default function CodingWorkspace() {
               </div>
               <div className="rounded-lg border border-slate-800 bg-slate-950 p-3">
                 <p className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Drag mode</p>
-                <p className="text-sm text-slate-300">Drag column headers or event buttons to reshape the quick coding matrix.</p>
+                <p className="text-sm text-slate-300">Drag column headers or event buttons to reshape the home and away coding matrix.</p>
               </div>
             </div>
           </section>
@@ -981,7 +1024,7 @@ export default function CodingWorkspace() {
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="font-bold">Quick coding matrix</h2>
-                <p className="text-xs text-slate-500">Home uses number keys. Away uses Q-row keys. Hold Shift, Option, Control or Command before pressing a key to record modifier shortcuts.</p>
+                <p className="text-xs text-slate-500">Home uses number keys. Away uses Q-row keys. Zone keys set the active field zone for the next coded events.</p>
               </div>
               <div className="flex rounded-lg border border-slate-700 p-1 text-sm">
                 {(["home", "away", "neutral"] as EventTeam[]).map((team) => (
@@ -1049,7 +1092,7 @@ export default function CodingWorkspace() {
                         <kbd data-design-id={`coding-quick-${designId(binding.id)}-key`} data-design-label={`${binding.label} key badge`} className={`min-w-14 rounded border px-2 py-1 text-center text-xs font-bold ${shortcutConflict(binding.shortcut) ? "border-rose-400 text-rose-400" : "border-slate-700 text-emerald-400"}`}>{shortcutLabel(binding.shortcut)}</kbd>
                         <span data-design-id={`coding-quick-${designId(binding.id)}-text`} data-design-label={`${binding.label} quick text`}>
                           <span className="block text-sm font-bold">{displayEventLabel(binding)}</span>
-                          <span className="block text-[11px] uppercase tracking-[0.12em] text-slate-500">{(binding.category ?? "core").replace("_", " ")}</span>
+                          <span className="block text-[11px] uppercase tracking-[0.12em] text-slate-500">{binding.fieldZone || categoryLabel(binding.category)}</span>
                         </span>
                       </button>
                     ))}
@@ -1223,6 +1266,51 @@ export default function CodingWorkspace() {
 
             <div
               className="mt-4 rounded-lg border border-slate-800 bg-slate-950 p-3"
+              data-design-id="coding-zone-mapping-block"
+              data-design-label="Zone keyboard mapping block"
+              data-design-priority="35"
+            >
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Zone keys</h3>
+                  <p className="mt-1 text-xs text-slate-500">Press a zone key to set where the next coded events happened. Zone names, keys and length descriptions are editable.</p>
+                </div>
+                <button type="button" onClick={() => setActiveZoneId(null)} className="rounded border border-slate-700 px-3 py-2 text-xs font-bold">Clear active zone</button>
+              </div>
+
+              <form onSubmit={submitZoneShortcut} className="mb-3 grid gap-2 rounded-lg border border-slate-800 bg-slate-900 p-3 md:grid-cols-2 xl:grid-cols-6" data-design-id="coding-zone-add-form" data-design-label="Add zone key form">
+                <input name="label" placeholder="Zone name" className={`${inputClass} xl:col-span-2`} data-design-id="coding-zone-add-label" data-design-label="Add zone name field" />
+                <input name="field_zone" placeholder="Saved zone label" className={inputClass} data-design-id="coding-zone-add-field-zone" data-design-label="Add saved zone field" />
+                <input name="zone_length" placeholder="Zone length e.g. inside 22m" className={inputClass} data-design-id="coding-zone-add-length" data-design-label="Add zone length field" />
+                <input name="shortcut" placeholder="Key code e.g. KeyL" className={inputClass} data-design-id="coding-zone-add-shortcut" data-design-label="Add zone key field" />
+                <button type="submit" className="rounded-lg bg-emerald-400 px-4 py-2 font-bold text-slate-950" data-design-id="coding-zone-add-button" data-design-label="Add zone key button">Add zone</button>
+                <textarea name="notes" placeholder="Zone notes" className={`${inputClass} md:col-span-2 xl:col-span-6`} data-design-id="coding-zone-add-notes" data-design-label="Add zone notes field" />
+              </form>
+
+              <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4" data-design-id="coding-zone-mapping-grid" data-design-label="Zone keyboard grid">
+                {zoneShortcuts.map((binding) => (
+                  <div key={binding.id} className={`rounded-lg border bg-slate-900 p-3 ${activeZoneId === binding.id ? "border-emerald-400" : "border-slate-800"}`} data-design-id={`coding-zone-${designId(binding.id)}-card`} data-design-label={`${binding.label} zone card`}>
+                    <div className="mb-2 flex items-center justify-between gap-2" data-design-id={`coding-zone-${designId(binding.id)}-header`} data-design-label={`${binding.label} zone header`}>
+                      <input value={binding.label} onChange={(event) => updateLibraryEvent(binding.id, { label: event.target.value })} className="min-w-0 flex-1 rounded border border-slate-700 bg-slate-950 px-2 py-1 text-sm font-semibold text-white outline-none focus:border-emerald-400" aria-label={`${binding.label} zone name`} data-design-id={`coding-zone-${designId(binding.id)}-name`} data-design-label={`${binding.label} zone name field`} />
+                      <kbd className={`rounded border px-2 py-1 text-xs font-bold ${shortcutConflict(binding.shortcut) ? "border-rose-400 text-rose-400" : "border-slate-700 text-emerald-400"}`} data-design-id={`coding-zone-${designId(binding.id)}-key`} data-design-label={`${binding.label} zone key badge`}>{editingShortcutId === binding.id ? "Hold + key" : shortcutLabel(binding.shortcut)}</kbd>
+                    </div>
+                    <div className="grid gap-2" data-design-id={`coding-zone-${designId(binding.id)}-fields`} data-design-label={`${binding.label} zone fields`}>
+                      <input value={binding.fieldZone ?? ""} onChange={(event) => updateLibraryEvent(binding.id, { fieldZone: event.target.value })} placeholder="Saved zone label" className={inputClass} aria-label={`${binding.label} saved zone`} data-design-id={`coding-zone-${designId(binding.id)}-field-zone`} data-design-label={`${binding.label} saved zone field`} />
+                      <input value={binding.zoneLength ?? ""} onChange={(event) => updateLibraryEvent(binding.id, { zoneLength: event.target.value })} placeholder="Zone length" className={inputClass} aria-label={`${binding.label} zone length`} data-design-id={`coding-zone-${designId(binding.id)}-length`} data-design-label={`${binding.label} zone length field`} />
+                      <input value={binding.notes ?? ""} onChange={(event) => updateLibraryEvent(binding.id, { notes: event.target.value })} placeholder="Zone notes" className={inputClass} aria-label={`${binding.label} zone notes`} data-design-id={`coding-zone-${designId(binding.id)}-notes`} data-design-label={`${binding.label} zone notes field`} />
+                      <div className="grid grid-cols-2 gap-2">
+                        <button type="button" onClick={() => setActiveZoneId(binding.id)} className="rounded border border-slate-700 px-3 py-2 text-sm font-bold" data-design-id={`coding-zone-${designId(binding.id)}-activate`} data-design-label={`${binding.label} activate zone button`}>Use zone</button>
+                        <button type="button" onClick={() => setEditingShortcutId(binding.id)} className="rounded border border-slate-700 px-3 py-2 text-sm font-bold" data-design-id={`coding-zone-${designId(binding.id)}-change-key`} data-design-label={`${binding.label} change zone key button`}>Change key</button>
+                      </div>
+                      {binding.custom && <button type="button" onClick={() => deleteLibraryEvent(binding.id)} className="rounded border border-rose-900 px-3 py-2 text-sm font-bold text-rose-300" data-design-id={`coding-zone-${designId(binding.id)}-delete`} data-design-label={`${binding.label} delete zone button`}>Delete zone</button>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div
+              className="mt-4 rounded-lg border border-slate-800 bg-slate-950 p-3"
               data-design-id="coding-video-controls-block"
               data-design-label="Video controls block"
               data-design-priority="40"
@@ -1292,7 +1380,7 @@ export default function CodingWorkspace() {
                     </div>
                     <p className="mt-2 truncate text-sm font-bold capitalize">{eventLabel(item)}</p>
                     <div className="mt-2 flex flex-wrap gap-1 text-[11px] font-bold uppercase tracking-[0.12em]">
-                      <span className="rounded bg-slate-900 px-2 py-1 text-slate-400">{eventCategory(item).replace("_", " ")}</span>
+                      <span className="rounded bg-slate-900 px-2 py-1 text-slate-400">{categoryLabel(eventCategory(item))}</span>
                       <span className={`rounded px-2 py-1 ${review.status === "confirmed" ? "bg-emerald-950 text-emerald-300" : review.status === "flagged" ? "bg-amber-950 text-amber-300" : "bg-slate-900 text-slate-400"}`}>{review.status}</span>
                       {item.clip_requested && <span className="rounded bg-sky-950 px-2 py-1 text-sky-300">clip</span>}
                     </div>

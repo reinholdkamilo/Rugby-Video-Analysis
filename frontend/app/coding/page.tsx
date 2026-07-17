@@ -169,6 +169,14 @@ const DEFAULT_SHORTCUTS: ShortcutBinding[] = [
 
 const inputClass = "w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-emerald-400";
 
+function designId(...parts: Array<string | number | undefined | null>) {
+  return parts
+    .filter((part) => part !== undefined && part !== null && String(part).length > 0)
+    .map((part) => String(part).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, ""))
+    .filter(Boolean)
+    .join("-");
+}
+
 function formatTime(seconds: number) {
   const value = Math.max(0, seconds || 0);
   const minutes = Math.floor(value / 60);
@@ -985,10 +993,13 @@ export default function CodingWorkspace() {
             </div>
 
             <div className={`grid gap-3 ${gridColumnsClass(codingLayout.quickColumns)}`}>
-              {quickMatrixColumns.map((column) => (
+              {quickMatrixColumns.map((column, columnIndex) => (
                 <div
                   key={column.id}
                   className={`rounded-lg border bg-slate-950 p-3 ${draggingColumnId === column.id ? "border-emerald-400" : "border-slate-800"}`}
+                  data-design-id={`coding-quick-${designId(column.id)}-column`}
+                  data-design-label={`${column.title} quick column`}
+                  data-design-priority={150 + columnIndex}
                   onDragOver={(event) => event.preventDefault()}
                   onDrop={() => {
                     if (draggingColumnId) moveQuickColumn(column.id);
@@ -1015,6 +1026,8 @@ export default function CodingWorkspace() {
                       <button
                         key={binding.id}
                         type="button"
+                        data-design-id={`coding-quick-${designId(binding.id)}-button`}
+                        data-design-label={`${binding.label} quick button`}
                         draggable
                         aria-disabled={busy || !selectedVideoId || !binding.eventType}
                         onDragStart={() => setDraggingShortcutId(binding.id)}
@@ -1033,8 +1046,8 @@ export default function CodingWorkspace() {
                         }}
                         className={`${quickButtonClass} ${busy || !selectedVideoId || !binding.eventType ? "opacity-50" : ""} ${draggingShortcutId === binding.id ? "border-emerald-400 opacity-70" : ""}`}
                       >
-                        <kbd className={`min-w-14 rounded border px-2 py-1 text-center text-xs font-bold ${shortcutConflict(binding.shortcut) ? "border-rose-400 text-rose-400" : "border-slate-700 text-emerald-400"}`}>{shortcutLabel(binding.shortcut)}</kbd>
-                        <span>
+                        <kbd data-design-id={`coding-quick-${designId(binding.id)}-key`} data-design-label={`${binding.label} key badge`} className={`min-w-14 rounded border px-2 py-1 text-center text-xs font-bold ${shortcutConflict(binding.shortcut) ? "border-rose-400 text-rose-400" : "border-slate-700 text-emerald-400"}`}>{shortcutLabel(binding.shortcut)}</kbd>
+                        <span data-design-id={`coding-quick-${designId(binding.id)}-text`} data-design-label={`${binding.label} quick text`}>
                           <span className="block text-sm font-bold">{displayEventLabel(binding)}</span>
                           <span className="block text-[11px] uppercase tracking-[0.12em] text-slate-500">{(binding.category ?? "core").replace("_", " ")}</span>
                         </span>
@@ -1077,11 +1090,23 @@ export default function CodingWorkspace() {
                 <div className="rounded bg-slate-950 px-3 py-2"><p className="font-bold text-amber-300">Flagged</p><p className="text-white">{reviewCounts.flagged}</p></div>
               </div>
             </div>
-            <div className="grid gap-2 lg:grid-cols-5">
+            <div
+              className="grid gap-2 lg:grid-cols-5"
+              data-design-id="coding-recent-codes-list"
+              data-design-label="Recent codes list"
+              data-design-priority="180"
+            >
               {recentEvents.map((item) => {
                 const review = reviewForEvent(item);
                 return (
-                  <button key={item.id} type="button" onClick={() => { setSelectedEventId(item.id); seekTo(item.start_seconds); }} className={`rounded-lg border bg-slate-950 p-3 text-left hover:border-emerald-400 ${selectedEventId === item.id ? "border-emerald-400" : "border-slate-800"}`}>
+                  <button
+                    key={item.id}
+                    type="button"
+                    data-design-id={`coding-recent-event-${item.id}`}
+                    data-design-label={`${eventLabel(item)} recent code card`}
+                    onClick={() => { setSelectedEventId(item.id); seekTo(item.start_seconds); }}
+                    className={`rounded-lg border bg-slate-950 p-3 text-left hover:border-emerald-400 ${selectedEventId === item.id ? "border-emerald-400" : "border-slate-800"}`}
+                  >
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-mono text-xs text-emerald-400">{formatTime(item.start_seconds)}</span>
                       <span className="rounded bg-slate-800 px-2 py-1 text-[11px] capitalize text-slate-300">{teamLabel(item.team)}</span>
@@ -1094,9 +1119,14 @@ export default function CodingWorkspace() {
               {!recentEvents.length && <div className="rounded-lg border border-dashed border-slate-700 p-6 text-center text-sm text-slate-500 lg:col-span-5">Play the video and use the quick-code matrix to build the timeline.</div>}
             </div>
             {events.length ? (
-              <div className="mt-3 grid gap-2 md:grid-cols-4 xl:grid-cols-8">
+              <div
+                className="mt-3 grid gap-2 md:grid-cols-4 xl:grid-cols-8"
+                data-design-id="coding-recent-counts-grid"
+                data-design-label="Recent code counts grid"
+                data-design-priority="181"
+              >
                 {Object.entries(eventCounts).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([type, count]) => (
-                  <div key={type} className="rounded-lg bg-slate-950 p-3">
+                  <div key={type} className="rounded-lg bg-slate-950 p-3" data-design-id={`coding-recent-count-${designId(type)}`} data-design-label={`${type} count card`}>
                     <p className="truncate text-xs capitalize text-slate-500">{type}</p>
                     <p className="mt-1 text-xl font-bold">{count}</p>
                   </div>
@@ -1116,13 +1146,13 @@ export default function CodingWorkspace() {
               <h2 className="font-bold">Manual event at {formatTime(currentTime)}</h2>
               <p className="mt-1 text-xs text-slate-500">Use this when the rugby action needs a one-off detail that is not mapped yet.</p>
             </div>
-            <select name="event_type" className={inputClass} defaultValue="custom">{EVENT_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}</select>
-            <input name="outcome" placeholder="Outcome" className={inputClass} />
-            <input name="field_zone" placeholder="Field zone" className={inputClass} />
-            <input name="phase_number" type="number" min="1" placeholder="Phase" className={inputClass} />
-            <input name="duration" type="number" min="1" max="300" defaultValue="8" className={inputClass} />
-            <textarea name="notes" placeholder="Analyst notes" className={`${inputClass} md:col-span-2 xl:col-span-1`} />
-            <button type="submit" disabled={busy || !selectedVideoId} className="rounded-lg bg-emerald-400 px-4 py-2 font-bold text-slate-950 disabled:opacity-40">Add event</button>
+            <select name="event_type" className={inputClass} defaultValue="custom" data-design-id="coding-manual-event-type" data-design-label="Manual event type field">{EVENT_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}</select>
+            <input name="outcome" placeholder="Outcome" className={inputClass} data-design-id="coding-manual-outcome" data-design-label="Manual outcome field" />
+            <input name="field_zone" placeholder="Field zone" className={inputClass} data-design-id="coding-manual-zone" data-design-label="Manual field zone field" />
+            <input name="phase_number" type="number" min="1" placeholder="Phase" className={inputClass} data-design-id="coding-manual-phase" data-design-label="Manual phase field" />
+            <input name="duration" type="number" min="1" max="300" defaultValue="8" className={inputClass} data-design-id="coding-manual-duration" data-design-label="Manual duration field" />
+            <textarea name="notes" placeholder="Analyst notes" className={`${inputClass} md:col-span-2 xl:col-span-1`} data-design-id="coding-manual-notes" data-design-label="Manual notes field" />
+            <button type="submit" disabled={busy || !selectedVideoId} className="rounded-lg bg-emerald-400 px-4 py-2 font-bold text-slate-950 disabled:opacity-40" data-design-id="coding-manual-add-button" data-design-label="Manual add event button">Add event</button>
           </form>
 
           <section
@@ -1141,49 +1171,49 @@ export default function CodingWorkspace() {
               </div>
             </div>
 
-            <form onSubmit={submitLibraryEvent} className="mb-4 grid gap-3 rounded-lg border border-slate-800 bg-slate-950 p-3 md:grid-cols-2 xl:grid-cols-7">
-              <input name="label" placeholder="New event name" className={`${inputClass} xl:col-span-2`} />
-              <select name="category" className={inputClass} defaultValue="attack">{EVENT_LIBRARY_CATEGORIES.map((category) => <option key={category.value} value={category.value}>{category.label}</option>)}</select>
-              <select name="team" className={inputClass} defaultValue="selected">
+            <form onSubmit={submitLibraryEvent} className="mb-4 grid gap-3 rounded-lg border border-slate-800 bg-slate-950 p-3 md:grid-cols-2 xl:grid-cols-7" data-design-id="coding-keyboard-add-event-form" data-design-label="Keyboard add event form" data-design-priority="300">
+              <input name="label" placeholder="New event name" className={`${inputClass} xl:col-span-2`} data-design-id="coding-keyboard-add-label" data-design-label="Keyboard add event name field" />
+              <select name="category" className={inputClass} defaultValue="attack" data-design-id="coding-keyboard-add-category" data-design-label="Keyboard add category field">{EVENT_LIBRARY_CATEGORIES.map((category) => <option key={category.value} value={category.value}>{category.label}</option>)}</select>
+              <select name="team" className={inputClass} defaultValue="selected" data-design-id="coding-keyboard-add-team" data-design-label="Keyboard add team field">
                 <option value="selected">Selected team</option>
                 <option value="home">{homeTeam?.name ?? "Home"}</option>
                 <option value="away">{awayTeam?.name ?? "Away"}</option>
                 <option value="neutral">Neutral</option>
               </select>
-              <input name="shortcut" placeholder="Key code e.g. KeyA" className={inputClass} />
-              <input name="duration" type="number" min="1" max="300" defaultValue="8" className={inputClass} />
-              <button type="submit" className="rounded-lg bg-emerald-400 px-4 py-2 font-bold text-slate-950">Add event</button>
-              <input name="field_zone" placeholder="Default zone" className={inputClass} />
-              <textarea name="notes" placeholder="Default note" className={`${inputClass} md:col-span-2 xl:col-span-6`} />
+              <input name="shortcut" placeholder="Key code e.g. KeyA" className={inputClass} data-design-id="coding-keyboard-add-shortcut" data-design-label="Keyboard add shortcut field" />
+              <input name="duration" type="number" min="1" max="300" defaultValue="8" className={inputClass} data-design-id="coding-keyboard-add-duration" data-design-label="Keyboard add duration field" />
+              <button type="submit" className="rounded-lg bg-emerald-400 px-4 py-2 font-bold text-slate-950" data-design-id="coding-keyboard-add-button" data-design-label="Keyboard add event button">Add event</button>
+              <input name="field_zone" placeholder="Default zone" className={inputClass} data-design-id="coding-keyboard-add-zone" data-design-label="Keyboard add zone field" />
+              <textarea name="notes" placeholder="Default note" className={`${inputClass} md:col-span-2 xl:col-span-6`} data-design-id="coding-keyboard-add-notes" data-design-label="Keyboard add notes field" />
             </form>
 
-            <div className={`grid gap-4 ${gridColumnsClass(codingLayout.mappingColumns)}`}>
-              {mappingColumns.map((column) => (
-                <div key={column.id} className="rounded-lg border border-slate-800 bg-slate-950 p-3">
+            <div className={`grid gap-4 ${gridColumnsClass(codingLayout.mappingColumns)}`} data-design-id="coding-keyboard-mapping-grid" data-design-label="Keyboard mapping grid" data-design-priority="310">
+              {mappingColumns.map((column, columnIndex) => (
+                <div key={column.id} className="rounded-lg border border-slate-800 bg-slate-950 p-3" data-design-id={`coding-keyboard-${designId(column.id)}-column`} data-design-label={`${column.title} mapping column`} data-design-priority={320 + columnIndex}>
                   <h3 className="mb-3 text-xs font-bold uppercase tracking-[0.18em] text-slate-500">{column.title}</h3>
                   <div className="grid gap-2">
                     {column.items.map((binding) => (
-                      <div key={binding.id} className={mappingCardClass}>
-                        <div className="mb-2 flex items-center justify-between gap-2">
-                          <input value={binding.label} onChange={(event) => updateLibraryEvent(binding.id, { label: event.target.value, outcome: binding.custom ? event.target.value : binding.outcome })} className="min-w-0 flex-1 rounded border border-slate-700 bg-slate-950 px-2 py-1 text-sm font-semibold text-white outline-none focus:border-emerald-400" aria-label={`${binding.label} name`} />
-                          <kbd className={`rounded border px-2 py-1 text-xs font-bold ${shortcutConflict(binding.shortcut) ? "border-rose-400 text-rose-400" : "border-slate-700 text-emerald-400"}`}>{editingShortcutId === binding.id ? "Hold + key" : shortcutLabel(binding.shortcut)}</kbd>
+                      <div key={binding.id} className={mappingCardClass} data-design-id={`coding-keyboard-${designId(binding.id)}-card`} data-design-label={`${binding.label} mapping card`}>
+                        <div className="mb-2 flex items-center justify-between gap-2" data-design-id={`coding-keyboard-${designId(binding.id)}-header`} data-design-label={`${binding.label} mapping header`}>
+                          <input value={binding.label} onChange={(event) => updateLibraryEvent(binding.id, { label: event.target.value, outcome: binding.custom ? event.target.value : binding.outcome })} className="min-w-0 flex-1 rounded border border-slate-700 bg-slate-950 px-2 py-1 text-sm font-semibold text-white outline-none focus:border-emerald-400" aria-label={`${binding.label} name`} data-design-id={`coding-keyboard-${designId(binding.id)}-name`} data-design-label={`${binding.label} name field`} />
+                          <kbd className={`rounded border px-2 py-1 text-xs font-bold ${shortcutConflict(binding.shortcut) ? "border-rose-400 text-rose-400" : "border-slate-700 text-emerald-400"}`} data-design-id={`coding-keyboard-${designId(binding.id)}-key`} data-design-label={`${binding.label} key badge`}>{editingShortcutId === binding.id ? "Hold + key" : shortcutLabel(binding.shortcut)}</kbd>
                         </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <select value={binding.eventType ?? "custom"} onChange={(event) => updateLibraryEvent(binding.id, { eventType: event.target.value as EventType })} className={inputClass} aria-label={`${binding.label} event type`}>{EVENT_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}</select>
-                          <select value={binding.category ?? "attack"} onChange={(event) => updateLibraryEvent(binding.id, { category: event.target.value as EventCategory })} className={inputClass} aria-label={`${binding.label} category`}>{EVENT_LIBRARY_CATEGORIES.map((category) => <option key={category.value} value={category.value}>{category.label}</option>)}</select>
-                          <select value={binding.team ?? "selected"} onChange={(event) => updateLibraryEvent(binding.id, { team: event.target.value as ShortcutBinding["team"] })} className={inputClass} aria-label={`${binding.label} team target`}>
+                        <div className="grid grid-cols-2 gap-2" data-design-id={`coding-keyboard-${designId(binding.id)}-fields`} data-design-label={`${binding.label} fields grid`}>
+                          <select value={binding.eventType ?? "custom"} onChange={(event) => updateLibraryEvent(binding.id, { eventType: event.target.value as EventType })} className={inputClass} aria-label={`${binding.label} event type`} data-design-id={`coding-keyboard-${designId(binding.id)}-type`} data-design-label={`${binding.label} event type field`}>{EVENT_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}</select>
+                          <select value={binding.category ?? "attack"} onChange={(event) => updateLibraryEvent(binding.id, { category: event.target.value as EventCategory })} className={inputClass} aria-label={`${binding.label} category`} data-design-id={`coding-keyboard-${designId(binding.id)}-category`} data-design-label={`${binding.label} category field`}>{EVENT_LIBRARY_CATEGORIES.map((category) => <option key={category.value} value={category.value}>{category.label}</option>)}</select>
+                          <select value={binding.team ?? "selected"} onChange={(event) => updateLibraryEvent(binding.id, { team: event.target.value as ShortcutBinding["team"] })} className={inputClass} aria-label={`${binding.label} team target`} data-design-id={`coding-keyboard-${designId(binding.id)}-team`} data-design-label={`${binding.label} team field`}>
                             <option value="selected">Selected</option>
                             <option value="home">{homeTeam?.name ?? "Home"}</option>
                             <option value="away">{awayTeam?.name ?? "Away"}</option>
                             <option value="neutral">Neutral</option>
                           </select>
-                          <input type="number" min="1" max="300" value={binding.duration ?? 8} onChange={(event) => updateLibraryEvent(binding.id, { duration: Number(event.target.value || 8) })} className={inputClass} aria-label={`${binding.label} duration`} />
-                          <input value={binding.outcome ?? ""} onChange={(event) => updateLibraryEvent(binding.id, { outcome: event.target.value })} placeholder="Outcome" className={`${inputClass} col-span-2`} aria-label={`${binding.label} outcome`} />
-                          <input value={binding.fieldZone ?? ""} onChange={(event) => updateLibraryEvent(binding.id, { fieldZone: event.target.value })} placeholder="Zone" className={inputClass} aria-label={`${binding.label} field zone`} />
-                          <button type="button" onClick={() => setEditingShortcutId(binding.id)} className="rounded border border-slate-700 px-3 py-2 text-sm font-bold">Change key</button>
+                          <input type="number" min="1" max="300" value={binding.duration ?? 8} onChange={(event) => updateLibraryEvent(binding.id, { duration: Number(event.target.value || 8) })} className={inputClass} aria-label={`${binding.label} duration`} data-design-id={`coding-keyboard-${designId(binding.id)}-duration`} data-design-label={`${binding.label} duration field`} />
+                          <input value={binding.outcome ?? ""} onChange={(event) => updateLibraryEvent(binding.id, { outcome: event.target.value })} placeholder="Outcome" className={`${inputClass} col-span-2`} aria-label={`${binding.label} outcome`} data-design-id={`coding-keyboard-${designId(binding.id)}-outcome`} data-design-label={`${binding.label} outcome field`} />
+                          <input value={binding.fieldZone ?? ""} onChange={(event) => updateLibraryEvent(binding.id, { fieldZone: event.target.value })} placeholder="Zone" className={inputClass} aria-label={`${binding.label} field zone`} data-design-id={`coding-keyboard-${designId(binding.id)}-zone`} data-design-label={`${binding.label} zone field`} />
+                          <button type="button" onClick={() => setEditingShortcutId(binding.id)} className="rounded border border-slate-700 px-3 py-2 text-sm font-bold" data-design-id={`coding-keyboard-${designId(binding.id)}-change-key`} data-design-label={`${binding.label} change key button`}>Change key</button>
                         </div>
-                        <input value={binding.notes ?? ""} onChange={(event) => updateLibraryEvent(binding.id, { notes: event.target.value })} placeholder="Default note" className={`${inputClass} mt-2`} aria-label={`${binding.label} note`} />
-                        {binding.custom && <button type="button" onClick={() => deleteLibraryEvent(binding.id)} className="mt-2 w-full rounded border border-rose-900 px-3 py-2 text-sm font-bold text-rose-300">Delete custom event</button>}
+                        <input value={binding.notes ?? ""} onChange={(event) => updateLibraryEvent(binding.id, { notes: event.target.value })} placeholder="Default note" className={`${inputClass} mt-2`} aria-label={`${binding.label} note`} data-design-id={`coding-keyboard-${designId(binding.id)}-note`} data-design-label={`${binding.label} note field`} />
+                        {binding.custom && <button type="button" onClick={() => deleteLibraryEvent(binding.id)} className="mt-2 w-full rounded border border-rose-900 px-3 py-2 text-sm font-bold text-rose-300" data-design-id={`coding-keyboard-${designId(binding.id)}-delete`} data-design-label={`${binding.label} delete custom button`}>Delete custom event</button>}
                       </div>
                     ))}
                   </div>
@@ -1198,12 +1228,12 @@ export default function CodingWorkspace() {
               data-design-priority="40"
             >
               <h3 className="mb-3 text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Video controls</h3>
-              <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+              <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4" data-design-id="coding-video-controls-grid" data-design-label="Video controls grid" data-design-priority="410">
                 {videoShortcuts.map((binding) => (
-                  <div key={binding.id} className="grid grid-cols-[1fr_auto_auto] items-center gap-2 rounded-lg border border-slate-800 bg-slate-900 p-3">
-                    <span className="text-sm font-semibold">{binding.label}</span>
-                    <kbd className={`rounded border px-2 py-1 text-xs font-bold ${shortcutConflict(binding.shortcut) ? "border-rose-400 text-rose-400" : "border-slate-700 text-emerald-400"}`}>{editingShortcutId === binding.id ? "Hold + key" : shortcutLabel(binding.shortcut)}</kbd>
-                    <button type="button" onClick={() => setEditingShortcutId(binding.id)} className="rounded border border-slate-700 px-2 py-1 text-xs font-bold">Change</button>
+                  <div key={binding.id} className="grid grid-cols-[1fr_auto_auto] items-center gap-2 rounded-lg border border-slate-800 bg-slate-900 p-3" data-design-id={`coding-video-control-${designId(binding.id)}-row`} data-design-label={`${binding.label} video control row`}>
+                    <span className="text-sm font-semibold" data-design-id={`coding-video-control-${designId(binding.id)}-label`} data-design-label={`${binding.label} video control label`}>{binding.label}</span>
+                    <kbd className={`rounded border px-2 py-1 text-xs font-bold ${shortcutConflict(binding.shortcut) ? "border-rose-400 text-rose-400" : "border-slate-700 text-emerald-400"}`} data-design-id={`coding-video-control-${designId(binding.id)}-key`} data-design-label={`${binding.label} video key badge`}>{editingShortcutId === binding.id ? "Hold + key" : shortcutLabel(binding.shortcut)}</kbd>
+                    <button type="button" onClick={() => setEditingShortcutId(binding.id)} className="rounded border border-slate-700 px-2 py-1 text-xs font-bold" data-design-id={`coding-video-control-${designId(binding.id)}-change`} data-design-label={`${binding.label} change button`}>Change</button>
                   </div>
                 ))}
               </div>
@@ -1223,39 +1253,39 @@ export default function CodingWorkspace() {
               </div>
               <span className="rounded bg-slate-950 px-2 py-1 text-xs font-bold text-emerald-400">{filteredEvents.length}/{events.length}</span>
             </div>
-            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-7">
-              <input value={timelineSearch} onChange={(event) => setTimelineSearch(event.target.value)} placeholder="Search event, note, zone or phase" className={`${inputClass} xl:col-span-2`} />
-              <select value={timelineTeamFilter} onChange={(event) => setTimelineTeamFilter(event.target.value as EventTeam | "all")} className={inputClass}>
+            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-7" data-design-id="coding-timeline-filter-grid" data-design-label="Timeline filter grid" data-design-priority="510">
+              <input value={timelineSearch} onChange={(event) => setTimelineSearch(event.target.value)} placeholder="Search event, note, zone or phase" className={`${inputClass} xl:col-span-2`} data-design-id="coding-timeline-search" data-design-label="Timeline search field" />
+              <select value={timelineTeamFilter} onChange={(event) => setTimelineTeamFilter(event.target.value as EventTeam | "all")} className={inputClass} data-design-id="coding-timeline-team-filter" data-design-label="Timeline team filter">
                 <option value="all">All teams</option>
                 <option value="home">{homeTeam?.name ?? "Home"}</option>
                 <option value="away">{awayTeam?.name ?? "Away"}</option>
                 <option value="neutral">Neutral</option>
               </select>
-              <select value={timelineTypeFilter} onChange={(event) => setTimelineTypeFilter(event.target.value as EventType | "all")} className={inputClass}>
+              <select value={timelineTypeFilter} onChange={(event) => setTimelineTypeFilter(event.target.value as EventType | "all")} className={inputClass} data-design-id="coding-timeline-type-filter" data-design-label="Timeline type filter">
                 <option value="all">All event types</option>
                 {EVENT_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
               </select>
-              <select value={timelineReviewFilter} onChange={(event) => setTimelineReviewFilter(event.target.value as ReviewStatus | "all")} className={inputClass}>
+              <select value={timelineReviewFilter} onChange={(event) => setTimelineReviewFilter(event.target.value as ReviewStatus | "all")} className={inputClass} data-design-id="coding-timeline-review-filter" data-design-label="Timeline review filter">
                 <option value="all">All review states</option>
                 {REVIEW_STATUSES.map((status) => <option key={status.value} value={status.value}>{status.label}</option>)}
               </select>
-              <button type="button" onClick={markFilteredReviewed} disabled={!filteredEvents.length} className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-bold disabled:opacity-40">Confirm filtered</button>
-              <button type="button" onClick={() => void deleteTimelineEvents(filteredEvents, `${filteredEvents.length} filtered timeline event${filteredEvents.length === 1 ? "" : "s"}`)} disabled={busy || !filteredEvents.length} className="rounded-lg border border-rose-900 px-3 py-2 text-sm font-bold text-rose-300 disabled:opacity-40">Delete filtered</button>
-              <select value={timelineCategoryFilter} onChange={(event) => setTimelineCategoryFilter(event.target.value as EventCategory | "all")} className={inputClass}>
+              <button type="button" onClick={markFilteredReviewed} disabled={!filteredEvents.length} className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-bold disabled:opacity-40" data-design-id="coding-timeline-confirm-filtered" data-design-label="Timeline confirm filtered button">Confirm filtered</button>
+              <button type="button" onClick={() => void deleteTimelineEvents(filteredEvents, `${filteredEvents.length} filtered timeline event${filteredEvents.length === 1 ? "" : "s"}`)} disabled={busy || !filteredEvents.length} className="rounded-lg border border-rose-900 px-3 py-2 text-sm font-bold text-rose-300 disabled:opacity-40" data-design-id="coding-timeline-delete-filtered" data-design-label="Timeline delete filtered button">Delete filtered</button>
+              <select value={timelineCategoryFilter} onChange={(event) => setTimelineCategoryFilter(event.target.value as EventCategory | "all")} className={inputClass} data-design-id="coding-timeline-category-filter" data-design-label="Timeline category filter">
                 <option value="all">All categories</option>
                 {EVENT_LIBRARY_CATEGORIES.map((category) => <option key={category.value} value={category.value}>{category.label}</option>)}
               </select>
-              <select value={timelineSourceFilter} onChange={(event) => setTimelineSourceFilter(event.target.value as EventSource | "all")} className={inputClass}>
+              <select value={timelineSourceFilter} onChange={(event) => setTimelineSourceFilter(event.target.value as EventSource | "all")} className={inputClass} data-design-id="coding-timeline-source-filter" data-design-label="Timeline source filter">
                 <option value="all">All sources</option>
                 {EVENT_SOURCES.map((source) => <option key={source.value} value={source.value}>{source.label}</option>)}
               </select>
             </div>
 
-            <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-5">
+            <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-5" data-design-id="coding-timeline-event-grid" data-design-label="Timeline event grid" data-design-priority="520">
               {filteredEvents.slice(0, 20).map((item) => {
                 const review = reviewForEvent(item);
                 return (
-                  <button key={item.id} type="button" onClick={() => { setSelectedEventId(item.id); seekTo(item.start_seconds); }} className={`rounded-lg border bg-slate-950 p-3 text-left hover:border-emerald-400 ${selectedEventId === item.id ? "border-emerald-400" : "border-slate-800"}`}>
+                  <button key={item.id} type="button" data-design-id={`coding-timeline-event-${item.id}`} data-design-label={`${eventLabel(item)} timeline card`} onClick={() => { setSelectedEventId(item.id); seekTo(item.start_seconds); }} className={`rounded-lg border bg-slate-950 p-3 text-left hover:border-emerald-400 ${selectedEventId === item.id ? "border-emerald-400" : "border-slate-800"}`}>
                     <div className="flex items-center justify-between gap-3">
                       <span className="font-mono text-xs text-emerald-400">{formatTime(item.start_seconds)}</span>
                       <span className="rounded bg-slate-800 px-2 py-1 text-[11px] capitalize">{item.team}</span>
@@ -1274,7 +1304,7 @@ export default function CodingWorkspace() {
             </div>
 
             {selectedEvent ? (
-              <form onSubmit={submitEventEdit} className="mt-4 grid gap-3 rounded-lg border border-slate-800 bg-slate-950 p-3 md:grid-cols-2 xl:grid-cols-8">
+              <form onSubmit={submitEventEdit} className="mt-4 grid gap-3 rounded-lg border border-slate-800 bg-slate-950 p-3 md:grid-cols-2 xl:grid-cols-8" data-design-id="coding-timeline-selected-editor" data-design-label="Selected timeline event editor" data-design-priority="530">
                 <div className="md:col-span-2 xl:col-span-8 flex flex-wrap items-center justify-between gap-3">
                   <h3 className="font-bold">Edit selected event #{selectedEvent.id}</h3>
                   <div className="flex gap-2">

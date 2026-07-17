@@ -33,6 +33,7 @@ type VideoCommand =
 type EventCategory = "core" | "attack" | "defence" | "set_piece" | "discipline" | "transition" | "kicking" | "possession";
 type ReviewStatus = "unreviewed" | "confirmed" | "flagged";
 type EventSource = "manual" | "auto" | "vision" | "imported";
+type VideoLayoutMode = "standard" | "large" | "theatre";
 
 type ReviewMeta = {
   status: ReviewStatus;
@@ -58,6 +59,7 @@ type ShortcutBinding = {
 
 const SHORTCUT_STORAGE_KEY = "rugby-video-analysis:coding-shortcuts:v1";
 const REVIEW_STORAGE_KEY = "rugby-video-analysis:coding-review:v1";
+const VIDEO_LAYOUT_STORAGE_KEY = "rugby-video-analysis:coding-video-layout:v1";
 
 const EVENT_LIBRARY_CATEGORIES: { value: EventCategory; label: string }[] = [
   { value: "attack", label: "Attack" },
@@ -176,11 +178,18 @@ function loadShortcutBindings() {
   if (!saved) return DEFAULT_SHORTCUTS;
   try {
     const parsed = JSON.parse(saved) as Partial<ShortcutBinding>[];
-    const defaults = DEFAULT_SHORTCUTS.map((binding) => ({
-      ...binding,
-      shortcut: parsed.find((item) => item.id === binding.id)?.shortcut || binding.shortcut,
-      team: (parsed.find((item) => item.id === binding.id)?.team as ShortcutBinding["team"]) || binding.team,
-    }));
+    const defaults = DEFAULT_SHORTCUTS.map((binding) => {
+      const savedBinding = parsed.find((item) => item.id === binding.id);
+      return {
+        ...binding,
+        ...savedBinding,
+        id: binding.id,
+        group: binding.group,
+        custom: binding.custom,
+        shortcut: savedBinding?.shortcut || binding.shortcut,
+        team: (savedBinding?.team as ShortcutBinding["team"]) || binding.team,
+      };
+    });
     const custom = parsed
       .filter((item) => item.custom && item.id && item.label && item.shortcut)
       .map((item) => ({
@@ -201,6 +210,12 @@ function loadShortcutBindings() {
   } catch {
     return DEFAULT_SHORTCUTS;
   }
+}
+
+function loadVideoLayoutMode(): VideoLayoutMode {
+  if (typeof window === "undefined") return "standard";
+  const saved = window.localStorage.getItem(VIDEO_LAYOUT_STORAGE_KEY);
+  return saved === "large" || saved === "theatre" ? saved : "standard";
 }
 
 function loadReviewMeta() {
@@ -243,18 +258,20 @@ export default function CodingWorkspace() {
   const [timelineCategoryFilter, setTimelineCategoryFilter] = useState<EventCategory | "all">("all");
   const [timelineReviewFilter, setTimelineReviewFilter] = useState<ReviewStatus | "all">("all");
   const [timelineSourceFilter, setTimelineSourceFilter] = useState<EventSource | "all">("all");
+  const [videoLayout, setVideoLayout] = useState<VideoLayoutMode>("standard");
   const [notice, setNotice] = useState("Loading coding workspace...");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     setShortcuts(loadShortcutBindings());
     setReviewMeta(loadReviewMeta());
+    setVideoLayout(loadVideoLayoutMode());
   }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    window.localStorage.setItem(SHORTCUT_STORAGE_KEY, JSON.stringify(shortcuts.map(({ id, shortcut, custom, label, duration, category, outcome, team, fieldZone, notes }) => (
-      custom ? { id, shortcut, custom, label, duration, category, outcome, team, fieldZone, notes } : { id, shortcut, team }
+    window.localStorage.setItem(SHORTCUT_STORAGE_KEY, JSON.stringify(shortcuts.map(({ id, shortcut, custom, label, duration, category, eventType, outcome, team, fieldZone, notes }) => (
+      { id, shortcut, custom, label, duration, category, eventType, outcome, team, fieldZone, notes }
     ))));
   }, [shortcuts]);
 
@@ -262,6 +279,11 @@ export default function CodingWorkspace() {
     if (typeof window === "undefined") return;
     window.localStorage.setItem(REVIEW_STORAGE_KEY, JSON.stringify(reviewMeta));
   }, [reviewMeta]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(VIDEO_LAYOUT_STORAGE_KEY, videoLayout);
+  }, [videoLayout]);
 
   const loadWorkspace = useCallback(async () => {
     try {
@@ -326,6 +348,11 @@ export default function CodingWorkspace() {
 
   const eventShortcuts = useMemo(() => shortcuts.filter((shortcut) => shortcut.group === "event"), [shortcuts]);
   const videoShortcuts = useMemo(() => shortcuts.filter((shortcut) => shortcut.group === "video"), [shortcuts]);
+  const videoShellClass = videoLayout === "theatre"
+    ? "mx-auto max-w-[1500px]"
+    : videoLayout === "large"
+      ? "mx-auto max-w-[1180px]"
+      : "mx-auto max-w-[920px]";
 
   const eventLabel = useCallback((event: TimelineEvent) => event.outcome || event.event_type, []);
 
@@ -395,7 +422,7 @@ export default function CodingWorkspace() {
       });
       setEvents((current) => [...current, created].sort((a, b) => a.start_seconds - b.start_seconds));
       setSelectedEventId(created.id);
-      setNotice(type === "custom" ? `${extras?.label || extras?.outcome || "Blank event"} created at ${formatTime(start)} for ${team}. Edit it in the timeline panel.` : `${type} coded at ${formatTime(start)} for ${team}.`);
+      setNotice(type === "custom" ? `${extras?.label || extras?.outcome || "Blank event"} saved to the timeline at ${formatTime(start)} for ${team}. Reports update from saved timeline events.` : `${type} saved to the timeline at ${formatTime(start)} for ${team}. Reports update from saved timeline events.`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Unable to create event");
     } finally {
@@ -625,7 +652,7 @@ export default function CodingWorkspace() {
       });
       setEvents((current) => current.map((item) => item.id === updated.id ? updated : item).sort((a, b) => a.start_seconds - b.start_seconds));
       setSelectedEventId(updated.id);
-      setNotice(`${updated.event_type} updated at ${formatTime(updated.start_seconds)}.`);
+      setNotice(`${updated.event_type} saved at ${formatTime(updated.start_seconds)}. Reports update from saved timeline events.`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Unable to update event");
     } finally {
@@ -667,24 +694,40 @@ export default function CodingWorkspace() {
           <div className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-300">{formatTime(currentTime)} · {events.length} events</div>
         </div>
 
-        <div className="mb-5 rounded-xl border border-slate-800 bg-slate-900 px-4 py-3 text-sm text-slate-300">{notice}</div>
+        <div className="mb-5 grid gap-3 md:grid-cols-[1fr_auto]">
+          <div className="rounded-xl border border-slate-800 bg-slate-900 px-4 py-3 text-sm text-slate-300">{notice}</div>
+          <div className="rounded-xl border border-emerald-900 bg-emerald-950/30 px-4 py-3 text-sm font-bold text-emerald-200">Timeline events save immediately</div>
+        </div>
 
-        <div className="grid gap-5 xl:grid-cols-[minmax(0,1.8fr)_minmax(360px,1fr)]">
+        <div className={videoLayout === "theatre" ? "grid gap-5" : "grid gap-5 xl:grid-cols-[minmax(0,1.8fr)_minmax(360px,1fr)]"}>
           <section className="space-y-5">
-            <div className="overflow-hidden rounded-xl border border-slate-800 bg-black">
-              {selectedVideo ? (
-                <video
-                  key={selectedVideo.id}
-                  ref={videoRef}
-                  src={sourceVideoUrl(selectedVideo.id)}
-                  controls
-                  playsInline
-                  className="aspect-video w-full bg-black"
-                  onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
-                  onRateChange={(event) => setPlaybackRate(event.currentTarget.playbackRate)}
-                  onError={() => setNotice("Source video is unavailable. Free Render storage is temporary and may have been cleared after sleep or redeploy.")}
-                />
-              ) : <div className="flex aspect-video items-center justify-center text-slate-500">Select a match with uploaded footage.</div>}
+            <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="font-bold">Playback</h2>
+                  <p className="text-xs text-slate-500">Centered video workspace for live coding.</p>
+                </div>
+                <div className="flex rounded-lg border border-slate-700 p-1 text-sm">
+                  {(["standard", "large", "theatre"] as VideoLayoutMode[]).map((mode) => (
+                    <button key={mode} type="button" onClick={() => setVideoLayout(mode)} className={`rounded-md px-3 py-1.5 capitalize ${videoLayout === mode ? "bg-emerald-400 font-bold text-slate-950" : "text-slate-300"}`}>{mode}</button>
+                  ))}
+                </div>
+              </div>
+              <div className={`${videoShellClass} overflow-hidden rounded-xl border border-slate-800 bg-black`}>
+                {selectedVideo ? (
+                  <video
+                    key={selectedVideo.id}
+                    ref={videoRef}
+                    src={sourceVideoUrl(selectedVideo.id)}
+                    controls
+                    playsInline
+                    className="aspect-video w-full bg-black"
+                    onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
+                    onRateChange={(event) => setPlaybackRate(event.currentTarget.playbackRate)}
+                    onError={() => setNotice("Source video is unavailable. Free Render storage is temporary and may have been cleared after sleep or redeploy.")}
+                  />
+                ) : <div className="flex aspect-video items-center justify-center text-slate-500">Select a match with uploaded footage.</div>}
+              </div>
             </div>
 
             <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
@@ -701,8 +744,8 @@ export default function CodingWorkspace() {
 
             <section className="rounded-xl border border-slate-800 bg-slate-900 p-4">
               <div className="mb-4">
-                <h2 className="font-bold">Event library</h2>
-                <p className="mt-1 text-xs text-slate-500">Create personalised rugby actions that appear as quick-code buttons and keyboard events.</p>
+                <h2 className="font-bold">Quick code library</h2>
+                <p className="mt-1 text-xs text-slate-500">Edit built-in and custom quick codes. Changes save in this browser and apply to keyboard coding immediately.</p>
               </div>
 
               <form onSubmit={submitLibraryEvent} className="grid gap-3 rounded-lg border border-slate-800 bg-slate-950 p-3 md:grid-cols-2 lg:grid-cols-6">
@@ -729,35 +772,27 @@ export default function CodingWorkspace() {
                       <kbd className={`rounded border px-2 py-1 text-xs font-bold ${shortcutConflict(binding.shortcut) ? "border-rose-400 text-rose-400" : "border-slate-700 text-emerald-400"}`}>{shortcutLabel(binding.shortcut)}</kbd>
                     </div>
                     <p className="mb-3 text-xs font-bold uppercase tracking-[0.14em] text-slate-500">{teamLabel(binding.team)}</p>
-                    {binding.custom ? (
-                      <div className="grid gap-2">
-                        <input value={binding.label} onChange={(event) => updateLibraryEvent(binding.id, { label: event.target.value, outcome: event.target.value })} className={inputClass} aria-label={`${binding.label} name`} />
-                        <div className="grid grid-cols-2 gap-2">
-                          <select value={binding.category ?? "attack"} onChange={(event) => updateLibraryEvent(binding.id, { category: event.target.value as EventCategory })} className={inputClass} aria-label={`${binding.label} category`}>{EVENT_LIBRARY_CATEGORIES.map((category) => <option key={category.value} value={category.value}>{category.label}</option>)}</select>
-                          <select value={binding.team ?? "selected"} onChange={(event) => updateLibraryEvent(binding.id, { team: event.target.value as ShortcutBinding["team"] })} className={inputClass} aria-label={`${binding.label} team target`}>
-                            <option value="selected">Selected team</option>
-                            <option value="home">{homeTeam?.name ?? "Home"}</option>
-                            <option value="away">{awayTeam?.name ?? "Away"}</option>
-                            <option value="neutral">Neutral</option>
-                          </select>
-                          <input type="number" min="1" max="300" value={binding.duration ?? 8} onChange={(event) => updateLibraryEvent(binding.id, { duration: Number(event.target.value || 8) })} className={inputClass} aria-label={`${binding.label} duration`} />
-                          <input value={binding.fieldZone ?? ""} onChange={(event) => updateLibraryEvent(binding.id, { fieldZone: event.target.value })} placeholder="Default zone" className={inputClass} aria-label={`${binding.label} field zone`} />
-                          <input value={binding.notes ?? ""} onChange={(event) => updateLibraryEvent(binding.id, { notes: event.target.value })} placeholder="Default note" className={inputClass} aria-label={`${binding.label} note`} />
-                        </div>
-                        <div className="flex gap-2">
-                          <button type="button" onClick={() => setEditingShortcutId(binding.id)} className="flex-1 rounded border border-slate-700 px-3 py-2 text-sm font-bold">Change key</button>
-                          <button type="button" onClick={() => deleteLibraryEvent(binding.id)} className="rounded border border-rose-900 px-3 py-2 text-sm font-bold text-rose-300">Delete</button>
-                        </div>
+                    <div className="grid gap-2">
+                      <input value={binding.label} onChange={(event) => updateLibraryEvent(binding.id, { label: event.target.value, outcome: binding.custom ? event.target.value : binding.outcome })} className={inputClass} aria-label={`${binding.label} name`} />
+                      <div className="grid grid-cols-2 gap-2">
+                        <select value={binding.eventType ?? "custom"} onChange={(event) => updateLibraryEvent(binding.id, { eventType: event.target.value as EventType })} className={inputClass} aria-label={`${binding.label} event type`}>{EVENT_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}</select>
+                        <select value={binding.category ?? "attack"} onChange={(event) => updateLibraryEvent(binding.id, { category: event.target.value as EventCategory })} className={inputClass} aria-label={`${binding.label} category`}>{EVENT_LIBRARY_CATEGORIES.map((category) => <option key={category.value} value={category.value}>{category.label}</option>)}</select>
+                        <select value={binding.team ?? "selected"} onChange={(event) => updateLibraryEvent(binding.id, { team: event.target.value as ShortcutBinding["team"] })} className={inputClass} aria-label={`${binding.label} team target`}>
+                          <option value="selected">Selected team</option>
+                          <option value="home">{homeTeam?.name ?? "Home"}</option>
+                          <option value="away">{awayTeam?.name ?? "Away"}</option>
+                          <option value="neutral">Neutral</option>
+                        </select>
+                        <input type="number" min="1" max="300" value={binding.duration ?? 8} onChange={(event) => updateLibraryEvent(binding.id, { duration: Number(event.target.value || 8) })} className={inputClass} aria-label={`${binding.label} duration`} />
+                        <input value={binding.outcome ?? ""} onChange={(event) => updateLibraryEvent(binding.id, { outcome: event.target.value })} placeholder="Default outcome" className={inputClass} aria-label={`${binding.label} outcome`} />
+                        <input value={binding.fieldZone ?? ""} onChange={(event) => updateLibraryEvent(binding.id, { fieldZone: event.target.value })} placeholder="Default zone" className={inputClass} aria-label={`${binding.label} field zone`} />
                       </div>
-                    ) : (
-                      <div className="grid grid-cols-[1fr_auto] items-center gap-2">
-                        <div>
-                          <p className="font-semibold">{binding.label}</p>
-                          <p className="mt-1 text-xs text-slate-500">{binding.duration ?? 8} second default window · {teamLabel(binding.team)}</p>
-                        </div>
-                        <button type="button" onClick={() => setEditingShortcutId(binding.id)} className="rounded border border-slate-700 px-3 py-2 text-sm font-bold">Change key</button>
+                      <input value={binding.notes ?? ""} onChange={(event) => updateLibraryEvent(binding.id, { notes: event.target.value })} placeholder="Default note" className={inputClass} aria-label={`${binding.label} note`} />
+                      <div className="flex gap-2">
+                        <button type="button" onClick={() => setEditingShortcutId(binding.id)} className="flex-1 rounded border border-slate-700 px-3 py-2 text-sm font-bold">Change key</button>
+                        {binding.custom && <button type="button" onClick={() => deleteLibraryEvent(binding.id)} className="rounded border border-rose-900 px-3 py-2 text-sm font-bold text-rose-300">Delete</button>}
                       </div>
-                    )}
+                    </div>
                   </div>
                 ))}
               </div>

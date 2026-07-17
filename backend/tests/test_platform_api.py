@@ -196,6 +196,105 @@ def test_delete_timeline_event_removes_it_from_timeline() -> None:
         assert all(item["id"] != event_id for item in timeline)
 
 
+def test_evidence_items_create_update_delete_and_validate_match_links() -> None:
+    unique = uuid4().hex[:8]
+    with TestClient(app) as client:
+        organisation_id = client.post(
+            "/api/organisations", json={"name": f"Evidence Library {unique}"}
+        ).json()["id"]
+        home_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"Home {unique}"},
+        ).json()["id"]
+        away_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"Away {unique}"},
+        ).json()["id"]
+        match_id = client.post(
+            "/api/matches",
+            json={
+                "organisation_id": organisation_id,
+                "home_team_id": home_id,
+                "away_team_id": away_id,
+                "match_date": "2026-07-12",
+            },
+        ).json()["id"]
+        second_match_id = client.post(
+            "/api/matches",
+            json={
+                "organisation_id": organisation_id,
+                "home_team_id": away_id,
+                "away_team_id": home_id,
+                "match_date": "2026-07-13",
+            },
+        ).json()["id"]
+        video = client.post(
+            f"/api/matches/{match_id}/videos",
+            files={"file": ("evidence-source.mp4", b"not a real video", "video/mp4")},
+        ).json()
+        event = client.post(
+            "/api/timeline-events",
+            json={
+                "match_id": match_id,
+                "video_asset_id": video["id"],
+                "event_type": "ruck",
+                "team": "home",
+                "start_seconds": 32,
+                "end_seconds": 38,
+                "player_name": None,
+                "outcome": "Quick ruck",
+                "notes": None,
+                "phase_number": None,
+                "field_zone": "middle third",
+                "clip_requested": False,
+            },
+        ).json()
+
+        created = client.post(
+            "/api/evidence-items",
+            json={
+                "match_id": match_id,
+                "video_asset_id": video["id"],
+                "timeline_event_id": event["id"],
+                "evidence_type": "clip",
+                "label": "Fast clean ruck",
+                "rugby_element": "ruck",
+                "source_uri": "r2://training/rucks/fast-clean-ruck.mp4",
+                "timestamp_seconds": 32,
+                "confidence_label": "positive",
+                "notes": "Good example for future ruck recognition.",
+                "approved_for_training": False,
+            },
+        )
+        assert created.status_code == 201
+        item_id = created.json()["id"]
+
+        listed = client.get(f"/api/evidence-items?match_id={match_id}").json()
+        assert [item["id"] for item in listed] == [item_id]
+
+        updated = client.patch(
+            f"/api/evidence-items/{item_id}",
+            json={"approved_for_training": True, "confidence_label": "verified"},
+        )
+        assert updated.status_code == 200
+        assert updated.json()["approved_for_training"] is True
+        assert updated.json()["confidence_label"] == "verified"
+
+        invalid = client.post(
+            "/api/evidence-items",
+            json={
+                "match_id": second_match_id,
+                "video_asset_id": video["id"],
+                "evidence_type": "clip",
+                "label": "Wrong match link",
+            },
+        )
+        assert invalid.status_code == 422
+
+        assert client.delete(f"/api/evidence-items/{item_id}").status_code == 204
+        assert client.get(f"/api/evidence-items?match_id={match_id}").json() == []
+
+
 def test_delete_organisation_cascades_workspace_and_catalogue() -> None:
     unique = uuid4().hex[:8]
     with TestClient(app) as client:

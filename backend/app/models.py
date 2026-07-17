@@ -50,6 +50,18 @@ class SuggestionStatus(str, enum.Enum):
     rejected = "rejected"
 
 
+class EvidenceType(str, enum.Enum):
+    video = "video"
+    clip = "clip"
+    frame = "frame"
+    audio = "audio"
+    referee_audio = "referee_audio"
+    scoreboard = "scoreboard"
+    commentary = "commentary"
+    note = "note"
+    other = "other"
+
+
 class Organisation(Base):
     __tablename__ = "organisations"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -213,6 +225,24 @@ class AutomaticEventSuggestion(Base):
     reason: Mapped[str] = mapped_column(Text)
     status: Mapped[SuggestionStatus] = mapped_column(Enum(SuggestionStatus), default=SuggestionStatus.pending, index=True)
     timeline_event_id: Mapped[int | None] = mapped_column(ForeignKey("timeline_events.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+
+class EvidenceItem(Base):
+    __tablename__ = "evidence_items"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    match_id: Mapped[int] = mapped_column(ForeignKey("matches.id", ondelete="CASCADE"), index=True)
+    video_asset_id: Mapped[int | None] = mapped_column(ForeignKey("video_assets.id", ondelete="SET NULL"), nullable=True, index=True)
+    timeline_event_id: Mapped[int | None] = mapped_column(ForeignKey("timeline_events.id", ondelete="SET NULL"), nullable=True, index=True)
+    evidence_type: Mapped[EvidenceType] = mapped_column(Enum(EvidenceType), default=EvidenceType.note, index=True)
+    label: Mapped[str] = mapped_column(String(200), index=True)
+    rugby_element: Mapped[str | None] = mapped_column(String(150), nullable=True, index=True)
+    source_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
+    timestamp_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    confidence_label: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    approved_for_training: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 

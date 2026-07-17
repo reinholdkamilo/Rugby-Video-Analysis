@@ -2,7 +2,7 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.models import AnalysisStatus
+from app.models import AnalysisStatus, EvidenceType
 
 
 class ORMModel(BaseModel):
@@ -94,6 +94,50 @@ class AnalysisJobRead(ORMModel):
     status: AnalysisStatus
     progress_percent: int
     message: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class EvidenceItemCreate(BaseModel):
+    match_id: int
+    video_asset_id: int | None = None
+    timeline_event_id: int | None = None
+    evidence_type: EvidenceType = EvidenceType.note
+    label: str = Field(min_length=2, max_length=200)
+    rugby_element: str | None = Field(default=None, max_length=150)
+    source_uri: str | None = Field(default=None, max_length=2000)
+    timestamp_seconds: float | None = Field(default=None, ge=0)
+    confidence_label: str | None = Field(default=None, max_length=40)
+    notes: str | None = Field(default=None, max_length=4000)
+    approved_for_training: bool = False
+
+
+class EvidenceItemUpdate(BaseModel):
+    video_asset_id: int | None = None
+    timeline_event_id: int | None = None
+    evidence_type: EvidenceType | None = None
+    label: str | None = Field(default=None, min_length=2, max_length=200)
+    rugby_element: str | None = Field(default=None, max_length=150)
+    source_uri: str | None = Field(default=None, max_length=2000)
+    timestamp_seconds: float | None = Field(default=None, ge=0)
+    confidence_label: str | None = Field(default=None, max_length=40)
+    notes: str | None = Field(default=None, max_length=4000)
+    approved_for_training: bool | None = None
+
+
+class EvidenceItemRead(ORMModel):
+    id: int
+    match_id: int
+    video_asset_id: int | None
+    timeline_event_id: int | None
+    evidence_type: EvidenceType
+    label: str
+    rugby_element: str | None
+    source_uri: str | None
+    timestamp_seconds: float | None
+    confidence_label: str | None
+    notes: str | None
+    approved_for_training: bool
     created_at: datetime
     updated_at: datetime
 

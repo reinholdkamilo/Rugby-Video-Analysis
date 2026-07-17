@@ -1,7 +1,22 @@
 import type { NextConfig } from "next";
 
+const PUBLIC_BACKEND_URL = "https://rugby-video-analysis-api-free.onrender.com";
+
+function isPrivateBackendTarget(url: string) {
+  return (
+    url.includes("localhost") ||
+    url.includes("127.0.0.1") ||
+    url.includes("0.0.0.0") ||
+    url.includes(".internal") ||
+    url.includes(".local")
+  );
+}
+
+const configuredBackendUrl = process.env.BACKEND_INTERNAL_URL?.replace(/\/$/, "");
 const backendInternalUrl = (
-  process.env.BACKEND_INTERNAL_URL ?? "http://127.0.0.1:8000"
+  process.env.VERCEL && (!configuredBackendUrl || isPrivateBackendTarget(configuredBackendUrl))
+    ? PUBLIC_BACKEND_URL
+    : configuredBackendUrl ?? "http://127.0.0.1:8000"
 ).replace(/\/$/, "");
 
 const nextConfig: NextConfig = {

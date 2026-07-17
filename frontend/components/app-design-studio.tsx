@@ -21,6 +21,7 @@ type ThemeSettings = {
 type ElementDesign = {
   id: string;
   label: string;
+  groupId?: string;
   custom?: boolean;
   kind?: "block" | "button" | "text" | "row" | "column";
   hidden?: boolean;
@@ -57,8 +58,8 @@ type DesignSettings = {
 };
 
 type DragState =
-  | { mode: "move"; id: string; startX: number; startY: number; baseX: number; baseY: number }
-  | { mode: "resize"; id: string; startX: number; startY: number; baseWidth: number; baseHeight: number };
+  | { mode: "move"; ids: string[]; startX: number; startY: number; bases: Record<string, { x: number; y: number }> }
+  | { mode: "resize"; ids: string[]; startX: number; startY: number; bases: Record<string, { width: number; height: number }> };
 
 const DESIGN_STORAGE_KEY = "rugby-video-analysis:app-design-studio:v2";
 const LEGACY_DESIGN_STORAGE_KEY = "rugby-video-analysis:app-design-studio:v1";
@@ -134,6 +135,15 @@ function elementSelector(id: string) {
   return `[data-design-id="${CSS.escape(id)}"]`;
 }
 
+function unionRect(rects: DOMRect[]) {
+  if (!rects.length) return null;
+  const left = Math.min(...rects.map((rect) => rect.left));
+  const top = Math.min(...rects.map((rect) => rect.top));
+  const right = Math.max(...rects.map((rect) => rect.right));
+  const bottom = Math.max(...rects.map((rect) => rect.bottom));
+  return { left, top, width: right - left, height: bottom - top };
+}
+
 function loadSettings(): DesignSettings {
   if (typeof window === "undefined") return DEFAULT_SETTINGS;
   const saved = window.localStorage.getItem(DESIGN_STORAGE_KEY) || window.localStorage.getItem(LEGACY_DESIGN_STORAGE_KEY);
@@ -189,12 +199,15 @@ export function AppDesignStudio() {
   const [open, setOpen] = useState(false);
   const [elements, setElements] = useState<ElementDesign[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [panelTab, setPanelTab] = useState<"element" | "layout" | "blocks" | "text" | "style" | "page">("element");
 
   const currentPage = useMemo(() => pageSettings(settings, key), [key, settings]);
   const currentElements = elements.length ? elements : currentPage.elements;
   const priorityElements = currentElements.filter((item) => (item.order ?? 1000) < 1000);
   const selected = currentElements.find((item) => item.id === selectedId) ?? null;
+  const activeSelectionIds = useMemo(() => selectedIds.length ? selectedIds : selectedId ? [selectedId] : [], [selectedId, selectedIds]);
+  const selectedGroupId = selected?.groupId;
 
   const updateElement = useCallback((id: string, updates: Partial<ElementDesign>) => {
     setSettings((current) => {
@@ -209,6 +222,24 @@ export function AppDesignStudio() {
     setElements((current) => current.map((item) => item.id === id ? { ...item, ...updates } : item));
   }, [elements, key]);
 
+  const updateElements = useCallback((updates: Record<string, Partial<ElementDesign>>) => {
+    const ids = Object.keys(updates);
+    if (!ids.length) return;
+    setSettings((current) => {
+      const page = pageSettings(current, key);
+      const nextElements = [...page.elements];
+      for (const id of ids) {
+        const existingIndex = nextElements.findIndex((item) => item.id === id);
+        const existing = existingIndex >= 0 ? nextElements[existingIndex] : elements.find((item) => item.id === id) ?? { id, label: readableLabel(id) };
+        const nextElement = { ...existing, ...updates[id] };
+        if (existingIndex >= 0) nextElements[existingIndex] = nextElement;
+        else nextElements.push(nextElement);
+      }
+      return { ...current, pages: { ...current.pages, [key]: { elements: nextElements } } };
+    });
+    setElements((current) => current.map((item) => updates[item.id] ? { ...item, ...updates[item.id] } : item));
+  }, [elements, key]);
+
   const applyElementDesigns = useCallback(() => {
     const saved = pageSettings(settings, key).elements;
     const active = open || saved.length > 0;
@@ -216,7 +247,8 @@ export function AppDesignStudio() {
     document.querySelectorAll<HTMLElement>("[data-design-id]").forEach((element) => {
       const design = saved.find((item) => item.id === element.dataset.designId);
       element.classList.toggle("design-editable", open);
-      element.classList.toggle("design-selected", open && element.dataset.designId === selectedId);
+      element.classList.toggle("design-selected", open && activeSelectionIds.includes(element.dataset.designId ?? ""));
+      element.classList.toggle("design-grouped", open && Boolean(design?.groupId));
       element.hidden = Boolean(design?.hidden);
       element.classList.toggle("design-hidden-section", Boolean(design?.hidden));
       element.style.order = design?.order !== undefined ? String(design.order) : "";
@@ -264,7 +296,7 @@ export function AppDesignStudio() {
       }
       element.contentEditable = open && (isTextEditableElement(element) || Boolean(design?.custom)) ? "true" : "false";
     });
-  }, [key, open, selectedId, settings]);
+  }, [activeSelectionIds, key, open, settings]);
 
   const detectElements = useCallback((): ElementDesign[] => {
     const main = document.querySelector("main");
@@ -346,7 +378,23 @@ export function AppDesignStudio() {
       if (!element) return;
       event.preventDefault();
       event.stopPropagation();
-      setSelectedId(element.dataset.designId ?? null);
+      const id = element.dataset.designId ?? null;
+      if (!id) return;
+      const clicked = currentElements.find((item) => item.id === id);
+      const groupIds = clicked?.groupId ? currentElements.filter((item) => item.groupId === clicked.groupId).map((item) => item.id) : [id];
+      if (event.shiftKey || event.metaKey || event.ctrlKey) {
+        setSelectedIds((current) => {
+          const next = new Set(current.length ? current : selectedId ? [selectedId] : []);
+          if (next.has(id)) next.delete(id);
+          else next.add(id);
+          const values = Array.from(next);
+          setSelectedId(values[values.length - 1] ?? null);
+          return values;
+        });
+      } else {
+        setSelectedIds(groupIds);
+        setSelectedId(id);
+      }
     };
     const onBlur = (event: FocusEvent) => {
       const element = closestDesignElement(event.target);
@@ -360,7 +408,7 @@ export function AppDesignStudio() {
       document.removeEventListener("click", onClick, true);
       document.removeEventListener("blur", onBlur, true);
     };
-  }, [currentElements, open, updateElement]);
+  }, [currentElements, open, selectedId, updateElement]);
 
   useEffect(() => {
     const onMove = (event: MouseEvent) => {
@@ -368,15 +416,23 @@ export function AppDesignStudio() {
       if (!state) return;
       event.preventDefault();
       if (state.mode === "move") {
-        updateElement(state.id, {
-          x: snap(state.baseX + event.clientX - state.startX, settings.theme.snapGrid),
-          y: snap(state.baseY + event.clientY - state.startY, settings.theme.snapGrid),
-        });
+        const updates = Object.fromEntries(state.ids.map((id) => [
+          id,
+          {
+            x: snap(state.bases[id].x + event.clientX - state.startX, settings.theme.snapGrid),
+            y: snap(state.bases[id].y + event.clientY - state.startY, settings.theme.snapGrid),
+          },
+        ]));
+        updateElements(updates);
       } else {
-        updateElement(state.id, {
-          width: Math.max(80, snap(state.baseWidth + event.clientX - state.startX, settings.theme.snapGrid)),
-          height: Math.max(36, snap(state.baseHeight + event.clientY - state.startY, settings.theme.snapGrid)),
-        });
+        const updates = Object.fromEntries(state.ids.map((id) => [
+          id,
+          {
+            width: Math.max(80, snap(state.bases[id].width + event.clientX - state.startX, settings.theme.snapGrid)),
+            height: Math.max(36, snap(state.bases[id].height + event.clientY - state.startY, settings.theme.snapGrid)),
+          },
+        ]));
+        updateElements(updates);
       }
     };
     const onUp = () => {
@@ -388,29 +444,36 @@ export function AppDesignStudio() {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
-  }, [settings.theme.snapGrid, updateElement]);
+  }, [settings.theme.snapGrid, updateElements]);
 
   function updateTheme(updates: Partial<ThemeSettings>) {
     setSettings((current) => ({ ...current, theme: { ...current.theme, ...updates } }));
   }
 
   function updateCurrent(updates: Partial<ElementDesign>) {
-    if (!selectedId) return;
-    updateElement(selectedId, updates);
+    if (!activeSelectionIds.length) return;
+    updateElements(Object.fromEntries(activeSelectionIds.map((id) => [id, updates])));
   }
 
   const nudgeSelected = useCallback((direction: "up" | "down" | "left" | "right", event: KeyboardEvent) => {
-    if (!selectedId) return;
+    if (!activeSelectionIds.length) return;
     const baseStep = event.altKey ? 1 : settings.theme.snapGrid;
     const step = event.shiftKey ? baseStep * 4 : baseStep;
-    updateElement(selectedId, {
-      x: (selected?.x ?? 0) + (direction === "left" ? -step : direction === "right" ? step : 0),
-      y: (selected?.y ?? 0) + (direction === "up" ? -step : direction === "down" ? step : 0),
-    });
-  }, [selected?.x, selected?.y, selectedId, settings.theme.snapGrid, updateElement]);
+    const updates = Object.fromEntries(activeSelectionIds.map((id) => {
+      const item = currentElements.find((element) => element.id === id);
+      return [
+        id,
+        {
+          x: (item?.x ?? 0) + (direction === "left" ? -step : direction === "right" ? step : 0),
+          y: (item?.y ?? 0) + (direction === "up" ? -step : direction === "down" ? step : 0),
+        },
+      ];
+    }));
+    updateElements(updates);
+  }, [activeSelectionIds, currentElements, settings.theme.snapGrid, updateElements]);
 
   useEffect(() => {
-    if (!open || !selectedId) return;
+    if (!open || !activeSelectionIds.length) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (isDesignPanelInput(event.target)) return;
       const directions: Record<string, "up" | "down" | "left" | "right"> = {
@@ -427,7 +490,7 @@ export function AppDesignStudio() {
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [nudgeSelected, open, selectedId]);
+  }, [activeSelectionIds.length, nudgeSelected, open]);
 
   function moveElement(direction: -1 | 1) {
     if (!selectedId) return;
@@ -468,38 +531,44 @@ export function AppDesignStudio() {
     });
     setElements((current) => [...current, next]);
     setSelectedId(next.id);
+    setSelectedIds([next.id]);
     setPanelTab("element");
   }
 
   function deleteSelected() {
-    if (!selectedId) return;
-    const selectedElement = currentElements.find((item) => item.id === selectedId);
+    if (!activeSelectionIds.length) return;
     setSettings((current) => {
       const page = pageSettings(current, key);
-      const existing = page.elements.find((item) => item.id === selectedId) ?? selectedElement;
-      const nextElements = selectedElement?.custom
-        ? page.elements.filter((item) => item.id !== selectedId)
-        : page.elements.some((item) => item.id === selectedId)
-          ? page.elements.map((item) => item.id === selectedId ? { ...item, hidden: true, deleted: true } : item)
-          : existing
-            ? [...page.elements, { ...existing, hidden: true, deleted: true }]
-            : page.elements;
+      let nextElements = [...page.elements];
+      for (const id of activeSelectionIds) {
+        const selectedElement = currentElements.find((item) => item.id === id);
+        const existing = page.elements.find((item) => item.id === id) ?? selectedElement;
+        nextElements = selectedElement?.custom
+          ? nextElements.filter((item) => item.id !== id)
+          : nextElements.some((item) => item.id === id)
+            ? nextElements.map((item) => item.id === id ? { ...item, hidden: true, deleted: true } : item)
+            : existing
+              ? [...nextElements, { ...existing, hidden: true, deleted: true }]
+              : nextElements;
+      }
       return { ...current, pages: { ...current.pages, [key]: { elements: nextElements } } };
     });
-    setElements((current) => current.filter((item) => item.id !== selectedId));
+    setElements((current) => current.filter((item) => !activeSelectionIds.includes(item.id)));
     setSelectedId(null);
+    setSelectedIds([]);
   }
 
   function resetSelected() {
-    if (!selectedId) return;
+    if (!activeSelectionIds.length) return;
     setSettings((current) => {
       const page = pageSettings(current, key);
-      return { ...current, pages: { ...current.pages, [key]: { elements: page.elements.filter((item) => item.id !== selectedId) } } };
+      return { ...current, pages: { ...current.pages, [key]: { elements: page.elements.filter((item) => !activeSelectionIds.includes(item.id)) } } };
     });
   }
 
   function resetCurrentPage() {
     setSelectedId(null);
+    setSelectedIds([]);
     setElements(detectElements());
     setSettings((current) => {
       const pages = { ...current.pages };
@@ -510,25 +579,64 @@ export function AppDesignStudio() {
 
   function resetAllDesign() {
     setSelectedId(null);
+    setSelectedIds([]);
     setSettings(DEFAULT_SETTINGS);
     setElements(detectElements());
   }
 
+  function groupSelected() {
+    if (activeSelectionIds.length < 2) return;
+    const groupId = `group-${Date.now()}`;
+    updateElements(Object.fromEntries(activeSelectionIds.map((id) => [id, { groupId }])));
+  }
+
+  function ungroupSelected() {
+    const groupIds = new Set(currentElements.filter((item) => activeSelectionIds.includes(item.id) && item.groupId).map((item) => item.groupId));
+    const ids = currentElements.filter((item) => activeSelectionIds.includes(item.id) || (item.groupId && groupIds.has(item.groupId))).map((item) => item.id);
+    updateElements(Object.fromEntries(ids.map((id) => [id, { groupId: undefined }])));
+    setSelectedIds(ids);
+  }
+
+  function selectCurrentGroup() {
+    if (!selectedGroupId) return;
+    setSelectedIds(currentElements.filter((item) => item.groupId === selectedGroupId).map((item) => item.id));
+  }
+
   function startHandleDrag(mode: DragState["mode"], event: ReactMouseEvent<HTMLButtonElement>) {
-    if (!selectedId) return;
-    const element = document.querySelector<HTMLElement>(elementSelector(selectedId));
-    if (!element) return;
+    const ids = activeSelectionIds.length ? activeSelectionIds : selectedId ? [selectedId] : [];
+    if (!ids.length) return;
     event.preventDefault();
     event.stopPropagation();
-    const rect = element.getBoundingClientRect();
     if (mode === "move") {
-      dragRef.current = { mode, id: selectedId, startX: event.clientX, startY: event.clientY, baseX: selected?.x ?? 0, baseY: selected?.y ?? 0 };
+      dragRef.current = {
+        mode,
+        ids,
+        startX: event.clientX,
+        startY: event.clientY,
+        bases: Object.fromEntries(ids.map((id) => {
+          const item = currentElements.find((element) => element.id === id);
+          return [id, { x: item?.x ?? 0, y: item?.y ?? 0 }];
+        })),
+      };
     } else {
-      dragRef.current = { mode, id: selectedId, startX: event.clientX, startY: event.clientY, baseWidth: selected?.width ?? Math.round(rect.width), baseHeight: selected?.height ?? Math.round(rect.height) };
+      dragRef.current = {
+        mode,
+        ids,
+        startX: event.clientX,
+        startY: event.clientY,
+        bases: Object.fromEntries(ids.map((id) => {
+          const element = document.querySelector<HTMLElement>(elementSelector(id));
+          const rect = element?.getBoundingClientRect();
+          const item = currentElements.find((element) => element.id === id);
+          return [id, { width: item?.width ?? Math.round(rect?.width ?? 120), height: item?.height ?? Math.round(rect?.height ?? 48) }];
+        })),
+      };
     }
   }
 
-  const selectedRect = selectedId && open ? document.querySelector<HTMLElement>(elementSelector(selectedId))?.getBoundingClientRect() : null;
+  const selectedRect = activeSelectionIds.length && open
+    ? unionRect(activeSelectionIds.map((id) => document.querySelector<HTMLElement>(elementSelector(id))?.getBoundingClientRect()).filter((rect): rect is DOMRect => Boolean(rect)))
+    : null;
 
   if (!ready) return null;
 
@@ -550,7 +658,7 @@ export function AppDesignStudio() {
           <div className="design-studio-panel__head">
             <div>
               <p>Design Mode</p>
-              <h2>{selected ? selected.label : `${readableLabel(key)} Tab`}</h2>
+              <h2>{activeSelectionIds.length > 1 ? `${activeSelectionIds.length} selected` : selected ? selected.label : `${readableLabel(key)} Tab`}</h2>
             </div>
             <button type="button" onClick={() => setOpen(false)}>Close</button>
           </div>
@@ -566,18 +674,23 @@ export function AppDesignStudio() {
               <h3>Selected Element</h3>
               {selected ? (
                 <>
-                  <label>Name <input value={selected.label} onChange={(event) => updateCurrent({ label: event.target.value })} /></label>
+                  <label>Name <input value={selected.label} disabled={activeSelectionIds.length > 1} onChange={(event) => updateCurrent({ label: event.target.value })} /></label>
                   <div className="design-button-row">
                     <button type="button" onClick={() => moveElement(-1)}>Move up</button>
                     <button type="button" onClick={() => moveElement(1)}>Move down</button>
                     <button type="button" onClick={() => updateCurrent({ hidden: !selected.hidden })}>{selected.hidden ? "Show" : "Hide"}</button>
                   </div>
                   <div className="design-button-row">
+                    <button type="button" onClick={groupSelected} disabled={activeSelectionIds.length < 2}>Group</button>
+                    <button type="button" onClick={ungroupSelected} disabled={!activeSelectionIds.some((id) => currentElements.find((item) => item.id === id)?.groupId)}>Ungroup</button>
+                    <button type="button" onClick={selectCurrentGroup} disabled={!selectedGroupId}>Select group</button>
+                  </div>
+                  <div className="design-button-row">
                     <button type="button" onClick={() => updateCurrent({ x: 0, y: 0 })}>Reset position</button>
                     <button type="button" onClick={resetSelected}>Reset element</button>
                     <button type="button" className="design-danger" onClick={deleteSelected}>Delete</button>
                   </div>
-                  <p className="design-empty">Use arrow keys to move the selected element. Hold Shift for larger moves, or Option for 1px nudges.</p>
+                  <p className="design-empty">Shift-click to multi-select. Grouped items move and resize together. Arrow keys move the current selection; hold Shift for larger moves or Option for 1px nudges.</p>
                 </>
               ) : <p className="design-empty">Click any section, card, text, button or tool on the page.</p>}
             </section>

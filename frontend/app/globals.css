@@ -66,6 +66,11 @@ body main :is(section, article, form, aside, header, .rounded-xl, .rounded-2xl) 
   box-shadow: 0 0 0 6px rgba(50,213,131,.12) !important;
 }
 
+.design-mode-active .design-grouped:not(.design-selected) {
+  outline: 1px dashed rgba(50,213,131,.55);
+  outline-offset: 3px;
+}
+
 .design-mode-active [contenteditable=true] {
   cursor: text !important;
 }

@@ -45,6 +45,7 @@ type ShortcutBinding = {
   label: string;
   group: "event" | "video";
   shortcut: string;
+  team?: EventTeam | "selected";
   eventType?: EventType;
   duration?: number;
   category?: EventCategory;
@@ -82,20 +83,29 @@ const EVENT_SOURCES: { value: EventSource; label: string }[] = [
   { value: "imported", label: "Imported" },
 ];
 
+const HOME_EVENT_KEYS = ["Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6", "Digit7", "Digit8", "Digit9", "Digit0", "Minus", "Equal", "Backquote"];
+const AWAY_EVENT_KEYS = ["KeyQ", "KeyW", "KeyE", "KeyR", "KeyT", "KeyY", "KeyU", "KeyI", "KeyO", "KeyP", "BracketLeft", "BracketRight", "Backslash"];
+const BASE_EVENT_SHORTCUTS: Omit<ShortcutBinding, "id" | "shortcut" | "team">[] = [
+  { label: "Blank event", group: "event", eventType: "custom", duration: 8, category: "core" },
+  { label: "Carry", group: "event", eventType: "carry", duration: 6, category: "attack" },
+  { label: "Tackle", group: "event", eventType: "tackle", duration: 5, category: "defence" },
+  { label: "Ruck", group: "event", eventType: "ruck", duration: 6, category: "possession" },
+  { label: "Pass", group: "event", eventType: "pass", duration: 4, category: "attack" },
+  { label: "Kick", group: "event", eventType: "kick", duration: 8, category: "kicking" },
+  { label: "Lineout", group: "event", eventType: "lineout", duration: 18, category: "set_piece" },
+  { label: "Scrum", group: "event", eventType: "scrum", duration: 22, category: "set_piece" },
+  { label: "Penalty", group: "event", eventType: "penalty", duration: 8, category: "discipline" },
+  { label: "Try", group: "event", eventType: "try", duration: 12, category: "attack" },
+  { label: "Turnover", group: "event", eventType: "turnover", duration: 8, category: "transition" },
+  { label: "Maul", group: "event", eventType: "maul", duration: 10, category: "set_piece" },
+  { label: "Stoppage", group: "event", eventType: "stoppage", duration: 10, category: "core" },
+];
+
 const DEFAULT_SHORTCUTS: ShortcutBinding[] = [
-  { id: "tag_blank", label: "Blank event", group: "event", shortcut: "KeyB", eventType: "custom", duration: 8, category: "core" },
-  { id: "tag_carry", label: "Carry", group: "event", shortcut: "Digit1", eventType: "carry", duration: 6, category: "attack" },
-  { id: "tag_tackle", label: "Tackle", group: "event", shortcut: "Digit2", eventType: "tackle", duration: 5, category: "defence" },
-  { id: "tag_ruck", label: "Ruck", group: "event", shortcut: "Digit3", eventType: "ruck", duration: 6, category: "possession" },
-  { id: "tag_pass", label: "Pass", group: "event", shortcut: "Digit4", eventType: "pass", duration: 4, category: "attack" },
-  { id: "tag_kick", label: "Kick", group: "event", shortcut: "Digit5", eventType: "kick", duration: 8, category: "kicking" },
-  { id: "tag_lineout", label: "Lineout", group: "event", shortcut: "Digit6", eventType: "lineout", duration: 18, category: "set_piece" },
-  { id: "tag_scrum", label: "Scrum", group: "event", shortcut: "Digit7", eventType: "scrum", duration: 22, category: "set_piece" },
-  { id: "tag_penalty", label: "Penalty", group: "event", shortcut: "Digit8", eventType: "penalty", duration: 8, category: "discipline" },
-  { id: "tag_try", label: "Try", group: "event", shortcut: "Digit9", eventType: "try", duration: 12, category: "attack" },
-  { id: "tag_turnover", label: "Turnover", group: "event", shortcut: "KeyO", eventType: "turnover", duration: 8, category: "transition" },
-  { id: "tag_maul", label: "Maul", group: "event", shortcut: "KeyM", eventType: "maul", duration: 10, category: "set_piece" },
-  { id: "tag_stoppage", label: "Stoppage", group: "event", shortcut: "KeyX", eventType: "stoppage", duration: 10, category: "core" },
+  ...BASE_EVENT_SHORTCUTS.flatMap((binding, index) => [
+    { ...binding, id: `tag_home_${binding.eventType}_${index}`, label: `Home ${binding.label}`, shortcut: HOME_EVENT_KEYS[index], team: "home" as const },
+    { ...binding, id: `tag_away_${binding.eventType}_${index}`, label: `Away ${binding.label}`, shortcut: AWAY_EVENT_KEYS[index], team: "away" as const },
+  ]),
   { id: "video_play_pause", label: "Play / pause", group: "video", shortcut: "Space", command: "play_pause" },
   { id: "video_back_5", label: "Back 5 seconds", group: "video", shortcut: "ArrowLeft", command: "seek_back_5" },
   { id: "video_forward_5", label: "Forward 5 seconds", group: "video", shortcut: "ArrowRight", command: "seek_forward_5" },
@@ -105,10 +115,10 @@ const DEFAULT_SHORTCUTS: ShortcutBinding[] = [
   { id: "video_forward_5m", label: "Forward 5 minutes", group: "video", shortcut: "Alt+ArrowRight", command: "seek_forward_5m" },
   { id: "video_back_10m", label: "Back 10 minutes", group: "video", shortcut: "Alt+Shift+ArrowLeft", command: "seek_back_10m" },
   { id: "video_forward_10m", label: "Forward 10 minutes", group: "video", shortcut: "Alt+Shift+ArrowRight", command: "seek_forward_10m" },
-  { id: "video_step_back", label: "Step back", group: "video", shortcut: "Comma", command: "step_back" },
-  { id: "video_step_forward", label: "Step forward", group: "video", shortcut: "Period", command: "step_forward" },
-  { id: "video_speed_down", label: "Decrease speed", group: "video", shortcut: "BracketLeft", command: "speed_down" },
-  { id: "video_speed_up", label: "Increase speed", group: "video", shortcut: "BracketRight", command: "speed_up" },
+  { id: "video_step_back", label: "Step back", group: "video", shortcut: "Shift+Comma", command: "step_back" },
+  { id: "video_step_forward", label: "Step forward", group: "video", shortcut: "Shift+Period", command: "step_forward" },
+  { id: "video_speed_down", label: "Decrease speed", group: "video", shortcut: "Shift+BracketLeft", command: "speed_down" },
+  { id: "video_speed_up", label: "Increase speed", group: "video", shortcut: "Shift+BracketRight", command: "speed_up" },
   { id: "video_speed_quarter", label: "Set speed 0.25x", group: "video", shortcut: "Shift+Digit1", command: "speed_quarter" },
   { id: "video_speed_half", label: "Set speed 0.5x", group: "video", shortcut: "Shift+Digit2", command: "speed_half" },
   { id: "video_speed_normal", label: "Set speed 1x", group: "video", shortcut: "Shift+Digit3", command: "speed_normal" },
@@ -146,6 +156,10 @@ function shortcutLabel(shortcut: string) {
     .replace("ArrowRight", "Right")
     .replace("BracketLeft", "[")
     .replace("BracketRight", "]")
+    .replace("Backslash", "\\")
+    .replace("Backquote", "`")
+    .replace("Minus", "-")
+    .replace("Equal", "=")
     .replace("Comma", ",")
     .replace("Period", ".")
     .replace("Space", "Space");
@@ -165,6 +179,7 @@ function loadShortcutBindings() {
     const defaults = DEFAULT_SHORTCUTS.map((binding) => ({
       ...binding,
       shortcut: parsed.find((item) => item.id === binding.id)?.shortcut || binding.shortcut,
+      team: (parsed.find((item) => item.id === binding.id)?.team as ShortcutBinding["team"]) || binding.team,
     }));
     const custom = parsed
       .filter((item) => item.custom && item.id && item.label && item.shortcut)
@@ -177,6 +192,7 @@ function loadShortcutBindings() {
         duration: Number(item.duration || 8),
         category: (item.category as EventCategory) || "attack",
         outcome: item.outcome ? String(item.outcome) : String(item.label),
+        team: (item.team as ShortcutBinding["team"]) || "selected",
         fieldZone: item.fieldZone ? String(item.fieldZone) : undefined,
         notes: item.notes ? String(item.notes) : undefined,
         custom: true,
@@ -237,8 +253,8 @@ export default function CodingWorkspace() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    window.localStorage.setItem(SHORTCUT_STORAGE_KEY, JSON.stringify(shortcuts.map(({ id, shortcut, custom, label, duration, category, outcome, fieldZone, notes }) => (
-      custom ? { id, shortcut, custom, label, duration, category, outcome, fieldZone, notes } : { id, shortcut }
+    window.localStorage.setItem(SHORTCUT_STORAGE_KEY, JSON.stringify(shortcuts.map(({ id, shortcut, custom, label, duration, category, outcome, team, fieldZone, notes }) => (
+      custom ? { id, shortcut, custom, label, duration, category, outcome, team, fieldZone, notes } : { id, shortcut, team }
     ))));
   }, [shortcuts]);
 
@@ -294,6 +310,12 @@ export default function CodingWorkspace() {
   const awayTeam = teams.find((team) => team.id === selectedMatch?.away_team_id);
   const selectedVideo = videos.find((video) => video.id === selectedVideoId) ?? null;
   const selectedEvent = events.find((event) => event.id === selectedEventId) ?? null;
+  const teamLabel = useCallback((team?: EventTeam | "selected") => {
+    if (!team || team === "selected") return "Selected team";
+    if (team === "home") return homeTeam?.name ?? "Home";
+    if (team === "away") return awayTeam?.name ?? "Away";
+    return "Neutral";
+  }, [awayTeam?.name, homeTeam?.name]);
 
   const eventCounts = useMemo(() => {
     return events.reduce<Record<string, number>>((counts, event) => {
@@ -350,17 +372,18 @@ export default function CodingWorkspace() {
     return (shortcut: string) => counts[shortcut] > 1;
   }, [shortcuts]);
 
-  const createEvent = useCallback(async (type: EventType, duration = 8, extras?: { notes?: string; outcome?: string; phaseNumber?: number | null; fieldZone?: string; label?: string }) => {
+  const createEvent = useCallback(async (type: EventType, duration = 8, extras?: { notes?: string; outcome?: string; phaseNumber?: number | null; fieldZone?: string; label?: string; team?: EventTeam | "selected" }) => {
     if (!selectedMatchId || !selectedVideoId) return;
     const start = Math.max(0, videoRef.current?.currentTime ?? currentTime);
     const end = Math.min(videoRef.current?.duration || start + duration, start + duration);
+    const team = extras?.team && extras.team !== "selected" ? extras.team : selectedTeam;
     setBusy(true);
     try {
       const created = await codingApi.createEvent({
         match_id: selectedMatchId,
         video_asset_id: selectedVideoId,
         event_type: type,
-        team: selectedTeam,
+        team,
         start_seconds: Number(start.toFixed(2)),
         end_seconds: Number(Math.max(start + 0.5, end).toFixed(2)),
         player_name: null,
@@ -372,7 +395,7 @@ export default function CodingWorkspace() {
       });
       setEvents((current) => [...current, created].sort((a, b) => a.start_seconds - b.start_seconds));
       setSelectedEventId(created.id);
-      setNotice(type === "custom" ? `${extras?.label || extras?.outcome || "Blank event"} created at ${formatTime(start)}. Edit it in the timeline panel.` : `${type} coded at ${formatTime(start)} for ${selectedTeam}.`);
+      setNotice(type === "custom" ? `${extras?.label || extras?.outcome || "Blank event"} created at ${formatTime(start)} for ${team}. Edit it in the timeline panel.` : `${type} coded at ${formatTime(start)} for ${team}.`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Unable to create event");
     } finally {
@@ -387,6 +410,7 @@ export default function CodingWorkspace() {
       notes: binding.notes,
       fieldZone: binding.fieldZone,
       label: binding.label,
+      team: binding.team,
     });
   }, [createEvent]);
 
@@ -489,6 +513,7 @@ export default function CodingWorkspace() {
       duration: Number(form.get("duration") || 8),
       category: String(form.get("category") || "attack") as EventCategory,
       outcome: label,
+      team: String(form.get("team") || "selected") as ShortcutBinding["team"],
       fieldZone: String(form.get("field_zone") || "").trim() || undefined,
       notes: String(form.get("notes") || "").trim() || undefined,
       custom: true,
@@ -664,13 +689,13 @@ export default function CodingWorkspace() {
 
             <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <div><h2 className="font-bold">Quick coding</h2><p className="text-xs text-slate-500">Use your mapped keys to tag team-level events at the current video time.</p></div>
+                <div><h2 className="font-bold">Quick coding</h2><p className="text-xs text-slate-500">Number row tags home. Q row tags away. Custom keys can use any free key.</p></div>
                 <div className="flex rounded-lg border border-slate-700 p-1 text-sm">
                   {(["home", "away", "neutral"] as EventTeam[]).map((team) => <button key={team} type="button" onClick={() => setSelectedTeam(team)} className={`rounded-md px-3 py-1.5 capitalize ${selectedTeam === team ? "bg-emerald-400 font-bold text-slate-950" : "text-slate-300"}`}>{team === "home" ? homeTeam?.name ?? "Home" : team === "away" ? awayTeam?.name ?? "Away" : "Neutral"}</button>)}
                 </div>
               </div>
               <div className="grid grid-cols-3 gap-2 md:grid-cols-5 lg:grid-cols-9">
-                {eventShortcuts.map((binding) => <button key={binding.id} type="button" disabled={busy || !selectedVideoId || !binding.eventType} onClick={() => createEventFromBinding(binding)} className="rounded-lg border border-slate-700 bg-slate-950 px-2 py-3 text-sm hover:border-emerald-400 disabled:opacity-40"><span className="block text-xs text-slate-500">{shortcutLabel(binding.shortcut)}</span>{binding.label}</button>)}
+                {eventShortcuts.map((binding) => <button key={binding.id} type="button" disabled={busy || !selectedVideoId || !binding.eventType} onClick={() => createEventFromBinding(binding)} className="rounded-lg border border-slate-700 bg-slate-950 px-2 py-3 text-sm hover:border-emerald-400 disabled:opacity-40"><span className="block text-xs text-slate-500">{shortcutLabel(binding.shortcut)} · {teamLabel(binding.team)}</span>{binding.label}</button>)}
               </div>
             </div>
 
@@ -683,10 +708,16 @@ export default function CodingWorkspace() {
               <form onSubmit={submitLibraryEvent} className="grid gap-3 rounded-lg border border-slate-800 bg-slate-950 p-3 md:grid-cols-2 lg:grid-cols-6">
                 <input name="label" placeholder="Event name" className={`${inputClass} lg:col-span-2`} />
                 <select name="category" className={inputClass} defaultValue="attack">{EVENT_LIBRARY_CATEGORIES.map((category) => <option key={category.value} value={category.value}>{category.label}</option>)}</select>
+                <select name="team" className={inputClass} defaultValue="selected">
+                  <option value="selected">Selected team</option>
+                  <option value="home">{homeTeam?.name ?? "Home"}</option>
+                  <option value="away">{awayTeam?.name ?? "Away"}</option>
+                  <option value="neutral">Neutral</option>
+                </select>
                 <input name="shortcut" placeholder="Key code e.g. KeyC" className={inputClass} />
                 <input name="duration" type="number" min="1" max="300" defaultValue="8" className={inputClass} />
                 <input name="field_zone" placeholder="Default zone" className={inputClass} />
-                <textarea name="notes" placeholder="Default note" className={`${inputClass} md:col-span-2 lg:col-span-5`} />
+                <textarea name="notes" placeholder="Default note" className={`${inputClass} md:col-span-2 lg:col-span-4`} />
                 <button type="submit" className="rounded-lg bg-emerald-400 px-4 py-2 font-bold text-slate-950">Add library event</button>
               </form>
 
@@ -697,11 +728,18 @@ export default function CodingWorkspace() {
                       <span className="rounded bg-slate-900 px-2 py-1 text-xs font-bold capitalize text-slate-400">{(binding.category ?? "core").replace("_", " ")}</span>
                       <kbd className={`rounded border px-2 py-1 text-xs font-bold ${shortcutConflict(binding.shortcut) ? "border-rose-400 text-rose-400" : "border-slate-700 text-emerald-400"}`}>{shortcutLabel(binding.shortcut)}</kbd>
                     </div>
+                    <p className="mb-3 text-xs font-bold uppercase tracking-[0.14em] text-slate-500">{teamLabel(binding.team)}</p>
                     {binding.custom ? (
                       <div className="grid gap-2">
                         <input value={binding.label} onChange={(event) => updateLibraryEvent(binding.id, { label: event.target.value, outcome: event.target.value })} className={inputClass} aria-label={`${binding.label} name`} />
                         <div className="grid grid-cols-2 gap-2">
                           <select value={binding.category ?? "attack"} onChange={(event) => updateLibraryEvent(binding.id, { category: event.target.value as EventCategory })} className={inputClass} aria-label={`${binding.label} category`}>{EVENT_LIBRARY_CATEGORIES.map((category) => <option key={category.value} value={category.value}>{category.label}</option>)}</select>
+                          <select value={binding.team ?? "selected"} onChange={(event) => updateLibraryEvent(binding.id, { team: event.target.value as ShortcutBinding["team"] })} className={inputClass} aria-label={`${binding.label} team target`}>
+                            <option value="selected">Selected team</option>
+                            <option value="home">{homeTeam?.name ?? "Home"}</option>
+                            <option value="away">{awayTeam?.name ?? "Away"}</option>
+                            <option value="neutral">Neutral</option>
+                          </select>
                           <input type="number" min="1" max="300" value={binding.duration ?? 8} onChange={(event) => updateLibraryEvent(binding.id, { duration: Number(event.target.value || 8) })} className={inputClass} aria-label={`${binding.label} duration`} />
                           <input value={binding.fieldZone ?? ""} onChange={(event) => updateLibraryEvent(binding.id, { fieldZone: event.target.value })} placeholder="Default zone" className={inputClass} aria-label={`${binding.label} field zone`} />
                           <input value={binding.notes ?? ""} onChange={(event) => updateLibraryEvent(binding.id, { notes: event.target.value })} placeholder="Default note" className={inputClass} aria-label={`${binding.label} note`} />
@@ -715,7 +753,7 @@ export default function CodingWorkspace() {
                       <div className="grid grid-cols-[1fr_auto] items-center gap-2">
                         <div>
                           <p className="font-semibold">{binding.label}</p>
-                          <p className="mt-1 text-xs text-slate-500">{binding.duration ?? 8} second default window</p>
+                          <p className="mt-1 text-xs text-slate-500">{binding.duration ?? 8} second default window · {teamLabel(binding.team)}</p>
                         </div>
                         <button type="button" onClick={() => setEditingShortcutId(binding.id)} className="rounded border border-slate-700 px-3 py-2 text-sm font-bold">Change key</button>
                       </div>
@@ -753,8 +791,9 @@ export default function CodingWorkspace() {
                   <h3 className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Event keys</h3>
                   <div className="grid gap-2">
                     {eventShortcuts.map((binding) => (
-                      <div key={binding.id} className="grid grid-cols-[1fr_auto_auto] items-center gap-2 rounded-lg border border-slate-800 bg-slate-950 p-3">
+                      <div key={binding.id} className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-2 rounded-lg border border-slate-800 bg-slate-950 p-3">
                         <span className="text-sm font-semibold">{binding.label}</span>
+                        <span className="rounded bg-slate-900 px-2 py-1 text-xs font-bold text-slate-400">{teamLabel(binding.team)}</span>
                         <kbd className={`rounded border px-2 py-1 text-xs font-bold ${shortcutConflict(binding.shortcut) ? "border-rose-400 text-rose-400" : "border-slate-700 text-emerald-400"}`}>{editingShortcutId === binding.id ? "Press keys..." : shortcutLabel(binding.shortcut)}</kbd>
                         <button type="button" onClick={() => setEditingShortcutId(binding.id)} className="rounded border border-slate-700 px-2 py-1 text-xs font-bold">Change</button>
                       </div>

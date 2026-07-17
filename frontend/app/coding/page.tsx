@@ -34,6 +34,16 @@ type EventCategory = "core" | "attack" | "defence" | "set_piece" | "discipline" 
 type ReviewStatus = "unreviewed" | "confirmed" | "flagged";
 type EventSource = "manual" | "auto" | "vision" | "imported";
 type VideoLayoutMode = "standard" | "large" | "theatre";
+type LayoutDensity = "compact" | "comfortable";
+type LayoutColumnCount = 2 | 3 | 4;
+type QuickColumnId = "home_core" | "home_variant" | "away_core" | "away_variant";
+
+type CodingLayout = {
+  quickColumns: LayoutColumnCount;
+  mappingColumns: LayoutColumnCount;
+  density: LayoutDensity;
+  quickColumnOrder: QuickColumnId[];
+};
 
 type ReviewMeta = {
   status: ReviewStatus;
@@ -61,6 +71,15 @@ type ShortcutBinding = {
 const SHORTCUT_STORAGE_KEY = "rugby-video-analysis:coding-shortcuts:v1";
 const REVIEW_STORAGE_KEY = "rugby-video-analysis:coding-review:v1";
 const VIDEO_LAYOUT_STORAGE_KEY = "rugby-video-analysis:coding-video-layout:v1";
+const CODING_LAYOUT_STORAGE_KEY = "rugby-video-analysis:coding-layout:v1";
+
+const DEFAULT_QUICK_COLUMN_ORDER: QuickColumnId[] = ["home_core", "home_variant", "away_core", "away_variant"];
+const DEFAULT_CODING_LAYOUT: CodingLayout = {
+  quickColumns: 4,
+  mappingColumns: 4,
+  density: "comfortable",
+  quickColumnOrder: DEFAULT_QUICK_COLUMN_ORDER,
+};
 
 const EVENT_LIBRARY_CATEGORIES: { value: EventCategory; label: string }[] = [
   { value: "attack", label: "Attack" },
@@ -161,6 +180,10 @@ function normaliseShortcut(shortcut: string) {
   return shortcut.split("+").filter(Boolean).join("+");
 }
 
+function isModifierOnlyKey(code: string) {
+  return ["ShiftLeft", "ShiftRight", "AltLeft", "AltRight", "ControlLeft", "ControlRight", "MetaLeft", "MetaRight"].includes(code);
+}
+
 function shortcutFromKeyboardEvent(event: KeyboardEvent | React.KeyboardEvent) {
   const parts = [];
   if (event.ctrlKey) parts.push("Ctrl");
@@ -173,6 +196,9 @@ function shortcutFromKeyboardEvent(event: KeyboardEvent | React.KeyboardEvent) {
 
 function shortcutLabel(shortcut: string) {
   return shortcut
+    .replace("Alt", "Option")
+    .replace("Meta", "Command")
+    .replace("Ctrl", "Control")
     .replace("Digit", "")
     .replace("Key", "")
     .replace("ArrowLeft", "Left")
@@ -191,6 +217,37 @@ function shortcutLabel(shortcut: string) {
 function shortcutEditable(event: KeyboardEvent) {
   const target = event.target as HTMLElement | null;
   return target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.tagName === "SELECT" || target?.isContentEditable;
+}
+
+function gridColumnsClass(count: LayoutColumnCount) {
+  if (count === 2) return "xl:grid-cols-2";
+  if (count === 3) return "xl:grid-cols-3";
+  return "xl:grid-cols-4";
+}
+
+function quickColumnTarget(columnId: QuickColumnId): Pick<ShortcutBinding, "team" | "variant"> {
+  return {
+    team: columnId.startsWith("home") ? "home" : "away",
+    variant: columnId.endsWith("variant"),
+  };
+}
+
+function loadCodingLayout(): CodingLayout {
+  if (typeof window === "undefined") return DEFAULT_CODING_LAYOUT;
+  const saved = window.localStorage.getItem(CODING_LAYOUT_STORAGE_KEY);
+  if (!saved) return DEFAULT_CODING_LAYOUT;
+  try {
+    const parsed = JSON.parse(saved) as Partial<CodingLayout>;
+    const order = parsed.quickColumnOrder?.filter((item): item is QuickColumnId => DEFAULT_QUICK_COLUMN_ORDER.includes(item as QuickColumnId)) ?? [];
+    return {
+      quickColumns: parsed.quickColumns === 2 || parsed.quickColumns === 3 || parsed.quickColumns === 4 ? parsed.quickColumns : DEFAULT_CODING_LAYOUT.quickColumns,
+      mappingColumns: parsed.mappingColumns === 2 || parsed.mappingColumns === 3 || parsed.mappingColumns === 4 ? parsed.mappingColumns : DEFAULT_CODING_LAYOUT.mappingColumns,
+      density: parsed.density === "compact" ? "compact" : "comfortable",
+      quickColumnOrder: [...order, ...DEFAULT_QUICK_COLUMN_ORDER.filter((item) => !order.includes(item))],
+    };
+  } catch {
+    return DEFAULT_CODING_LAYOUT;
+  }
 }
 
 function displayEventLabel(binding: ShortcutBinding) {
@@ -284,6 +341,9 @@ export default function CodingWorkspace() {
   const [timelineReviewFilter, setTimelineReviewFilter] = useState<ReviewStatus | "all">("all");
   const [timelineSourceFilter, setTimelineSourceFilter] = useState<EventSource | "all">("all");
   const [videoLayout, setVideoLayout] = useState<VideoLayoutMode>("standard");
+  const [codingLayout, setCodingLayout] = useState<CodingLayout>(DEFAULT_CODING_LAYOUT);
+  const [draggingShortcutId, setDraggingShortcutId] = useState<string | null>(null);
+  const [draggingColumnId, setDraggingColumnId] = useState<QuickColumnId | null>(null);
   const [notice, setNotice] = useState("Loading coding workspace...");
   const [busy, setBusy] = useState(false);
 
@@ -291,6 +351,7 @@ export default function CodingWorkspace() {
     setShortcuts(loadShortcutBindings());
     setReviewMeta(loadReviewMeta());
     setVideoLayout(loadVideoLayoutMode());
+    setCodingLayout(loadCodingLayout());
   }, []);
 
   useEffect(() => {
@@ -309,6 +370,11 @@ export default function CodingWorkspace() {
     if (typeof window === "undefined") return;
     window.localStorage.setItem(VIDEO_LAYOUT_STORAGE_KEY, videoLayout);
   }, [videoLayout]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(CODING_LAYOUT_STORAGE_KEY, JSON.stringify(codingLayout));
+  }, [codingLayout]);
 
   const loadWorkspace = useCallback(async () => {
     try {
@@ -424,32 +490,35 @@ export default function CodingWorkspace() {
     return (shortcut: string) => counts[shortcut] > 1;
   }, [shortcuts]);
 
-  const quickMatrixColumns = useMemo(() => [
-    {
-      id: "home_core",
-      title: "Home core",
-      subtitle: homeTeam?.name ?? "Home",
-      items: eventShortcuts.filter((shortcut) => shortcut.team === "home" && !shortcut.variant && !shortcut.custom),
-    },
-    {
-      id: "home_variant",
-      title: "Home variants",
-      subtitle: "Shift layer",
-      items: eventShortcuts.filter((shortcut) => shortcut.team === "home" && shortcut.variant && !shortcut.custom),
-    },
-    {
-      id: "away_core",
-      title: "Away core",
-      subtitle: awayTeam?.name ?? "Away",
-      items: eventShortcuts.filter((shortcut) => shortcut.team === "away" && !shortcut.variant && !shortcut.custom),
-    },
-    {
-      id: "away_variant",
-      title: "Away variants",
-      subtitle: "Shift layer",
-      items: eventShortcuts.filter((shortcut) => shortcut.team === "away" && shortcut.variant && !shortcut.custom),
-    },
-  ], [awayTeam?.name, eventShortcuts, homeTeam?.name]);
+  const quickMatrixColumns = useMemo(() => {
+    const columns: Record<QuickColumnId, { id: QuickColumnId; title: string; subtitle: string; items: ShortcutBinding[] }> = {
+      home_core: {
+        id: "home_core",
+        title: "Home core",
+        subtitle: homeTeam?.name ?? "Home",
+        items: eventShortcuts.filter((shortcut) => shortcut.team === "home" && !shortcut.variant && !shortcut.custom),
+      },
+      home_variant: {
+        id: "home_variant",
+        title: "Home variants",
+        subtitle: "Modifier layer",
+        items: eventShortcuts.filter((shortcut) => shortcut.team === "home" && shortcut.variant && !shortcut.custom),
+      },
+      away_core: {
+        id: "away_core",
+        title: "Away core",
+        subtitle: awayTeam?.name ?? "Away",
+        items: eventShortcuts.filter((shortcut) => shortcut.team === "away" && !shortcut.variant && !shortcut.custom),
+      },
+      away_variant: {
+        id: "away_variant",
+        title: "Away variants",
+        subtitle: "Modifier layer",
+        items: eventShortcuts.filter((shortcut) => shortcut.team === "away" && shortcut.variant && !shortcut.custom),
+      },
+    };
+    return codingLayout.quickColumnOrder.map((columnId) => columns[columnId]);
+  }, [awayTeam?.name, codingLayout.quickColumnOrder, eventShortcuts, homeTeam?.name]);
 
   const customEventShortcuts = useMemo(() => eventShortcuts.filter((shortcut) => shortcut.custom || !["home", "away"].includes(String(shortcut.team))), [eventShortcuts]);
 
@@ -470,6 +539,13 @@ export default function CodingWorkspace() {
   }, [eventShortcuts]);
 
   const recentEvents = useMemo(() => [...events].sort((a, b) => b.start_seconds - a.start_seconds).slice(0, 10), [events]);
+
+  const quickButtonClass = codingLayout.density === "compact"
+    ? "grid grid-cols-[auto_1fr] items-center gap-2 rounded-lg border border-slate-800 bg-slate-900 px-2 py-1.5 text-left hover:border-emerald-400 disabled:opacity-40"
+    : "grid grid-cols-[auto_1fr] items-center gap-3 rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-left hover:border-emerald-400 disabled:opacity-40";
+  const mappingCardClass = codingLayout.density === "compact"
+    ? "rounded-lg border border-slate-800 bg-slate-900 p-2"
+    : "rounded-lg border border-slate-800 bg-slate-900 p-3";
 
   const createEvent = useCallback(async (type: EventType, duration = 8, extras?: { notes?: string; outcome?: string; phaseNumber?: number | null; fieldZone?: string; label?: string; team?: EventTeam | "selected" }) => {
     if (!selectedMatchId || !selectedVideoId) return;
@@ -583,6 +659,10 @@ export default function CodingWorkspace() {
         setNotice("Shortcut edit cancelled.");
         return;
       }
+      if (isModifierOnlyKey(event.code)) {
+        setNotice("Hold the modifier, then press the event key.");
+        return;
+      }
       updateShortcut(editingShortcutId, shortcutFromKeyboardEvent(event));
     };
     window.addEventListener("keydown", onCapture, true);
@@ -593,6 +673,44 @@ export default function CodingWorkspace() {
     setShortcuts(DEFAULT_SHORTCUTS);
     setEditingShortcutId(null);
     setNotice("Keyboard shortcuts and custom library events reset to defaults.");
+  }
+
+  function updateCodingLayout(updates: Partial<CodingLayout>) {
+    setCodingLayout((current) => ({ ...current, ...updates }));
+  }
+
+  function resetCodingLayout() {
+    setCodingLayout(DEFAULT_CODING_LAYOUT);
+    setNotice("Coding workspace layout reset.");
+  }
+
+  function moveQuickColumn(targetColumnId: QuickColumnId) {
+    if (!draggingColumnId || draggingColumnId === targetColumnId) return;
+    setCodingLayout((current) => {
+      const next = current.quickColumnOrder.filter((item) => item !== draggingColumnId);
+      const targetIndex = next.indexOf(targetColumnId);
+      next.splice(targetIndex < 0 ? next.length : targetIndex, 0, draggingColumnId);
+      return { ...current, quickColumnOrder: next };
+    });
+    setDraggingColumnId(null);
+    setNotice("Quick coding columns reordered.");
+  }
+
+  function moveShortcutToColumn(targetColumnId: QuickColumnId, targetShortcutId?: string) {
+    if (!draggingShortcutId) return;
+    const target = quickColumnTarget(targetColumnId);
+    setShortcuts((current) => {
+      const dragged = current.find((item) => item.id === draggingShortcutId);
+      if (!dragged) return current;
+      const draggedNext = { ...dragged, ...target };
+      const withoutDragged = current.filter((item) => item.id !== draggingShortcutId);
+      const targetIndex = targetShortcutId ? withoutDragged.findIndex((item) => item.id === targetShortcutId) : -1;
+      const insertIndex = targetIndex >= 0 ? targetIndex : withoutDragged.length;
+      withoutDragged.splice(insertIndex, 0, draggedNext);
+      return withoutDragged;
+    });
+    setDraggingShortcutId(null);
+    setNotice("Quick code moved. Layout and team layer saved.");
   }
 
   function submitLibraryEvent(event: FormEvent<HTMLFormElement>) {
@@ -772,6 +890,46 @@ export default function CodingWorkspace() {
         </div>
 
         <section className="space-y-5">
+          <section className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="font-bold">Workspace layout</h2>
+                <p className="text-xs text-slate-500">Design the coding surface for the way you review rugby: columns, density and drag order are saved in this browser.</p>
+              </div>
+              <button type="button" onClick={resetCodingLayout} className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-bold">Reset layout</button>
+            </div>
+            <div className="grid gap-3 lg:grid-cols-4">
+              <div className="rounded-lg border border-slate-800 bg-slate-950 p-3">
+                <p className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Quick code columns</p>
+                <div className="flex rounded-lg border border-slate-700 p-1 text-sm">
+                  {([2, 3, 4] as LayoutColumnCount[]).map((count) => (
+                    <button key={count} type="button" onClick={() => updateCodingLayout({ quickColumns: count })} className={`flex-1 rounded-md px-3 py-1.5 ${codingLayout.quickColumns === count ? "bg-emerald-400 font-bold text-slate-950" : "text-slate-300"}`}>{count}</button>
+                  ))}
+                </div>
+              </div>
+              <div className="rounded-lg border border-slate-800 bg-slate-950 p-3">
+                <p className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Mapping columns</p>
+                <div className="flex rounded-lg border border-slate-700 p-1 text-sm">
+                  {([2, 3, 4] as LayoutColumnCount[]).map((count) => (
+                    <button key={count} type="button" onClick={() => updateCodingLayout({ mappingColumns: count })} className={`flex-1 rounded-md px-3 py-1.5 ${codingLayout.mappingColumns === count ? "bg-emerald-400 font-bold text-slate-950" : "text-slate-300"}`}>{count}</button>
+                  ))}
+                </div>
+              </div>
+              <div className="rounded-lg border border-slate-800 bg-slate-950 p-3">
+                <p className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Density</p>
+                <div className="flex rounded-lg border border-slate-700 p-1 text-sm">
+                  {(["comfortable", "compact"] as LayoutDensity[]).map((density) => (
+                    <button key={density} type="button" onClick={() => updateCodingLayout({ density })} className={`flex-1 rounded-md px-3 py-1.5 capitalize ${codingLayout.density === density ? "bg-emerald-400 font-bold text-slate-950" : "text-slate-300"}`}>{density}</button>
+                  ))}
+                </div>
+              </div>
+              <div className="rounded-lg border border-slate-800 bg-slate-950 p-3">
+                <p className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Drag mode</p>
+                <p className="text-sm text-slate-300">Drag column headers or event buttons to reshape the quick coding matrix.</p>
+              </div>
+            </div>
+          </section>
+
           <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -805,7 +963,7 @@ export default function CodingWorkspace() {
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="font-bold">Quick coding matrix</h2>
-                <p className="text-xs text-slate-500">Home uses number keys. Away uses Q-row keys. Shift creates the paired rugby variant.</p>
+                <p className="text-xs text-slate-500">Home uses number keys. Away uses Q-row keys. Hold Shift, Option, Control or Command before pressing a key to record modifier shortcuts.</p>
               </div>
               <div className="flex rounded-lg border border-slate-700 p-1 text-sm">
                 {(["home", "away", "neutral"] as EventTeam[]).map((team) => (
@@ -816,19 +974,55 @@ export default function CodingWorkspace() {
               </div>
             </div>
 
-            <div className="grid gap-3 xl:grid-cols-4">
+            <div className={`grid gap-3 ${gridColumnsClass(codingLayout.quickColumns)}`}>
               {quickMatrixColumns.map((column) => (
-                <div key={column.id} className="rounded-lg border border-slate-800 bg-slate-950 p-3">
-                  <div className="mb-3 flex items-center justify-between gap-2">
+                <div
+                  key={column.id}
+                  className={`rounded-lg border bg-slate-950 p-3 ${draggingColumnId === column.id ? "border-emerald-400" : "border-slate-800"}`}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={() => {
+                    if (draggingColumnId) moveQuickColumn(column.id);
+                    else moveShortcutToColumn(column.id);
+                  }}
+                >
+                  <div
+                    className="mb-3 flex cursor-grab items-center justify-between gap-2 rounded-md border border-transparent p-1 active:cursor-grabbing hover:border-slate-700"
+                    draggable
+                    onDragStart={() => setDraggingColumnId(column.id)}
+                    onDragEnd={() => setDraggingColumnId(null)}
+                  >
                     <div>
                       <h3 className="text-sm font-bold uppercase tracking-[0.14em] text-slate-300">{column.title}</h3>
                       <p className="text-xs text-slate-500">{column.subtitle}</p>
                     </div>
-                    <span className="rounded bg-slate-900 px-2 py-1 text-xs font-bold text-slate-500">{column.items.length}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="rounded bg-slate-900 px-2 py-1 text-xs font-bold text-slate-500">{column.items.length}</span>
+                      <span className="text-xs text-slate-600">Drag</span>
+                    </div>
                   </div>
                   <div className="grid gap-2">
                     {column.items.map((binding) => (
-                      <button key={binding.id} type="button" disabled={busy || !selectedVideoId || !binding.eventType} onClick={() => createEventFromBinding(binding)} className="grid grid-cols-[auto_1fr] items-center gap-3 rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-left hover:border-emerald-400 disabled:opacity-40">
+                      <button
+                        key={binding.id}
+                        type="button"
+                        draggable
+                        aria-disabled={busy || !selectedVideoId || !binding.eventType}
+                        onDragStart={() => setDraggingShortcutId(binding.id)}
+                        onDragOver={(event) => event.preventDefault()}
+                        onDrop={(event) => {
+                          event.preventDefault();
+                          moveShortcutToColumn(column.id, binding.id);
+                        }}
+                        onDragEnd={() => setDraggingShortcutId(null)}
+                        onClick={() => {
+                          if (busy || !selectedVideoId || !binding.eventType) {
+                            setNotice("Select a source video before coding events. Drag-and-drop layout editing still works.");
+                            return;
+                          }
+                          createEventFromBinding(binding);
+                        }}
+                        className={`${quickButtonClass} ${busy || !selectedVideoId || !binding.eventType ? "opacity-50" : ""} ${draggingShortcutId === binding.id ? "border-emerald-400 opacity-70" : ""}`}
+                      >
                         <kbd className={`min-w-14 rounded border px-2 py-1 text-center text-xs font-bold ${shortcutConflict(binding.shortcut) ? "border-rose-400 text-rose-400" : "border-slate-700 text-emerald-400"}`}>{shortcutLabel(binding.shortcut)}</kbd>
                         <span>
                           <span className="block text-sm font-bold">{displayEventLabel(binding)}</span>
@@ -937,16 +1131,16 @@ export default function CodingWorkspace() {
               <textarea name="notes" placeholder="Default note" className={`${inputClass} md:col-span-2 xl:col-span-6`} />
             </form>
 
-            <div className="grid gap-4 xl:grid-cols-4">
+            <div className={`grid gap-4 ${gridColumnsClass(codingLayout.mappingColumns)}`}>
               {mappingColumns.map((column) => (
                 <div key={column.id} className="rounded-lg border border-slate-800 bg-slate-950 p-3">
                   <h3 className="mb-3 text-xs font-bold uppercase tracking-[0.18em] text-slate-500">{column.title}</h3>
                   <div className="grid gap-2">
                     {column.items.map((binding) => (
-                      <div key={binding.id} className="rounded-lg border border-slate-800 bg-slate-900 p-3">
+                      <div key={binding.id} className={mappingCardClass}>
                         <div className="mb-2 flex items-center justify-between gap-2">
                           <input value={binding.label} onChange={(event) => updateLibraryEvent(binding.id, { label: event.target.value, outcome: binding.custom ? event.target.value : binding.outcome })} className="min-w-0 flex-1 rounded border border-slate-700 bg-slate-950 px-2 py-1 text-sm font-semibold text-white outline-none focus:border-emerald-400" aria-label={`${binding.label} name`} />
-                          <kbd className={`rounded border px-2 py-1 text-xs font-bold ${shortcutConflict(binding.shortcut) ? "border-rose-400 text-rose-400" : "border-slate-700 text-emerald-400"}`}>{editingShortcutId === binding.id ? "Press..." : shortcutLabel(binding.shortcut)}</kbd>
+                          <kbd className={`rounded border px-2 py-1 text-xs font-bold ${shortcutConflict(binding.shortcut) ? "border-rose-400 text-rose-400" : "border-slate-700 text-emerald-400"}`}>{editingShortcutId === binding.id ? "Hold + key" : shortcutLabel(binding.shortcut)}</kbd>
                         </div>
                         <div className="grid grid-cols-2 gap-2">
                           <select value={binding.eventType ?? "custom"} onChange={(event) => updateLibraryEvent(binding.id, { eventType: event.target.value as EventType })} className={inputClass} aria-label={`${binding.label} event type`}>{EVENT_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}</select>
@@ -977,7 +1171,7 @@ export default function CodingWorkspace() {
                 {videoShortcuts.map((binding) => (
                   <div key={binding.id} className="grid grid-cols-[1fr_auto_auto] items-center gap-2 rounded-lg border border-slate-800 bg-slate-900 p-3">
                     <span className="text-sm font-semibold">{binding.label}</span>
-                    <kbd className={`rounded border px-2 py-1 text-xs font-bold ${shortcutConflict(binding.shortcut) ? "border-rose-400 text-rose-400" : "border-slate-700 text-emerald-400"}`}>{editingShortcutId === binding.id ? "Press..." : shortcutLabel(binding.shortcut)}</kbd>
+                    <kbd className={`rounded border px-2 py-1 text-xs font-bold ${shortcutConflict(binding.shortcut) ? "border-rose-400 text-rose-400" : "border-slate-700 text-emerald-400"}`}>{editingShortcutId === binding.id ? "Hold + key" : shortcutLabel(binding.shortcut)}</kbd>
                     <button type="button" onClick={() => setEditingShortcutId(binding.id)} className="rounded border border-slate-700 px-2 py-1 text-xs font-bold">Change</button>
                   </div>
                 ))}

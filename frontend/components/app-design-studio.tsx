@@ -174,6 +174,12 @@ function closestDesignElement(target: EventTarget | null) {
   return target instanceof HTMLElement ? target.closest<HTMLElement>("[data-design-id]") : null;
 }
 
+function isDesignPanelInput(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false;
+  if (!target.closest(".design-studio-panel")) return false;
+  return target.matches("input,select,textarea,button") || Boolean(target.closest("input,select,textarea,button"));
+}
+
 export function AppDesignStudio() {
   const pathname = usePathname();
   const key = pageKey(pathname);
@@ -393,6 +399,36 @@ export function AppDesignStudio() {
     updateElement(selectedId, updates);
   }
 
+  const nudgeSelected = useCallback((direction: "up" | "down" | "left" | "right", event: KeyboardEvent) => {
+    if (!selectedId) return;
+    const baseStep = event.altKey ? 1 : settings.theme.snapGrid;
+    const step = event.shiftKey ? baseStep * 4 : baseStep;
+    updateElement(selectedId, {
+      x: (selected?.x ?? 0) + (direction === "left" ? -step : direction === "right" ? step : 0),
+      y: (selected?.y ?? 0) + (direction === "up" ? -step : direction === "down" ? step : 0),
+    });
+  }, [selected?.x, selected?.y, selectedId, settings.theme.snapGrid, updateElement]);
+
+  useEffect(() => {
+    if (!open || !selectedId) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (isDesignPanelInput(event.target)) return;
+      const directions: Record<string, "up" | "down" | "left" | "right"> = {
+        ArrowUp: "up",
+        ArrowDown: "down",
+        ArrowLeft: "left",
+        ArrowRight: "right",
+      };
+      const direction = directions[event.key];
+      if (!direction) return;
+      event.preventDefault();
+      event.stopPropagation();
+      nudgeSelected(direction, event);
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [nudgeSelected, open, selectedId]);
+
   function moveElement(direction: -1 | 1) {
     if (!selectedId) return;
     const list = [...currentElements].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
@@ -541,6 +577,7 @@ export function AppDesignStudio() {
                     <button type="button" onClick={resetSelected}>Reset element</button>
                     <button type="button" className="design-danger" onClick={deleteSelected}>Delete</button>
                   </div>
+                  <p className="design-empty">Use arrow keys to move the selected element. Hold Shift for larger moves, or Option for 1px nudges.</p>
                 </>
               ) : <p className="design-empty">Click any section, card, text, button or tool on the page.</p>}
             </section>

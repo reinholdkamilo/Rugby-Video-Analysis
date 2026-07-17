@@ -181,7 +181,20 @@ function snap(value: number, grid: number) {
 }
 
 function closestDesignElement(target: EventTarget | null) {
-  return target instanceof HTMLElement ? target.closest<HTMLElement>("[data-design-id]") : null;
+  if (!(target instanceof HTMLElement)) return null;
+  const closest = target.closest<HTMLElement>("[data-design-id]");
+  if (!closest) return null;
+  const interactiveContainer = closest.closest<HTMLElement>("button[data-design-id],a[data-design-id]");
+  if (interactiveContainer) return interactiveContainer;
+  return closest;
+}
+
+function displayForDesignMove(element: HTMLElement, design?: ElementDesign) {
+  if (design?.layout && design.layout !== "default") return "";
+  const computedDisplay = window.getComputedStyle(element).display;
+  if (computedDisplay === "inline") return "inline-block";
+  if (computedDisplay === "contents") return "block";
+  return "";
 }
 
 function isDesignPanelInput(target: EventTarget | null) {
@@ -249,10 +262,13 @@ export function AppDesignStudio() {
       element.classList.toggle("design-editable", open);
       element.classList.toggle("design-selected", open && activeSelectionIds.includes(element.dataset.designId ?? ""));
       element.classList.toggle("design-grouped", open && Boolean(design?.groupId));
+      element.classList.toggle("design-positioned", Boolean(design?.x || design?.y || design?.width || design?.height));
       element.hidden = Boolean(design?.hidden);
       element.classList.toggle("design-hidden-section", Boolean(design?.hidden));
       element.style.order = design?.order !== undefined ? String(design.order) : "";
       element.style.transform = design?.x || design?.y ? `translate(${design.x ?? 0}px, ${design.y ?? 0}px)` : "";
+      element.style.position = design?.x || design?.y ? "relative" : "";
+      element.style.zIndex = design?.x || design?.y ? "5" : "";
       element.style.width = design?.width ? `${design.width}px` : "";
       element.style.height = design?.height ? `${design.height}px` : "";
       element.style.minHeight = design?.minHeight ? `${design.minHeight}px` : "";
@@ -282,6 +298,8 @@ export function AppDesignStudio() {
         }
       } else {
         element.classList.remove("design-layout-controlled");
+        const moveDisplay = design?.x || design?.y || design?.width || design?.height ? displayForDesignMove(element, design) : "";
+        element.style.display = moveDisplay;
         if (!active) {
           element.style.display = "";
           element.style.gridTemplateColumns = "";
@@ -599,7 +617,9 @@ export function AppDesignStudio() {
 
   function selectCurrentGroup() {
     if (!selectedGroupId) return;
-    setSelectedIds(currentElements.filter((item) => item.groupId === selectedGroupId).map((item) => item.id));
+    const ids = currentElements.filter((item) => item.groupId === selectedGroupId).map((item) => item.id);
+    setSelectedIds(ids);
+    setSelectedId(ids[0] ?? null);
   }
 
   function startHandleDrag(mode: DragState["mode"], event: ReactMouseEvent<HTMLButtonElement>) {
@@ -753,7 +773,7 @@ export function AppDesignStudio() {
                   <h3>Priority Blocks</h3>
                   <div className="design-section-list">
                     {priorityElements.map((element) => (
-                      <button key={element.id} type="button" className={element.id === selectedId ? "is-active" : ""} onClick={() => setSelectedId(element.id)}>{element.label}</button>
+                      <button key={element.id} type="button" className={element.id === selectedId ? "is-active" : ""} onClick={() => { setSelectedId(element.id); setSelectedIds([element.id]); }}>{element.label}</button>
                     ))}
                   </div>
                 </section>
@@ -781,7 +801,7 @@ export function AppDesignStudio() {
                 <h3>Detected Elements</h3>
                 <div className="design-section-list">
                   {currentElements.slice(0, 90).map((element) => (
-                    <button key={element.id} type="button" className={element.id === selectedId ? "is-active" : ""} onClick={() => setSelectedId(element.id)}>{element.label}</button>
+                    <button key={element.id} type="button" className={element.id === selectedId ? "is-active" : ""} onClick={() => { setSelectedId(element.id); setSelectedIds([element.id]); }}>{element.label}</button>
                   ))}
                 </div>
               </section>

@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { AppDesignStudio } from "@/components/app-design-studio";
 import { AppNav } from "@/components/app-nav";
 import "./globals.css";
 import "./tab-pages.css";
@@ -22,6 +23,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       <body>
         <AppNav />
         {children}
+        <AppDesignStudio />
       </body>
     </html>
   );

@@ -31,7 +31,185 @@ a { color: inherit; text-decoration: none; }
 button,input,select,textarea { font: inherit; }
 button { cursor: pointer; }
 main { min-height: calc(100vh - 100px); }
-.site-container { width: min(1440px, calc(100% - 48px)); margin: 0 auto; }
+.site-container { width: min(var(--design-content-width, 1440px), calc(100% - 48px)); margin: 0 auto; }
+
+body {
+  font-size: calc(16px * var(--design-text-scale, 1));
+}
+
+body main {
+  --design-space: var(--design-spacing-scale, 1);
+}
+
+body main :is(section, article, form, aside, header, .rounded-xl, .rounded-2xl) {
+  border-radius: var(--design-radius, 18px);
+}
+
+.design-editable-parent {
+  display: flex !important;
+  flex-direction: column;
+  gap: calc(18px * var(--design-space));
+}
+
+.design-hidden-section {
+  display: none !important;
+}
+
+.design-studio-toggle {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 120;
+  min-height: 44px;
+  border: 1px solid rgba(255,255,255,.22);
+  border-radius: 12px;
+  background: #101918;
+  padding: 0 16px;
+  color: #fff;
+  font-size: .8rem;
+  font-weight: 950;
+  box-shadow: 0 18px 42px rgba(5,31,29,.28);
+}
+
+.design-studio-panel {
+  position: fixed;
+  right: 18px;
+  bottom: 74px;
+  z-index: 121;
+  display: grid;
+  width: min(420px, calc(100vw - 28px));
+  max-height: min(760px, calc(100vh - 96px));
+  gap: 12px;
+  overflow: auto;
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 18px;
+  background: #111c1b;
+  padding: 16px;
+  color: #fff;
+  box-shadow: 0 30px 90px rgba(0,0,0,.34);
+}
+
+.design-studio-panel * {
+  box-sizing: border-box;
+}
+
+.design-studio-panel__head,
+.design-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.design-studio-panel__head p {
+  color: var(--yellow);
+  font-size: .68rem;
+  font-weight: 950;
+  letter-spacing: .14em;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+
+.design-studio-panel__head h2,
+.design-studio-panel h3 {
+  color: #fff;
+}
+
+.design-studio-panel__head h2 {
+  margin-top: 4px;
+  font-size: 1.25rem;
+  letter-spacing: -.03em;
+}
+
+.design-studio-panel section {
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 14px;
+  background: rgba(255,255,255,.045);
+  padding: 13px;
+}
+
+.design-studio-panel h3 {
+  margin: 0 0 11px;
+  font-size: .78rem;
+  font-weight: 950;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.design-studio-panel label {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 34px;
+  color: rgba(255,255,255,.74);
+  font-size: .8rem;
+  font-weight: 800;
+}
+
+.design-studio-panel input[type=color] {
+  width: 44px;
+  height: 28px;
+  min-height: 28px;
+  border: 1px solid rgba(255,255,255,.18) !important;
+  border-radius: 8px !important;
+  background: transparent !important;
+  padding: 2px !important;
+}
+
+.design-studio-panel input[type=range] {
+  width: 150px;
+  min-height: 24px;
+  accent-color: var(--yellow);
+}
+
+.design-studio-panel button {
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: 9px;
+  background: rgba(255,255,255,.08);
+  padding: 7px 9px;
+  color: #fff;
+  font-size: .72rem;
+  font-weight: 900;
+}
+
+.design-studio-panel button:disabled {
+  cursor: not-allowed;
+  opacity: .35;
+}
+
+.design-section-list {
+  display: grid;
+  gap: 8px;
+}
+
+.design-section-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 11px;
+  background: rgba(0,0,0,.18);
+  padding: 8px;
+}
+
+.design-section-row span {
+  min-width: 0;
+  overflow: hidden;
+  color: rgba(255,255,255,.82);
+  font-size: .76rem;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.design-reset-all {
+  min-height: 42px;
+  border-color: rgba(245,180,0,.42) !important;
+  background: rgba(245,180,0,.16) !important;
+  color: #ffe59a !important;
+}
 
 /* Header */
 .product-strip { background: var(--navy); color: rgba(255,255,255,.72); font-size: .72rem; font-weight: 700; }

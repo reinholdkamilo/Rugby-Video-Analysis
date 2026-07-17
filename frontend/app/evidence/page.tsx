@@ -1,0 +1,314 @@
+"use client";
+
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+
+import { EvidenceItem, EvidenceType, Match, Team, TimelineEvent, VideoAsset, api } from "@/lib/api";
+
+const EVIDENCE_TYPES: { value: EvidenceType; label: string }[] = [
+  { value: "video", label: "Video" },
+  { value: "clip", label: "Clip" },
+  { value: "frame", label: "Frame" },
+  { value: "audio", label: "Audio" },
+  { value: "referee_audio", label: "Ref audio" },
+  { value: "scoreboard", label: "Scoreboard" },
+  { value: "commentary", label: "Commentary" },
+  { value: "note", label: "Note" },
+  { value: "other", label: "Other" },
+];
+
+const RUGBY_ELEMENTS = [
+  "carry",
+  "tackle",
+  "ruck",
+  "maul",
+  "scrum",
+  "lineout",
+  "kick",
+  "counter attack",
+  "zone entry",
+  "exit",
+  "restart",
+  "line break",
+  "jackal",
+  "penalty",
+  "drop out",
+  "scoreboard",
+];
+
+const inputClass = "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none focus:border-emerald-500";
+
+function formatTime(seconds: number | null) {
+  if (seconds === null) return "";
+  const value = Math.max(0, seconds || 0);
+  const minutes = Math.floor(value / 60);
+  const remaining = Math.floor(value % 60);
+  return `${String(minutes).padStart(2, "0")}:${String(remaining).padStart(2, "0")}`;
+}
+
+export default function EvidenceLibraryPage() {
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [matches, setMatches] = useState<Match[]>([]);
+  const [videos, setVideos] = useState<VideoAsset[]>([]);
+  const [events, setEvents] = useState<TimelineEvent[]>([]);
+  const [items, setItems] = useState<EvidenceItem[]>([]);
+  const [selectedMatchId, setSelectedMatchId] = useState<number | null>(null);
+  const [selectedVideoId, setSelectedVideoId] = useState<number | null>(null);
+  const [notice, setNotice] = useState("Loading evidence library...");
+  const [busy, setBusy] = useState(false);
+
+  const teamName = useCallback((teamId: number) => teams.find((team) => team.id === teamId)?.name ?? `Team ${teamId}`, [teams]);
+  const selectedMatch = useMemo(() => matches.find((match) => match.id === selectedMatchId) ?? null, [matches, selectedMatchId]);
+  const selectedVideo = useMemo(() => videos.find((video) => video.id === selectedVideoId) ?? null, [selectedVideoId, videos]);
+  const approvedCount = items.filter((item) => item.approved_for_training).length;
+
+  const eventLabel = useCallback((event: TimelineEvent) => {
+    const label = event.outcome || event.event_type;
+    return `${formatTime(event.start_seconds)} · ${event.team} · ${label}`;
+  }, []);
+
+  const loadBase = useCallback(async () => {
+    setBusy(true);
+    try {
+      const [teamData, matchData] = await Promise.all([api.teams.list(), api.matches.list()]);
+      setTeams(teamData);
+      setMatches(matchData);
+      setSelectedMatchId((current) => current ?? matchData[0]?.id ?? null);
+      setNotice(matchData.length ? "Evidence library ready." : "Create a match before adding evidence.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Unable to load evidence library.");
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  const loadMatchEvidence = useCallback(async (matchId: number) => {
+    setBusy(true);
+    try {
+      const videoData = await api.matches.videos(matchId);
+      const nextVideoId = selectedVideoId && videoData.some((video) => video.id === selectedVideoId)
+        ? selectedVideoId
+        : videoData[0]?.id ?? null;
+      const [eventData, evidenceData] = await Promise.all([
+        api.timeline.list(matchId, nextVideoId ?? undefined),
+        api.evidence.list(matchId),
+      ]);
+      setVideos(videoData);
+      setSelectedVideoId(nextVideoId);
+      setEvents(eventData);
+      setItems(evidenceData);
+      setNotice(`${evidenceData.length} evidence item${evidenceData.length === 1 ? "" : "s"} loaded.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Unable to load match evidence.");
+    } finally {
+      setBusy(false);
+    }
+  }, [selectedVideoId]);
+
+  useEffect(() => {
+    void loadBase();
+  }, [loadBase]);
+
+  useEffect(() => {
+    if (!selectedMatchId) {
+      setVideos([]);
+      setEvents([]);
+      setItems([]);
+      setSelectedVideoId(null);
+      return;
+    }
+    void loadMatchEvidence(selectedMatchId);
+  }, [loadMatchEvidence, selectedMatchId]);
+
+  useEffect(() => {
+    if (!selectedMatchId || !selectedVideoId) return;
+    void api.timeline.list(selectedMatchId, selectedVideoId).then(setEvents).catch((error) => {
+      setNotice(error instanceof Error ? error.message : "Unable to reload video events.");
+    });
+  }, [selectedMatchId, selectedVideoId]);
+
+  async function submitEvidence(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedMatchId) return;
+    const form = new FormData(event.currentTarget);
+    const label = String(form.get("label") || "").trim();
+    if (!label) {
+      setNotice("Name the evidence item before saving it.");
+      return;
+    }
+    const eventId = Number(form.get("timeline_event_id") || 0) || null;
+    const rawTimestamp = String(form.get("timestamp_seconds") || "").trim();
+    const timestampSeconds = rawTimestamp ? Number(rawTimestamp) : null;
+    setBusy(true);
+    try {
+      const created = await api.evidence.create({
+        match_id: selectedMatchId,
+        video_asset_id: selectedVideoId,
+        timeline_event_id: eventId,
+        evidence_type: String(form.get("evidence_type") || "note") as EvidenceType,
+        label,
+        rugby_element: String(form.get("rugby_element") || "").trim() || null,
+        source_uri: String(form.get("source_uri") || "").trim() || null,
+        timestamp_seconds: timestampSeconds !== null && Number.isFinite(timestampSeconds) ? timestampSeconds : null,
+        confidence_label: String(form.get("confidence_label") || "").trim() || null,
+        notes: String(form.get("notes") || "").trim() || null,
+        approved_for_training: form.get("approved_for_training") === "on",
+      });
+      setItems((current) => [created, ...current]);
+      setNotice(`${created.label} saved to the evidence library.`);
+      event.currentTarget.reset();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Unable to save evidence item.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggleTrainingApproval(item: EvidenceItem) {
+    setBusy(true);
+    try {
+      const updated = await api.evidence.update(item.id, { approved_for_training: !item.approved_for_training });
+      setItems((current) => current.map((currentItem) => currentItem.id === updated.id ? updated : currentItem));
+      setNotice(updated.approved_for_training ? "Evidence approved for training." : "Evidence removed from the training set.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Unable to update evidence item.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteEvidence(item: EvidenceItem) {
+    const confirmed = window.confirm(`Delete ${item.label} from the evidence library?`);
+    if (!confirmed) return;
+    setBusy(true);
+    try {
+      await api.evidence.delete(item.id);
+      setItems((current) => current.filter((currentItem) => currentItem.id !== item.id));
+      setNotice(`${item.label} deleted.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Unable to delete evidence item.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <main className="min-h-screen bg-slate-100 text-slate-950">
+      <header className="bg-slate-950 text-white">
+        <div className="mx-auto flex max-w-[1500px] flex-wrap items-end justify-between gap-5 px-6 py-6">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.24em] text-emerald-400">Training evidence</p>
+            <h1 className="mt-1 text-3xl font-bold">Evidence Library</h1>
+          </div>
+          <div className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-300">
+            {items.length} items · {approvedCount} approved
+          </div>
+        </div>
+      </header>
+
+      <div className="mx-auto max-w-[1500px] px-6 py-6">
+        <div className="mb-5 grid gap-3 rounded-xl border border-slate-300 bg-white p-4 shadow-sm lg:grid-cols-[1fr_1fr_auto]">
+          <select className={inputClass} value={selectedMatchId ?? ""} onChange={(event) => setSelectedMatchId(event.target.value ? Number(event.target.value) : null)}>
+            <option value="">Select match</option>
+            {matches.map((match) => (
+              <option key={match.id} value={match.id}>
+                {match.match_date} · {teamName(match.home_team_id)} vs {teamName(match.away_team_id)}
+              </option>
+            ))}
+          </select>
+          <select className={inputClass} value={selectedVideoId ?? ""} onChange={(event) => setSelectedVideoId(event.target.value ? Number(event.target.value) : null)} disabled={!videos.length}>
+            <option value="">All videos</option>
+            {videos.map((video) => <option key={video.id} value={video.id}>{video.original_filename}</option>)}
+          </select>
+          <div className="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-600">
+            {busy ? "Working..." : notice}
+          </div>
+        </div>
+
+        <div className="grid gap-5 xl:grid-cols-[minmax(360px,0.8fr)_1.2fr]">
+          <form onSubmit={submitEvidence} className="space-y-4 rounded-xl border border-slate-300 bg-white p-5 shadow-sm">
+            <div>
+              <h2 className="text-lg font-bold">Add evidence</h2>
+              <p className="mt-1 text-sm text-slate-500">{selectedMatch ? `${teamName(selectedMatch.home_team_id)} vs ${teamName(selectedMatch.away_team_id)}` : "Select a match first."}</p>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <input name="label" placeholder="Evidence name" className={`${inputClass} md:col-span-2`} />
+              <select name="evidence_type" className={inputClass} defaultValue="clip">
+                {EVIDENCE_TYPES.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
+              </select>
+              <input name="rugby_element" list="rugby-elements" placeholder="Rugby element" className={inputClass} />
+              <datalist id="rugby-elements">
+                {RUGBY_ELEMENTS.map((element) => <option key={element} value={element} />)}
+              </datalist>
+              <select name="timeline_event_id" className={`${inputClass} md:col-span-2`} defaultValue="">
+                <option value="">No linked timeline event</option>
+                {events.map((timelineEvent) => (
+                  <option key={timelineEvent.id} value={timelineEvent.id}>{eventLabel(timelineEvent)}</option>
+                ))}
+              </select>
+              <input name="source_uri" placeholder="Source link, path, or R2 URI" className={`${inputClass} md:col-span-2`} />
+              <input name="timestamp_seconds" type="number" min="0" step="0.1" placeholder="Timestamp seconds" className={inputClass} />
+              <input name="confidence_label" placeholder="positive, negative, uncertain" className={inputClass} />
+              <textarea name="notes" placeholder="Notes" className={`${inputClass} min-h-24 md:col-span-2`} />
+            </div>
+
+            <label className="flex items-center gap-2 text-sm font-bold text-slate-700">
+              <input name="approved_for_training" type="checkbox" className="h-4 w-4 accent-emerald-600" />
+              Approved for training
+            </label>
+
+            <button type="submit" disabled={busy || !selectedMatchId} className="w-full rounded-lg bg-emerald-600 px-4 py-3 text-sm font-bold text-white disabled:opacity-50">
+              Save evidence
+            </button>
+          </form>
+
+          <section className="rounded-xl border border-slate-300 bg-white p-5 shadow-sm">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-bold">Evidence items</h2>
+                <p className="mt-1 text-sm text-slate-500">{selectedVideo ? selectedVideo.original_filename : "All match evidence"}</p>
+              </div>
+              <button type="button" onClick={() => selectedMatchId && void loadMatchEvidence(selectedMatchId)} disabled={busy || !selectedMatchId} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-bold disabled:opacity-50">
+                Refresh
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              {items.map((item) => {
+                const linkedEvent = events.find((timelineEvent) => timelineEvent.id === item.timeline_event_id);
+                return (
+                  <article key={item.id} className="rounded-lg border border-slate-200 p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-700">{item.evidence_type.replace("_", " ")}</p>
+                        <h3 className="mt-1 font-bold">{item.label}</h3>
+                        <p className="mt-1 text-sm text-slate-500">
+                          {item.rugby_element || "General"}{item.timestamp_seconds !== null ? ` · ${formatTime(item.timestamp_seconds)}` : ""}
+                        </p>
+                      </div>
+                      <span className={`rounded-full px-3 py-1 text-xs font-bold ${item.approved_for_training ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-600"}`}>
+                        {item.approved_for_training ? "Training approved" : "Draft"}
+                      </span>
+                    </div>
+                    {linkedEvent ? <p className="mt-3 text-sm text-slate-600">Linked event: {eventLabel(linkedEvent)}</p> : null}
+                    {item.source_uri ? <p className="mt-2 break-all text-sm text-slate-600">Source: {item.source_uri}</p> : null}
+                    {item.notes ? <p className="mt-2 text-sm text-slate-600">{item.notes}</p> : null}
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <button type="button" onClick={() => void toggleTrainingApproval(item)} disabled={busy} className="rounded-lg border border-emerald-600 px-3 py-2 text-sm font-bold text-emerald-700 disabled:opacity-50">
+                        {item.approved_for_training ? "Remove approval" : "Approve for training"}
+                      </button>
+                      <button type="button" onClick={() => void deleteEvidence(item)} disabled={busy} className="rounded-lg border border-rose-300 px-3 py-2 text-sm font-bold text-rose-700 disabled:opacity-50">
+                        Delete
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+              {!items.length ? <div className="rounded-lg border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">No evidence saved for this match yet.</div> : null}
+            </div>
+          </section>
+        </div>
+      </div>
+    </main>
+  );
+}

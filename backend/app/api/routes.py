@@ -10,6 +10,7 @@ from app.models import (
     AnalysisJob,
     AutomaticEventSuggestion,
     Competition,
+    EvidenceItem,
     EventClip,
     Match,
     MatchContext,
@@ -29,6 +30,9 @@ from app.schemas import (
     AnalysisJobCreate,
     AnalysisJobRead,
     AnalysisJobUpdate,
+    EvidenceItemCreate,
+    EvidenceItemRead,
+    EvidenceItemUpdate,
     MatchCreate,
     MatchRead,
     OrganisationCreate,
@@ -99,6 +103,7 @@ def _delete_match_tree(match: Match, db: Session) -> None:
 
     if event_ids:
         db.execute(delete(EventClip).where(EventClip.event_id.in_(event_ids)))
+    db.execute(delete(EvidenceItem).where(EvidenceItem.match_id == match.id))
     db.execute(delete(TimelineEvent).where(TimelineEvent.match_id == match.id))
     db.execute(delete(MatchContext).where(MatchContext.match_id == match.id))
     db.execute(delete(AutomaticEventSuggestion).where(AutomaticEventSuggestion.match_id == match.id))
@@ -276,6 +281,80 @@ def get_video_processing_result(
     if result is None:
         raise HTTPException(status_code=404, detail="Video processing result not found.")
     return result
+
+
+def _validate_evidence_references(
+    match_id: int,
+    db: Session,
+    video_asset_id: int | None = None,
+    timeline_event_id: int | None = None,
+) -> None:
+    if db.get(Match, match_id) is None:
+        raise HTTPException(status_code=404, detail="Match not found.")
+    if video_asset_id is not None:
+        video = db.get(VideoAsset, video_asset_id)
+        if video is None or video.match_id != match_id:
+            raise HTTPException(status_code=422, detail="Video does not belong to this match.")
+    if timeline_event_id is not None:
+        event = db.get(TimelineEvent, timeline_event_id)
+        if event is None or event.match_id != match_id:
+            raise HTTPException(status_code=422, detail="Timeline event does not belong to this match.")
+
+
+@router.post("/evidence-items", response_model=EvidenceItemRead, status_code=status.HTTP_201_CREATED)
+def create_evidence_item(payload: EvidenceItemCreate, db: Session = Depends(get_db)) -> EvidenceItem:
+    _validate_evidence_references(payload.match_id, db, payload.video_asset_id, payload.timeline_event_id)
+    item = EvidenceItem(**payload.model_dump())
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.get("/evidence-items", response_model=list[EvidenceItemRead])
+def list_evidence_items(
+    match_id: int | None = None,
+    video_asset_id: int | None = None,
+    approved_for_training: bool | None = None,
+    db: Session = Depends(get_db),
+) -> list[EvidenceItem]:
+    statement = select(EvidenceItem).order_by(EvidenceItem.created_at.desc(), EvidenceItem.id.desc())
+    if match_id is not None:
+        statement = statement.where(EvidenceItem.match_id == match_id)
+    if video_asset_id is not None:
+        statement = statement.where(EvidenceItem.video_asset_id == video_asset_id)
+    if approved_for_training is not None:
+        statement = statement.where(EvidenceItem.approved_for_training == approved_for_training)
+    return list(db.scalars(statement))
+
+
+@router.patch("/evidence-items/{item_id}", response_model=EvidenceItemRead)
+def update_evidence_item(
+    item_id: int,
+    payload: EvidenceItemUpdate,
+    db: Session = Depends(get_db),
+) -> EvidenceItem:
+    item = db.get(EvidenceItem, item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Evidence item not found.")
+    updates = payload.model_dump(exclude_unset=True)
+    next_video_id = updates.get("video_asset_id", item.video_asset_id)
+    next_event_id = updates.get("timeline_event_id", item.timeline_event_id)
+    _validate_evidence_references(item.match_id, db, next_video_id, next_event_id)
+    for field, value in updates.items():
+        setattr(item, field, value)
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.delete("/evidence-items/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_evidence_item(item_id: int, db: Session = Depends(get_db)) -> None:
+    item = db.get(EvidenceItem, item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Evidence item not found.")
+    db.delete(item)
+    db.commit()
 
 
 @router.post("/analysis-jobs", response_model=AnalysisJobRead, status_code=status.HTTP_201_CREATED)

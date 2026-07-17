@@ -141,6 +141,61 @@ def test_delete_match_before_deleting_teams() -> None:
         assert deleted_away.status_code == 204
 
 
+def test_delete_timeline_event_removes_it_from_timeline() -> None:
+    unique = uuid4().hex[:8]
+    with TestClient(app) as client:
+        organisation_id = client.post(
+            "/api/organisations", json={"name": f"Timeline Delete {unique}"}
+        ).json()["id"]
+        home_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"Home {unique}"},
+        ).json()["id"]
+        away_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"Away {unique}"},
+        ).json()["id"]
+        match_id = client.post(
+            "/api/matches",
+            json={
+                "organisation_id": organisation_id,
+                "home_team_id": home_id,
+                "away_team_id": away_id,
+                "match_date": "2026-07-12",
+            },
+        ).json()["id"]
+        video = client.post(
+            f"/api/matches/{match_id}/videos",
+            files={"file": ("sample.mp4", b"not a real video", "video/mp4")},
+        ).json()
+        event = client.post(
+            "/api/timeline-events",
+            json={
+                "match_id": match_id,
+                "video_asset_id": video["id"],
+                "event_type": "custom",
+                "team": "home",
+                "start_seconds": 12,
+                "end_seconds": 20,
+                "player_name": None,
+                "outcome": "Manual delete check",
+                "notes": None,
+                "phase_number": None,
+                "field_zone": None,
+                "clip_requested": False,
+            },
+        )
+
+        assert event.status_code == 201
+        event_id = event.json()["id"]
+        deleted = client.delete(f"/api/timeline-events/{event_id}")
+
+        assert deleted.status_code == 204
+        assert client.get(f"/api/timeline-events/{event_id}").status_code == 404
+        timeline = client.get(f"/api/timeline-events?match_id={match_id}&video_asset_id={video['id']}").json()
+        assert all(item["id"] != event_id for item in timeline)
+
+
 def test_delete_organisation_cascades_workspace_and_catalogue() -> None:
     unique = uuid4().hex[:8]
     with TestClient(app) as client:

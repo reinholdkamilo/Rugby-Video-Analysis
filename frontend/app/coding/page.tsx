@@ -30,6 +30,8 @@ type VideoCommand =
   | "speed_normal"
   | "speed_double";
 
+type EventCategory = "core" | "attack" | "defence" | "set_piece" | "discipline" | "transition" | "kicking" | "possession";
+
 type ShortcutBinding = {
   id: string;
   label: string;
@@ -37,25 +39,41 @@ type ShortcutBinding = {
   shortcut: string;
   eventType?: EventType;
   duration?: number;
+  category?: EventCategory;
+  outcome?: string;
+  fieldZone?: string;
+  notes?: string;
+  custom?: boolean;
   command?: VideoCommand;
 };
 
 const SHORTCUT_STORAGE_KEY = "rugby-video-analysis:coding-shortcuts:v1";
 
+const EVENT_LIBRARY_CATEGORIES: { value: EventCategory; label: string }[] = [
+  { value: "attack", label: "Attack" },
+  { value: "defence", label: "Defence" },
+  { value: "set_piece", label: "Set piece" },
+  { value: "discipline", label: "Discipline" },
+  { value: "transition", label: "Transition" },
+  { value: "kicking", label: "Kicking" },
+  { value: "possession", label: "Possession" },
+  { value: "core", label: "Core" },
+];
+
 const DEFAULT_SHORTCUTS: ShortcutBinding[] = [
-  { id: "tag_blank", label: "Blank event", group: "event", shortcut: "KeyB", eventType: "custom", duration: 8 },
-  { id: "tag_carry", label: "Carry", group: "event", shortcut: "Digit1", eventType: "carry", duration: 6 },
-  { id: "tag_tackle", label: "Tackle", group: "event", shortcut: "Digit2", eventType: "tackle", duration: 5 },
-  { id: "tag_ruck", label: "Ruck", group: "event", shortcut: "Digit3", eventType: "ruck", duration: 6 },
-  { id: "tag_pass", label: "Pass", group: "event", shortcut: "Digit4", eventType: "pass", duration: 4 },
-  { id: "tag_kick", label: "Kick", group: "event", shortcut: "Digit5", eventType: "kick", duration: 8 },
-  { id: "tag_lineout", label: "Lineout", group: "event", shortcut: "Digit6", eventType: "lineout", duration: 18 },
-  { id: "tag_scrum", label: "Scrum", group: "event", shortcut: "Digit7", eventType: "scrum", duration: 22 },
-  { id: "tag_penalty", label: "Penalty", group: "event", shortcut: "Digit8", eventType: "penalty", duration: 8 },
-  { id: "tag_try", label: "Try", group: "event", shortcut: "Digit9", eventType: "try", duration: 12 },
-  { id: "tag_turnover", label: "Turnover", group: "event", shortcut: "KeyO", eventType: "turnover", duration: 8 },
-  { id: "tag_maul", label: "Maul", group: "event", shortcut: "KeyM", eventType: "maul", duration: 10 },
-  { id: "tag_stoppage", label: "Stoppage", group: "event", shortcut: "KeyX", eventType: "stoppage", duration: 10 },
+  { id: "tag_blank", label: "Blank event", group: "event", shortcut: "KeyB", eventType: "custom", duration: 8, category: "core" },
+  { id: "tag_carry", label: "Carry", group: "event", shortcut: "Digit1", eventType: "carry", duration: 6, category: "attack" },
+  { id: "tag_tackle", label: "Tackle", group: "event", shortcut: "Digit2", eventType: "tackle", duration: 5, category: "defence" },
+  { id: "tag_ruck", label: "Ruck", group: "event", shortcut: "Digit3", eventType: "ruck", duration: 6, category: "possession" },
+  { id: "tag_pass", label: "Pass", group: "event", shortcut: "Digit4", eventType: "pass", duration: 4, category: "attack" },
+  { id: "tag_kick", label: "Kick", group: "event", shortcut: "Digit5", eventType: "kick", duration: 8, category: "kicking" },
+  { id: "tag_lineout", label: "Lineout", group: "event", shortcut: "Digit6", eventType: "lineout", duration: 18, category: "set_piece" },
+  { id: "tag_scrum", label: "Scrum", group: "event", shortcut: "Digit7", eventType: "scrum", duration: 22, category: "set_piece" },
+  { id: "tag_penalty", label: "Penalty", group: "event", shortcut: "Digit8", eventType: "penalty", duration: 8, category: "discipline" },
+  { id: "tag_try", label: "Try", group: "event", shortcut: "Digit9", eventType: "try", duration: 12, category: "attack" },
+  { id: "tag_turnover", label: "Turnover", group: "event", shortcut: "KeyO", eventType: "turnover", duration: 8, category: "transition" },
+  { id: "tag_maul", label: "Maul", group: "event", shortcut: "KeyM", eventType: "maul", duration: 10, category: "set_piece" },
+  { id: "tag_stoppage", label: "Stoppage", group: "event", shortcut: "KeyX", eventType: "stoppage", duration: 10, category: "core" },
   { id: "video_play_pause", label: "Play / pause", group: "video", shortcut: "Space", command: "play_pause" },
   { id: "video_back_5", label: "Back 5 seconds", group: "video", shortcut: "ArrowLeft", command: "seek_back_5" },
   { id: "video_forward_5", label: "Forward 5 seconds", group: "video", shortcut: "ArrowRight", command: "seek_forward_5" },
@@ -122,10 +140,26 @@ function loadShortcutBindings() {
   if (!saved) return DEFAULT_SHORTCUTS;
   try {
     const parsed = JSON.parse(saved) as Partial<ShortcutBinding>[];
-    return DEFAULT_SHORTCUTS.map((binding) => ({
+    const defaults = DEFAULT_SHORTCUTS.map((binding) => ({
       ...binding,
       shortcut: parsed.find((item) => item.id === binding.id)?.shortcut || binding.shortcut,
     }));
+    const custom = parsed
+      .filter((item) => item.custom && item.id && item.label && item.shortcut)
+      .map((item) => ({
+        id: String(item.id),
+        label: String(item.label),
+        group: "event" as const,
+        shortcut: String(item.shortcut),
+        eventType: "custom" as EventType,
+        duration: Number(item.duration || 8),
+        category: (item.category as EventCategory) || "attack",
+        outcome: item.outcome ? String(item.outcome) : String(item.label),
+        fieldZone: item.fieldZone ? String(item.fieldZone) : undefined,
+        notes: item.notes ? String(item.notes) : undefined,
+        custom: true,
+      }));
+    return [...defaults, ...custom];
   } catch {
     return DEFAULT_SHORTCUTS;
   }
@@ -154,7 +188,9 @@ export default function CodingWorkspace() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    window.localStorage.setItem(SHORTCUT_STORAGE_KEY, JSON.stringify(shortcuts.map(({ id, shortcut }) => ({ id, shortcut }))));
+    window.localStorage.setItem(SHORTCUT_STORAGE_KEY, JSON.stringify(shortcuts.map(({ id, shortcut, custom, label, duration, category, outcome, fieldZone, notes }) => (
+      custom ? { id, shortcut, custom, label, duration, category, outcome, fieldZone, notes } : { id, shortcut }
+    ))));
   }, [shortcuts]);
 
   const loadWorkspace = useCallback(async () => {
@@ -223,7 +259,7 @@ export default function CodingWorkspace() {
     return (shortcut: string) => counts[shortcut] > 1;
   }, [shortcuts]);
 
-  const createEvent = useCallback(async (type: EventType, duration = 8, extras?: { notes?: string; outcome?: string; phaseNumber?: number | null; fieldZone?: string }) => {
+  const createEvent = useCallback(async (type: EventType, duration = 8, extras?: { notes?: string; outcome?: string; phaseNumber?: number | null; fieldZone?: string; label?: string }) => {
     if (!selectedMatchId || !selectedVideoId) return;
     const start = Math.max(0, videoRef.current?.currentTime ?? currentTime);
     const end = Math.min(videoRef.current?.duration || start + duration, start + duration);
@@ -245,13 +281,23 @@ export default function CodingWorkspace() {
       });
       setEvents((current) => [...current, created].sort((a, b) => a.start_seconds - b.start_seconds));
       setSelectedEventId(created.id);
-      setNotice(type === "custom" ? `Blank event created at ${formatTime(start)}. Edit it in the timeline panel.` : `${type} coded at ${formatTime(start)} for ${selectedTeam}.`);
+      setNotice(type === "custom" ? `${extras?.label || extras?.outcome || "Blank event"} created at ${formatTime(start)}. Edit it in the timeline panel.` : `${type} coded at ${formatTime(start)} for ${selectedTeam}.`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Unable to create event");
     } finally {
       setBusy(false);
     }
   }, [currentTime, selectedMatchId, selectedTeam, selectedVideoId]);
+
+  const createEventFromBinding = useCallback((binding: ShortcutBinding) => {
+    if (!binding.eventType) return;
+    void createEvent(binding.eventType, binding.duration, {
+      outcome: binding.outcome || (binding.custom ? binding.label : undefined),
+      notes: binding.notes,
+      fieldZone: binding.fieldZone,
+      label: binding.label,
+    });
+  }, [createEvent]);
 
   const runVideoCommand = useCallback((command: VideoCommand) => {
     const video = videoRef.current;
@@ -298,14 +344,14 @@ export default function CodingWorkspace() {
       if (!binding) return;
       event.preventDefault();
       if (binding.group === "event" && binding.eventType) {
-        void createEvent(binding.eventType, binding.duration);
+        createEventFromBinding(binding);
       } else if (binding.group === "video" && binding.command) {
         runVideoCommand(binding.command);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [createEvent, editingShortcutId, runVideoCommand, shortcuts]);
+  }, [createEventFromBinding, editingShortcutId, runVideoCommand, shortcuts]);
 
   const updateShortcut = useCallback((bindingId: string, shortcut: string) => {
     const duplicate = shortcuts.some((binding) => binding.id !== bindingId && binding.shortcut === shortcut);
@@ -332,7 +378,47 @@ export default function CodingWorkspace() {
   function resetShortcuts() {
     setShortcuts(DEFAULT_SHORTCUTS);
     setEditingShortcutId(null);
-    setNotice("Keyboard shortcuts reset to defaults.");
+    setNotice("Keyboard shortcuts and custom library events reset to defaults.");
+  }
+
+  function submitLibraryEvent(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const label = String(form.get("label") || "").trim();
+    if (!label) {
+      setNotice("Name the library event before adding it.");
+      return;
+    }
+    const binding: ShortcutBinding = {
+      id: `custom_${Date.now()}`,
+      label,
+      group: "event",
+      shortcut: String(form.get("shortcut") || "").trim() || "Unassigned",
+      eventType: "custom",
+      duration: Number(form.get("duration") || 8),
+      category: String(form.get("category") || "attack") as EventCategory,
+      outcome: label,
+      fieldZone: String(form.get("field_zone") || "").trim() || undefined,
+      notes: String(form.get("notes") || "").trim() || undefined,
+      custom: true,
+    };
+    setShortcuts((current) => [...current, binding]);
+    setNotice(`${label} added to the coding event library.`);
+    event.currentTarget.reset();
+  }
+
+  function updateLibraryEvent(bindingId: string, updates: Partial<ShortcutBinding>) {
+    setShortcuts((current) => current.map((binding) => (
+      binding.id === bindingId
+        ? { ...binding, ...updates, outcome: updates.label ?? binding.outcome ?? binding.label }
+        : binding
+    )));
+  }
+
+  function deleteLibraryEvent(bindingId: string) {
+    const binding = shortcuts.find((item) => item.id === bindingId);
+    setShortcuts((current) => current.filter((item) => item.id !== bindingId));
+    setNotice(`${binding?.label ?? "Custom event"} removed from the coding event library.`);
   }
 
   async function submitCustomEvent(event: FormEvent<HTMLFormElement>) {
@@ -436,9 +522,60 @@ export default function CodingWorkspace() {
                 </div>
               </div>
               <div className="grid grid-cols-3 gap-2 md:grid-cols-5 lg:grid-cols-9">
-                {eventShortcuts.map((binding) => <button key={binding.id} type="button" disabled={busy || !selectedVideoId || !binding.eventType} onClick={() => binding.eventType && void createEvent(binding.eventType, binding.duration)} className="rounded-lg border border-slate-700 bg-slate-950 px-2 py-3 text-sm hover:border-emerald-400 disabled:opacity-40"><span className="block text-xs text-slate-500">{shortcutLabel(binding.shortcut)}</span>{binding.label}</button>)}
+                {eventShortcuts.map((binding) => <button key={binding.id} type="button" disabled={busy || !selectedVideoId || !binding.eventType} onClick={() => createEventFromBinding(binding)} className="rounded-lg border border-slate-700 bg-slate-950 px-2 py-3 text-sm hover:border-emerald-400 disabled:opacity-40"><span className="block text-xs text-slate-500">{shortcutLabel(binding.shortcut)}</span>{binding.label}</button>)}
               </div>
             </div>
+
+            <section className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+              <div className="mb-4">
+                <h2 className="font-bold">Event library</h2>
+                <p className="mt-1 text-xs text-slate-500">Create personalised rugby actions that appear as quick-code buttons and keyboard events.</p>
+              </div>
+
+              <form onSubmit={submitLibraryEvent} className="grid gap-3 rounded-lg border border-slate-800 bg-slate-950 p-3 md:grid-cols-2 lg:grid-cols-6">
+                <input name="label" placeholder="Event name" className={`${inputClass} lg:col-span-2`} />
+                <select name="category" className={inputClass} defaultValue="attack">{EVENT_LIBRARY_CATEGORIES.map((category) => <option key={category.value} value={category.value}>{category.label}</option>)}</select>
+                <input name="shortcut" placeholder="Key code e.g. KeyC" className={inputClass} />
+                <input name="duration" type="number" min="1" max="300" defaultValue="8" className={inputClass} />
+                <input name="field_zone" placeholder="Default zone" className={inputClass} />
+                <textarea name="notes" placeholder="Default note" className={`${inputClass} md:col-span-2 lg:col-span-5`} />
+                <button type="submit" className="rounded-lg bg-emerald-400 px-4 py-2 font-bold text-slate-950">Add library event</button>
+              </form>
+
+              <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                {eventShortcuts.map((binding) => (
+                  <div key={binding.id} className="rounded-lg border border-slate-800 bg-slate-950 p-3">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <span className="rounded bg-slate-900 px-2 py-1 text-xs font-bold capitalize text-slate-400">{(binding.category ?? "core").replace("_", " ")}</span>
+                      <kbd className={`rounded border px-2 py-1 text-xs font-bold ${shortcutConflict(binding.shortcut) ? "border-rose-400 text-rose-400" : "border-slate-700 text-emerald-400"}`}>{shortcutLabel(binding.shortcut)}</kbd>
+                    </div>
+                    {binding.custom ? (
+                      <div className="grid gap-2">
+                        <input value={binding.label} onChange={(event) => updateLibraryEvent(binding.id, { label: event.target.value, outcome: event.target.value })} className={inputClass} aria-label={`${binding.label} name`} />
+                        <div className="grid grid-cols-2 gap-2">
+                          <select value={binding.category ?? "attack"} onChange={(event) => updateLibraryEvent(binding.id, { category: event.target.value as EventCategory })} className={inputClass} aria-label={`${binding.label} category`}>{EVENT_LIBRARY_CATEGORIES.map((category) => <option key={category.value} value={category.value}>{category.label}</option>)}</select>
+                          <input type="number" min="1" max="300" value={binding.duration ?? 8} onChange={(event) => updateLibraryEvent(binding.id, { duration: Number(event.target.value || 8) })} className={inputClass} aria-label={`${binding.label} duration`} />
+                          <input value={binding.fieldZone ?? ""} onChange={(event) => updateLibraryEvent(binding.id, { fieldZone: event.target.value })} placeholder="Default zone" className={inputClass} aria-label={`${binding.label} field zone`} />
+                          <input value={binding.notes ?? ""} onChange={(event) => updateLibraryEvent(binding.id, { notes: event.target.value })} placeholder="Default note" className={inputClass} aria-label={`${binding.label} note`} />
+                        </div>
+                        <div className="flex gap-2">
+                          <button type="button" onClick={() => setEditingShortcutId(binding.id)} className="flex-1 rounded border border-slate-700 px-3 py-2 text-sm font-bold">Change key</button>
+                          <button type="button" onClick={() => deleteLibraryEvent(binding.id)} className="rounded border border-rose-900 px-3 py-2 text-sm font-bold text-rose-300">Delete</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+                        <div>
+                          <p className="font-semibold">{binding.label}</p>
+                          <p className="mt-1 text-xs text-slate-500">{binding.duration ?? 8} second default window</p>
+                        </div>
+                        <button type="button" onClick={() => setEditingShortcutId(binding.id)} className="rounded border border-slate-700 px-3 py-2 text-sm font-bold">Change key</button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </section>
 
             <form onSubmit={submitCustomEvent} className="grid gap-3 rounded-xl border border-slate-800 bg-slate-900 p-4 md:grid-cols-2 lg:grid-cols-4">
               <div className="md:col-span-2 lg:col-span-4">

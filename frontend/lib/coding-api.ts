@@ -43,6 +43,10 @@ export const codingApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     }),
+  deleteEvent: (eventId: number) =>
+    request<void>(`/api/timeline-events/${eventId}`, {
+      method: "DELETE",
+    }),
 };
 
 export const sourceVideoUrl = (videoAssetId: number) => `${apiUrl}/api/videos/${videoAssetId}/stream`;

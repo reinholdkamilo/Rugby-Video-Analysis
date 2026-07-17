@@ -1,13 +1,18 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session, selectinload
 
 from app.clips import generate_event_clip
 from app.database import get_db
 from app.event_schemas import EventClipRead, TimelineEventCreate, TimelineEventRead, TimelineEventUpdate
-from app.models import EventClip, Match, TimelineEvent, VideoAsset, VideoProcessingResult
+from app.models import AutomaticEventSuggestion, EventClip, Match, TimelineEvent, VideoAsset, VideoProcessingResult
+from app.object_storage import delete_object, is_object_uri
+from app.storage import delete_stored_file
 
 router = APIRouter(prefix="/api", tags=["timeline"])
+logger = logging.getLogger(__name__)
 
 
 def get_event_or_404(event_id: int, db: Session) -> TimelineEvent:
@@ -19,6 +24,16 @@ def get_event_or_404(event_id: int, db: Session) -> TimelineEvent:
     if event is None:
         raise HTTPException(status_code=404, detail="Timeline event not found.")
     return event
+
+
+def delete_media_reference(storage_path: str) -> None:
+    try:
+        if is_object_uri(storage_path):
+            delete_object(storage_path)
+        else:
+            delete_stored_file(storage_path)
+    except Exception as exc:  # pragma: no cover - filesystem/provider dependent
+        logger.warning("Could not delete stored event media %s: %s", storage_path, exc)
 
 
 @router.post("/timeline-events", response_model=TimelineEventRead, status_code=status.HTTP_201_CREATED)
@@ -92,6 +107,21 @@ def update_timeline_event(
     db.commit()
     db.refresh(event)
     return get_event_or_404(event.id, db)
+
+
+@router.delete("/timeline-events/{event_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_timeline_event(event_id: int, db: Session = Depends(get_db)) -> None:
+    event = get_event_or_404(event_id, db)
+    clip_path = event.clip.file_path if event.clip is not None else None
+    db.execute(
+        update(AutomaticEventSuggestion)
+        .where(AutomaticEventSuggestion.timeline_event_id == event.id)
+        .values(timeline_event_id=None)
+    )
+    db.delete(event)
+    db.commit()
+    if clip_path:
+        delete_media_reference(clip_path)
 
 
 @router.post("/timeline-events/{event_id}/clip", response_model=EventClipRead)

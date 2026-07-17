@@ -531,6 +531,31 @@ export default function CodingWorkspace() {
     setNotice(`${filteredEvents.length} filtered events marked confirmed.`);
   }
 
+  async function deleteTimelineEvents(eventsToDelete: TimelineEvent[], label: string) {
+    if (!eventsToDelete.length) return;
+    const confirmed = window.confirm(`Delete ${label}? This removes the coding event${eventsToDelete.length === 1 ? "" : "s"} from the timeline and reports.`);
+    if (!confirmed) return;
+    const eventIds = new Set(eventsToDelete.map((event) => event.id));
+    setBusy(true);
+    try {
+      await Promise.all(eventsToDelete.map((event) => codingApi.deleteEvent(event.id)));
+      setEvents((current) => current.filter((event) => !eventIds.has(event.id)));
+      setReviewMeta((current) => {
+        const next = { ...current };
+        for (const eventId of eventIds) {
+          delete next[eventId];
+        }
+        return next;
+      });
+      setSelectedEventId((current) => current && eventIds.has(current) ? null : current);
+      setNotice(`${eventsToDelete.length} timeline event${eventsToDelete.length === 1 ? "" : "s"} deleted.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Unable to delete timeline events");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function toggleClipRequest(event: TimelineEvent) {
     setBusy(true);
     try {
@@ -788,6 +813,7 @@ export default function CodingWorkspace() {
                     {EVENT_SOURCES.map((source) => <option key={source.value} value={source.value}>{source.label}</option>)}
                   </select>
                   <button type="button" onClick={markFilteredReviewed} disabled={!filteredEvents.length} className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-bold disabled:opacity-40">Confirm filtered</button>
+                  <button type="button" onClick={() => void deleteTimelineEvents(filteredEvents, `${filteredEvents.length} filtered timeline event${filteredEvents.length === 1 ? "" : "s"}`)} disabled={busy || !filteredEvents.length} className="rounded-lg border border-rose-900 px-3 py-2 text-sm font-bold text-rose-300 disabled:opacity-40">Delete filtered</button>
                 </div>
               </div>
               <div className="mt-3 grid grid-cols-3 gap-2 text-center text-xs">
@@ -831,6 +857,7 @@ export default function CodingWorkspace() {
                     <button type="button" onClick={() => updateReview(selectedEvent.id, { status: "flagged" })} className="rounded-lg border border-amber-900 px-3 py-2 text-sm font-bold text-amber-300">Flag</button>
                     <button type="button" onClick={() => void toggleClipRequest(selectedEvent)} disabled={busy} className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-bold disabled:opacity-40">{selectedEvent.clip_requested ? "Queued" : "Clip queue"}</button>
                   </div>
+                  <button type="button" onClick={() => void deleteTimelineEvents([selectedEvent], `${eventLabel(selectedEvent)} at ${formatTime(selectedEvent.start_seconds)}`)} disabled={busy} className="rounded-lg border border-rose-900 px-3 py-2 text-sm font-bold text-rose-300 disabled:opacity-40">Delete event</button>
                 </div>
               ) : (
                 <div className="rounded-lg border border-dashed border-slate-700 p-8 text-center text-sm text-slate-500">Press the blank-event key or select an event from the timeline.</div>
@@ -846,7 +873,10 @@ export default function CodingWorkspace() {
             </div>
 
             <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
-              <div className="mb-3 flex items-center justify-between"><h2 className="font-bold">Filtered timeline</h2><span className="text-xs text-slate-500">Chronological</span></div>
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h2 className="font-bold">Filtered timeline</h2>
+                <button type="button" onClick={() => void deleteTimelineEvents(filteredEvents, `${filteredEvents.length} filtered timeline event${filteredEvents.length === 1 ? "" : "s"}`)} disabled={busy || !filteredEvents.length} className="rounded border border-rose-900 px-2 py-1 text-xs font-bold text-rose-300 disabled:opacity-40">Delete filtered</button>
+              </div>
               <div className="max-h-[680px] space-y-2 overflow-y-auto pr-1">
                 {filteredEvents.map((item) => {
                   const review = reviewForEvent(item);

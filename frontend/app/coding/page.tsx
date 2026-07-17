@@ -143,12 +143,12 @@ const VARIANT_EVENT_SHORTCUTS: Omit<ShortcutBinding, "id" | "shortcut" | "team">
 
 const DEFAULT_SHORTCUTS: ShortcutBinding[] = [
   ...BASE_EVENT_SHORTCUTS.flatMap((binding, index) => [
-    { ...binding, id: `tag_home_${binding.eventType}_${index}`, label: `Home ${binding.label}`, shortcut: HOME_EVENT_KEYS[index], team: "home" as const },
-    { ...binding, id: `tag_away_${binding.eventType}_${index}`, label: `Away ${binding.label}`, shortcut: AWAY_EVENT_KEYS[index], team: "away" as const },
+    { ...binding, id: `tag_home_${binding.eventType}_${index}`, label: binding.label, shortcut: HOME_EVENT_KEYS[index], team: "home" as const },
+    { ...binding, id: `tag_away_${binding.eventType}_${index}`, label: binding.label, shortcut: AWAY_EVENT_KEYS[index], team: "away" as const },
   ]),
   ...VARIANT_EVENT_SHORTCUTS.flatMap((binding, index) => [
-    { ...binding, id: `tag_home_variant_${binding.eventType}_${index}`, label: `Home ${binding.label}`, shortcut: `Shift+${HOME_EVENT_KEYS[index]}`, team: "home" as const },
-    { ...binding, id: `tag_away_variant_${binding.eventType}_${index}`, label: `Away ${binding.label}`, shortcut: `Shift+${AWAY_EVENT_KEYS[index]}`, team: "away" as const },
+    { ...binding, id: `tag_home_variant_${binding.eventType}_${index}`, label: binding.label, shortcut: `Shift+${HOME_EVENT_KEYS[index]}`, team: "home" as const },
+    { ...binding, id: `tag_away_variant_${binding.eventType}_${index}`, label: binding.label, shortcut: `Shift+${AWAY_EVENT_KEYS[index]}`, team: "away" as const },
   ]),
   { id: "zone_own_22", label: "Own 22m", group: "zone", shortcut: ZONE_KEYS[0], fieldZone: "Own 22m", zoneLength: "Inside defensive 22m" },
   { id: "zone_own_half", label: "Own half", group: "zone", shortcut: ZONE_KEYS[1], fieldZone: "Own half", zoneLength: "Outside own 22m to halfway" },
@@ -289,10 +289,12 @@ function loadShortcutBindings() {
     const parsed = JSON.parse(saved) as Partial<ShortcutBinding>[];
     const defaults = DEFAULT_SHORTCUTS.map((binding) => {
       const savedBinding = parsed.find((item) => item.id === binding.id);
+      const savedLabel = savedBinding?.label ? displayEventLabel({ label: String(savedBinding.label) } as ShortcutBinding) : binding.label;
       return {
         ...binding,
         ...savedBinding,
         id: binding.id,
+        label: savedLabel,
         group: binding.group,
         custom: binding.custom,
         shortcut: savedBinding?.shortcut || binding.shortcut,
@@ -525,13 +527,13 @@ export default function CodingWorkspace() {
     const columns: Record<QuickColumnId, { id: QuickColumnId; title: string; subtitle: string; items: ShortcutBinding[] }> = {
       home: {
         id: "home",
-        title: "Home events",
+        title: "Home",
         subtitle: homeTeam?.name ?? "Home",
         items: eventShortcuts.filter((shortcut) => shortcut.team === "home" && !shortcut.custom),
       },
       away: {
         id: "away",
-        title: "Away events",
+        title: "Away",
         subtitle: awayTeam?.name ?? "Away",
         items: eventShortcuts.filter((shortcut) => shortcut.team === "away" && !shortcut.custom),
       },
@@ -541,21 +543,27 @@ export default function CodingWorkspace() {
 
   const customEventShortcuts = useMemo(() => eventShortcuts.filter((shortcut) => shortcut.custom || !["home", "away"].includes(String(shortcut.team))), [eventShortcuts]);
 
-  const mappingColumns = useMemo(() => {
-    const groups: { id: EventCategory | "custom"; title: string; items: ShortcutBinding[] }[] = [
-      { id: "attack", title: "Attack", items: [] },
-      { id: "defence", title: "Defence", items: [] },
-      { id: "set_piece", title: "Set piece", items: [] },
-      { id: "custom", title: "Special / custom", items: [] },
+  const mappingTeams = useMemo(() => {
+    const createSections = () => [
+      { id: "attack", title: "Attack", items: [] as ShortcutBinding[] },
+      { id: "defence", title: "Defence", items: [] as ShortcutBinding[] },
+      { id: "set_piece", title: "Set piece", items: [] as ShortcutBinding[] },
+      { id: "custom", title: "Restart / transition / custom", items: [] as ShortcutBinding[] },
     ];
-    for (const shortcut of eventShortcuts) {
-      if (shortcut.category === "attack" || shortcut.category === "kicking" || shortcut.category === "transition") groups[0].items.push(shortcut);
-      else if (shortcut.category === "defence" || shortcut.category === "discipline" || shortcut.category === "possession") groups[1].items.push(shortcut);
-      else if (shortcut.category === "set_piece") groups[2].items.push(shortcut);
-      else groups[3].items.push(shortcut);
+    const teams = [
+      { id: "home" as const, title: "Home", subtitle: homeTeam?.name ?? "Home", sections: createSections() },
+      { id: "away" as const, title: "Away", subtitle: awayTeam?.name ?? "Away", sections: createSections() },
+    ];
+    for (const shortcut of eventShortcuts.filter((item) => item.team === "home" || item.team === "away")) {
+      const team = teams.find((item) => item.id === shortcut.team);
+      if (!team) continue;
+      if (shortcut.category === "attack" || shortcut.category === "kicking") team.sections[0].items.push(shortcut);
+      else if (shortcut.category === "defence" || shortcut.category === "discipline" || shortcut.category === "possession") team.sections[1].items.push(shortcut);
+      else if (shortcut.category === "set_piece") team.sections[2].items.push(shortcut);
+      else team.sections[3].items.push(shortcut);
     }
-    return groups;
-  }, [eventShortcuts]);
+    return teams;
+  }, [awayTeam?.name, eventShortcuts, homeTeam?.name]);
 
   const recentEvents = useMemo(() => [...events].sort((a, b) => b.start_seconds - a.start_seconds).slice(0, 10), [events]);
 
@@ -1230,13 +1238,23 @@ export default function CodingWorkspace() {
               <textarea name="notes" placeholder="Default note" className={`${inputClass} md:col-span-2 xl:col-span-6`} data-design-id="coding-keyboard-add-notes" data-design-label="Keyboard add notes field" />
             </form>
 
-            <div className={`grid gap-4 ${gridColumnsClass(codingLayout.mappingColumns)}`} data-design-id="coding-keyboard-mapping-grid" data-design-label="Keyboard mapping grid" data-design-priority="310">
-              {mappingColumns.map((column, columnIndex) => (
-                <div key={column.id} className="rounded-lg border border-slate-800 bg-slate-950 p-3" data-design-id={`coding-keyboard-${designId(column.id)}-column`} data-design-label={`${column.title} mapping column`} data-design-priority={320 + columnIndex}>
-                  <h3 className="mb-3 text-xs font-bold uppercase tracking-[0.18em] text-slate-500">{column.title}</h3>
-                  <div className="grid gap-2">
-                    {column.items.map((binding) => (
-                      <div key={binding.id} className={mappingCardClass} data-design-id={`coding-keyboard-${designId(binding.id)}-card`} data-design-label={`${binding.label} mapping card`}>
+            <div className="grid gap-4" data-design-id="coding-keyboard-mapping-grid" data-design-label="Keyboard mapping grid" data-design-priority="310">
+              {mappingTeams.map((team, teamIndex) => (
+                <div key={team.id} className="rounded-xl border border-slate-800 bg-slate-950 p-4" data-design-id={`coding-keyboard-${team.id}-box`} data-design-label={`${team.title} keyboard mapping box`} data-design-priority={320 + teamIndex}>
+                  <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
+                    <div>
+                      <h3 className="text-lg font-black text-white">{team.title}</h3>
+                      <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">{team.subtitle}</p>
+                    </div>
+                    <span className="rounded bg-slate-900 px-2 py-1 text-xs font-bold text-emerald-400">{team.sections.reduce((count, section) => count + section.items.length, 0)} mapped keys</span>
+                  </div>
+                  <div className={`grid gap-3 ${gridColumnsClass(codingLayout.mappingColumns)}`} data-design-id={`coding-keyboard-${team.id}-sections`} data-design-label={`${team.title} keyboard sections`}>
+                    {team.sections.map((section, sectionIndex) => (
+                      <div key={section.id} className="rounded-lg border border-slate-800 bg-slate-900 p-3" data-design-id={`coding-keyboard-${team.id}-${designId(section.id)}-section`} data-design-label={`${team.title} ${section.title} section`} data-design-priority={340 + sectionIndex}>
+                        <h4 className="mb-3 text-xs font-bold uppercase tracking-[0.18em] text-slate-500">{section.title}</h4>
+                        <div className="grid gap-2">
+                          {section.items.map((binding) => (
+                            <div key={binding.id} className={mappingCardClass} data-design-id={`coding-keyboard-${designId(binding.id)}-card`} data-design-label={`${binding.label} mapping card`}>
                         <div className="mb-2 flex items-center justify-between gap-2" data-design-id={`coding-keyboard-${designId(binding.id)}-header`} data-design-label={`${binding.label} mapping header`}>
                           <input value={binding.label} onChange={(event) => updateLibraryEvent(binding.id, { label: event.target.value, outcome: binding.custom ? event.target.value : binding.outcome })} className="min-w-0 flex-1 rounded border border-slate-700 bg-slate-950 px-2 py-1 text-sm font-semibold text-white outline-none focus:border-emerald-400" aria-label={`${binding.label} name`} data-design-id={`coding-keyboard-${designId(binding.id)}-name`} data-design-label={`${binding.label} name field`} />
                           <kbd className={`rounded border px-2 py-1 text-xs font-bold ${shortcutConflict(binding.shortcut) ? "border-rose-400 text-rose-400" : "border-slate-700 text-emerald-400"}`} data-design-id={`coding-keyboard-${designId(binding.id)}-key`} data-design-label={`${binding.label} key badge`}>{editingShortcutId === binding.id ? "Hold + key" : shortcutLabel(binding.shortcut)}</kbd>
@@ -1257,6 +1275,9 @@ export default function CodingWorkspace() {
                         </div>
                         <input value={binding.notes ?? ""} onChange={(event) => updateLibraryEvent(binding.id, { notes: event.target.value })} placeholder="Default note" className={`${inputClass} mt-2`} aria-label={`${binding.label} note`} data-design-id={`coding-keyboard-${designId(binding.id)}-note`} data-design-label={`${binding.label} note field`} />
                         {binding.custom && <button type="button" onClick={() => deleteLibraryEvent(binding.id)} className="mt-2 w-full rounded border border-rose-900 px-3 py-2 text-sm font-bold text-rose-300" data-design-id={`coding-keyboard-${designId(binding.id)}-delete`} data-design-label={`${binding.label} delete custom button`}>Delete custom event</button>}
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     ))}
                   </div>

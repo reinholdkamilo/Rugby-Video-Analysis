@@ -890,7 +890,12 @@ export default function CodingWorkspace() {
         </div>
 
         <section className="space-y-5">
-          <section className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+          <section
+            className="rounded-xl border border-slate-800 bg-slate-900 p-4"
+            data-design-id="coding-workspace-layout-block"
+            data-design-label="Workspace layout block"
+            data-design-priority="10"
+          >
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="font-bold">Workspace layout</h2>
@@ -959,7 +964,12 @@ export default function CodingWorkspace() {
             </div>
           </div>
 
-          <section className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+          <section
+            className="rounded-xl border border-slate-800 bg-slate-900 p-4"
+            data-design-id="coding-quick-matrix-block"
+            data-design-label="Quick coding matrix block"
+            data-design-priority="15"
+          >
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="font-bold">Quick coding matrix</h2>
@@ -1050,7 +1060,12 @@ export default function CodingWorkspace() {
             ) : null}
           </section>
 
-          <section className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+          <section
+            className="rounded-xl border border-slate-800 bg-slate-900 p-4"
+            data-design-id="coding-recent-codes-block"
+            data-design-label="Recent codes block"
+            data-design-priority="18"
+          >
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="font-bold">Recent codes</h2>
@@ -1090,7 +1105,13 @@ export default function CodingWorkspace() {
             ) : null}
           </section>
 
-          <form onSubmit={submitCustomEvent} className="grid gap-3 rounded-xl border border-slate-800 bg-slate-900 p-4 md:grid-cols-2 xl:grid-cols-7">
+          <form
+            onSubmit={submitCustomEvent}
+            className="grid gap-3 rounded-xl border border-slate-800 bg-slate-900 p-4 md:grid-cols-2 xl:grid-cols-7"
+            data-design-id="coding-manual-event-block"
+            data-design-label="Manual event block"
+            data-design-priority="20"
+          >
             <div className="md:col-span-2 xl:col-span-7">
               <h2 className="font-bold">Manual event at {formatTime(currentTime)}</h2>
               <p className="mt-1 text-xs text-slate-500">Use this when the rugby action needs a one-off detail that is not mapped yet.</p>
@@ -1104,7 +1125,12 @@ export default function CodingWorkspace() {
             <button type="submit" disabled={busy || !selectedVideoId} className="rounded-lg bg-emerald-400 px-4 py-2 font-bold text-slate-950 disabled:opacity-40">Add event</button>
           </form>
 
-          <section className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+          <section
+            className="rounded-xl border border-slate-800 bg-slate-900 p-4"
+            data-design-id="coding-keyboard-mapping-block"
+            data-design-label="Keyboard mapping block"
+            data-design-priority="30"
+          >
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="font-bold">Keyboard mapping</h2>
@@ -1165,7 +1191,12 @@ export default function CodingWorkspace() {
               ))}
             </div>
 
-            <div className="mt-4 rounded-lg border border-slate-800 bg-slate-950 p-3">
+            <div
+              className="mt-4 rounded-lg border border-slate-800 bg-slate-950 p-3"
+              data-design-id="coding-video-controls-block"
+              data-design-label="Video controls block"
+              data-design-priority="40"
+            >
               <h3 className="mb-3 text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Video controls</h3>
               <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
                 {videoShortcuts.map((binding) => (
@@ -1179,7 +1210,12 @@ export default function CodingWorkspace() {
             </div>
           </section>
 
-          <section className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+          <section
+            className="rounded-xl border border-slate-800 bg-slate-900 p-4"
+            data-design-id="coding-timeline-cleanup-block"
+            data-design-label="Timeline cleanup block"
+            data-design-priority="50"
+          >
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="font-bold">Timeline cleanup</h2>

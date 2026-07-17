@@ -82,6 +82,7 @@ const DEFAULT_SETTINGS: DesignSettings = {
 };
 
 const editableSelector = [
+  "main [data-design-id]",
   "main > header",
   "main > div",
   "main > section",
@@ -117,9 +118,16 @@ function readableLabel(value: string) {
 }
 
 function elementLabel(element: Element, fallback: string) {
+  const designLabel = element.getAttribute("data-design-label");
+  if (designLabel) return readableLabel(designLabel);
   const heading = element.matches(textSelector) ? element : element.querySelector("h1,h2,h3,h4,p,button,a,label");
   const text = heading?.textContent?.trim() || element.getAttribute("aria-label") || fallback;
   return readableLabel(text.slice(0, 54));
+}
+
+function elementPriority(element: Element) {
+  const value = Number(element.getAttribute("data-design-priority"));
+  return Number.isFinite(value) ? value : undefined;
 }
 
 function elementSelector(id: string) {
@@ -179,6 +187,7 @@ export function AppDesignStudio() {
 
   const currentPage = useMemo(() => pageSettings(settings, key), [key, settings]);
   const currentElements = elements.length ? elements : currentPage.elements;
+  const priorityElements = currentElements.filter((item) => (item.order ?? 1000) < 1000);
   const selected = currentElements.find((item) => item.id === selectedId) ?? null;
 
   const updateElement = useCallback((id: string, updates: Partial<ElementDesign>) => {
@@ -272,7 +281,7 @@ export function AppDesignStudio() {
           id: currentId,
           label: elementLabel(element, `${element.tagName.toLowerCase()} ${index + 1}`),
           hidden: false,
-          order: index,
+          order: elementPriority(element) ?? index + 1000,
         };
       });
   }, [key]);
@@ -588,6 +597,17 @@ export function AppDesignStudio() {
 
           {panelTab === "page" ? (
             <>
+              {priorityElements.length ? (
+                <section>
+                  <h3>Priority Blocks</h3>
+                  <div className="design-section-list">
+                    {priorityElements.map((element) => (
+                      <button key={element.id} type="button" className={element.id === selectedId ? "is-active" : ""} onClick={() => setSelectedId(element.id)}>{element.label}</button>
+                    ))}
+                  </div>
+                </section>
+              ) : null}
+
               <section>
                 <h3>Theme</h3>
                 <label>Text <input type="color" value={settings.theme.ink} onChange={(event) => updateTheme({ ink: event.target.value })} /></label>
@@ -609,7 +629,7 @@ export function AppDesignStudio() {
               <section>
                 <h3>Detected Elements</h3>
                 <div className="design-section-list">
-                  {currentElements.slice(0, 40).map((element) => (
+                  {currentElements.slice(0, 90).map((element) => (
                     <button key={element.id} type="button" className={element.id === selectedId ? "is-active" : ""} onClick={() => setSelectedId(element.id)}>{element.label}</button>
                   ))}
                 </div>

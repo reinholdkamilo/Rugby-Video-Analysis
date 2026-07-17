@@ -31,6 +31,14 @@ type VideoCommand =
   | "speed_double";
 
 type EventCategory = "core" | "attack" | "defence" | "set_piece" | "discipline" | "transition" | "kicking" | "possession";
+type ReviewStatus = "unreviewed" | "confirmed" | "flagged";
+type EventSource = "manual" | "auto" | "vision" | "imported";
+
+type ReviewMeta = {
+  status: ReviewStatus;
+  source: EventSource;
+  confidence: number;
+};
 
 type ShortcutBinding = {
   id: string;
@@ -48,6 +56,7 @@ type ShortcutBinding = {
 };
 
 const SHORTCUT_STORAGE_KEY = "rugby-video-analysis:coding-shortcuts:v1";
+const REVIEW_STORAGE_KEY = "rugby-video-analysis:coding-review:v1";
 
 const EVENT_LIBRARY_CATEGORIES: { value: EventCategory; label: string }[] = [
   { value: "attack", label: "Attack" },
@@ -58,6 +67,19 @@ const EVENT_LIBRARY_CATEGORIES: { value: EventCategory; label: string }[] = [
   { value: "kicking", label: "Kicking" },
   { value: "possession", label: "Possession" },
   { value: "core", label: "Core" },
+];
+
+const REVIEW_STATUSES: { value: ReviewStatus; label: string }[] = [
+  { value: "unreviewed", label: "Unreviewed" },
+  { value: "confirmed", label: "Confirmed" },
+  { value: "flagged", label: "Flagged" },
+];
+
+const EVENT_SOURCES: { value: EventSource; label: string }[] = [
+  { value: "manual", label: "Manual" },
+  { value: "auto", label: "Auto" },
+  { value: "vision", label: "Vision" },
+  { value: "imported", label: "Imported" },
 ];
 
 const DEFAULT_SHORTCUTS: ShortcutBinding[] = [
@@ -165,6 +187,25 @@ function loadShortcutBindings() {
   }
 }
 
+function loadReviewMeta() {
+  if (typeof window === "undefined") return {};
+  const saved = window.localStorage.getItem(REVIEW_STORAGE_KEY);
+  if (!saved) return {};
+  try {
+    return JSON.parse(saved) as Record<number, ReviewMeta>;
+  } catch {
+    return {};
+  }
+}
+
+function defaultReviewMeta(event?: TimelineEvent | null): ReviewMeta {
+  return {
+    status: "unreviewed",
+    source: event?.created_at === event?.updated_at ? "manual" : "auto",
+    confidence: 100,
+  };
+}
+
 export default function CodingWorkspace() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [matches, setMatches] = useState<Match[]>([]);
@@ -179,11 +220,19 @@ export default function CodingWorkspace() {
   const [shortcuts, setShortcuts] = useState<ShortcutBinding[]>(DEFAULT_SHORTCUTS);
   const [editingShortcutId, setEditingShortcutId] = useState<string | null>(null);
   const [selectedEventId, setSelectedEventId] = useState<number | null>(null);
+  const [reviewMeta, setReviewMeta] = useState<Record<number, ReviewMeta>>({});
+  const [timelineSearch, setTimelineSearch] = useState("");
+  const [timelineTeamFilter, setTimelineTeamFilter] = useState<EventTeam | "all">("all");
+  const [timelineTypeFilter, setTimelineTypeFilter] = useState<EventType | "all">("all");
+  const [timelineCategoryFilter, setTimelineCategoryFilter] = useState<EventCategory | "all">("all");
+  const [timelineReviewFilter, setTimelineReviewFilter] = useState<ReviewStatus | "all">("all");
+  const [timelineSourceFilter, setTimelineSourceFilter] = useState<EventSource | "all">("all");
   const [notice, setNotice] = useState("Loading coding workspace...");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     setShortcuts(loadShortcutBindings());
+    setReviewMeta(loadReviewMeta());
   }, []);
 
   useEffect(() => {
@@ -192,6 +241,11 @@ export default function CodingWorkspace() {
       custom ? { id, shortcut, custom, label, duration, category, outcome, fieldZone, notes } : { id, shortcut }
     ))));
   }, [shortcuts]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(REVIEW_STORAGE_KEY, JSON.stringify(reviewMeta));
+  }, [reviewMeta]);
 
   const loadWorkspace = useCallback(async () => {
     try {
@@ -250,6 +304,43 @@ export default function CodingWorkspace() {
 
   const eventShortcuts = useMemo(() => shortcuts.filter((shortcut) => shortcut.group === "event"), [shortcuts]);
   const videoShortcuts = useMemo(() => shortcuts.filter((shortcut) => shortcut.group === "video"), [shortcuts]);
+
+  const eventLabel = useCallback((event: TimelineEvent) => event.outcome || event.event_type, []);
+
+  const eventCategory = useCallback((event: TimelineEvent) => {
+    const label = eventLabel(event).toLowerCase();
+    return eventShortcuts.find((shortcut) => (
+      shortcut.eventType === event.event_type && (!shortcut.outcome || shortcut.outcome.toLowerCase() === label)
+    ))?.category ?? "core";
+  }, [eventLabel, eventShortcuts]);
+
+  const reviewForEvent = useCallback((event: TimelineEvent) => reviewMeta[event.id] ?? defaultReviewMeta(event), [reviewMeta]);
+
+  const selectedReview = selectedEvent ? reviewForEvent(selectedEvent) : null;
+
+  const filteredEvents = useMemo(() => {
+    const query = timelineSearch.trim().toLowerCase();
+    return events.filter((event) => {
+      const review = reviewForEvent(event);
+      const label = eventLabel(event);
+      const searchable = [label, event.event_type, event.team, event.field_zone, event.notes, event.outcome, event.phase_number ? `phase ${event.phase_number}` : ""].filter(Boolean).join(" ").toLowerCase();
+      if (query && !searchable.includes(query)) return false;
+      if (timelineTeamFilter !== "all" && event.team !== timelineTeamFilter) return false;
+      if (timelineTypeFilter !== "all" && event.event_type !== timelineTypeFilter) return false;
+      if (timelineCategoryFilter !== "all" && eventCategory(event) !== timelineCategoryFilter) return false;
+      if (timelineReviewFilter !== "all" && review.status !== timelineReviewFilter) return false;
+      if (timelineSourceFilter !== "all" && review.source !== timelineSourceFilter) return false;
+      return true;
+    });
+  }, [eventCategory, eventLabel, events, reviewForEvent, timelineCategoryFilter, timelineReviewFilter, timelineSearch, timelineSourceFilter, timelineTeamFilter, timelineTypeFilter]);
+
+  const reviewCounts = useMemo(() => {
+    return events.reduce<Record<ReviewStatus, number>>((counts, event) => {
+      const status = reviewForEvent(event).status;
+      counts[status] += 1;
+      return counts;
+    }, { unreviewed: 0, confirmed: 0, flagged: 0 });
+  }, [events, reviewForEvent]);
 
   const shortcutConflict = useMemo(() => {
     const counts = shortcuts.reduce<Record<string, number>>((items, shortcut) => {
@@ -419,6 +510,38 @@ export default function CodingWorkspace() {
     const binding = shortcuts.find((item) => item.id === bindingId);
     setShortcuts((current) => current.filter((item) => item.id !== bindingId));
     setNotice(`${binding?.label ?? "Custom event"} removed from the coding event library.`);
+  }
+
+  function updateReview(eventId: number, updates: Partial<ReviewMeta>) {
+    const event = events.find((item) => item.id === eventId);
+    setReviewMeta((current) => ({
+      ...current,
+      [eventId]: { ...defaultReviewMeta(event), ...current[eventId], ...updates },
+    }));
+  }
+
+  function markFilteredReviewed() {
+    setReviewMeta((current) => {
+      const next = { ...current };
+      for (const event of filteredEvents) {
+        next[event.id] = { ...defaultReviewMeta(event), ...next[event.id], status: "confirmed" };
+      }
+      return next;
+    });
+    setNotice(`${filteredEvents.length} filtered events marked confirmed.`);
+  }
+
+  async function toggleClipRequest(event: TimelineEvent) {
+    setBusy(true);
+    try {
+      const updated = await codingApi.updateEvent(event.id, { clip_requested: !event.clip_requested });
+      setEvents((current) => current.map((item) => item.id === updated.id ? updated : item).sort((a, b) => a.start_seconds - b.start_seconds));
+      setNotice(updated.clip_requested ? "Event added to the clip queue." : "Event removed from the clip queue.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Unable to update clip request");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function submitCustomEvent(event: FormEvent<HTMLFormElement>) {
@@ -631,6 +754,49 @@ export default function CodingWorkspace() {
           </section>
 
           <aside className="space-y-5">
+            <section className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="font-bold">Timeline review</h2>
+                  <p className="text-xs text-slate-500">Filter, confirm and prepare coded events for reporting.</p>
+                </div>
+                <span className="rounded bg-slate-950 px-2 py-1 text-xs font-bold text-emerald-400">{filteredEvents.length}/{events.length}</span>
+              </div>
+              <div className="grid gap-2">
+                <input value={timelineSearch} onChange={(event) => setTimelineSearch(event.target.value)} placeholder="Search event, note, zone or phase" className={inputClass} />
+                <div className="grid grid-cols-2 gap-2">
+                  <select value={timelineTeamFilter} onChange={(event) => setTimelineTeamFilter(event.target.value as EventTeam | "all")} className={inputClass}>
+                    <option value="all">All teams</option>
+                    <option value="home">{homeTeam?.name ?? "Home"}</option>
+                    <option value="away">{awayTeam?.name ?? "Away"}</option>
+                    <option value="neutral">Neutral</option>
+                  </select>
+                  <select value={timelineTypeFilter} onChange={(event) => setTimelineTypeFilter(event.target.value as EventType | "all")} className={inputClass}>
+                    <option value="all">All event types</option>
+                    {EVENT_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
+                  </select>
+                  <select value={timelineCategoryFilter} onChange={(event) => setTimelineCategoryFilter(event.target.value as EventCategory | "all")} className={inputClass}>
+                    <option value="all">All categories</option>
+                    {EVENT_LIBRARY_CATEGORIES.map((category) => <option key={category.value} value={category.value}>{category.label}</option>)}
+                  </select>
+                  <select value={timelineReviewFilter} onChange={(event) => setTimelineReviewFilter(event.target.value as ReviewStatus | "all")} className={inputClass}>
+                    <option value="all">All review states</option>
+                    {REVIEW_STATUSES.map((status) => <option key={status.value} value={status.value}>{status.label}</option>)}
+                  </select>
+                  <select value={timelineSourceFilter} onChange={(event) => setTimelineSourceFilter(event.target.value as EventSource | "all")} className={inputClass}>
+                    <option value="all">All sources</option>
+                    {EVENT_SOURCES.map((source) => <option key={source.value} value={source.value}>{source.label}</option>)}
+                  </select>
+                  <button type="button" onClick={markFilteredReviewed} disabled={!filteredEvents.length} className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-bold disabled:opacity-40">Confirm filtered</button>
+                </div>
+              </div>
+              <div className="mt-3 grid grid-cols-3 gap-2 text-center text-xs">
+                <div className="rounded-lg bg-slate-950 p-2"><p className="font-bold text-slate-400">Unreviewed</p><p className="mt-1 text-lg text-white">{reviewCounts.unreviewed}</p></div>
+                <div className="rounded-lg bg-slate-950 p-2"><p className="font-bold text-emerald-400">Confirmed</p><p className="mt-1 text-lg text-white">{reviewCounts.confirmed}</p></div>
+                <div className="rounded-lg bg-slate-950 p-2"><p className="font-bold text-amber-300">Flagged</p><p className="mt-1 text-lg text-white">{reviewCounts.flagged}</p></div>
+              </div>
+            </section>
+
             <form onSubmit={submitEventEdit} className="rounded-xl border border-slate-800 bg-slate-900 p-4">
               <div className="mb-3 flex items-center justify-between gap-3">
                 <div>
@@ -651,9 +817,19 @@ export default function CodingWorkspace() {
                     <input key={`phase-${selectedEvent.id}`} name="phase_number" type="number" min="1" placeholder="Phase" defaultValue={selectedEvent.phase_number ?? ""} className={inputClass} />
                   </div>
                   <textarea key={`notes-${selectedEvent.id}`} name="notes" placeholder="Analyst notes" defaultValue={selectedEvent.notes ?? ""} className={inputClass} />
+                  <div className="grid grid-cols-3 gap-2">
+                    <select value={selectedReview?.status ?? "unreviewed"} onChange={(event) => updateReview(selectedEvent.id, { status: event.target.value as ReviewStatus })} className={inputClass} aria-label="Review status">{REVIEW_STATUSES.map((status) => <option key={status.value} value={status.value}>{status.label}</option>)}</select>
+                    <select value={selectedReview?.source ?? "manual"} onChange={(event) => updateReview(selectedEvent.id, { source: event.target.value as EventSource })} className={inputClass} aria-label="Event source">{EVENT_SOURCES.map((source) => <option key={source.value} value={source.value}>{source.label}</option>)}</select>
+                    <input type="number" min="0" max="100" value={selectedReview?.confidence ?? 100} onChange={(event) => updateReview(selectedEvent.id, { confidence: Number(event.target.value || 0) })} className={inputClass} aria-label="Confidence percent" />
+                  </div>
                   <div className="flex gap-2">
                     <button type="submit" disabled={busy} className="flex-1 rounded-lg bg-emerald-400 px-4 py-2 font-bold text-slate-950 disabled:opacity-40">Save event</button>
                     <button type="button" onClick={() => seekTo(selectedEvent.start_seconds)} className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-bold">Play</button>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <button type="button" onClick={() => updateReview(selectedEvent.id, { status: "confirmed" })} className="rounded-lg border border-emerald-900 px-3 py-2 text-sm font-bold text-emerald-300">Confirm</button>
+                    <button type="button" onClick={() => updateReview(selectedEvent.id, { status: "flagged" })} className="rounded-lg border border-amber-900 px-3 py-2 text-sm font-bold text-amber-300">Flag</button>
+                    <button type="button" onClick={() => void toggleClipRequest(selectedEvent)} disabled={busy} className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-bold disabled:opacity-40">{selectedEvent.clip_requested ? "Queued" : "Clip queue"}</button>
                   </div>
                 </div>
               ) : (
@@ -670,10 +846,29 @@ export default function CodingWorkspace() {
             </div>
 
             <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
-              <div className="mb-3 flex items-center justify-between"><h2 className="font-bold">Timeline</h2><span className="text-xs text-slate-500">Chronological</span></div>
+              <div className="mb-3 flex items-center justify-between"><h2 className="font-bold">Filtered timeline</h2><span className="text-xs text-slate-500">Chronological</span></div>
               <div className="max-h-[680px] space-y-2 overflow-y-auto pr-1">
-                {events.map((item) => <button key={item.id} type="button" onClick={() => { setSelectedEventId(item.id); seekTo(item.start_seconds); }} className={`w-full rounded-lg border bg-slate-950 p-3 text-left hover:border-emerald-400 ${selectedEventId === item.id ? "border-emerald-400" : "border-slate-800"}`}><div className="flex items-center justify-between gap-3"><span className="font-mono text-sm text-emerald-400">{formatTime(item.start_seconds)}</span><span className="rounded bg-slate-800 px-2 py-1 text-xs capitalize">{item.team}</span></div><p className="mt-2 font-semibold capitalize">{item.event_type}</p><p className="mt-1 truncate text-xs text-slate-500">{item.outcome || item.field_zone || item.notes || `${Math.round(item.end_seconds - item.start_seconds)} second window`}</p></button>)}
+                {filteredEvents.map((item) => {
+                  const review = reviewForEvent(item);
+                  return (
+                    <button key={item.id} type="button" onClick={() => { setSelectedEventId(item.id); seekTo(item.start_seconds); }} className={`w-full rounded-lg border bg-slate-950 p-3 text-left hover:border-emerald-400 ${selectedEventId === item.id ? "border-emerald-400" : "border-slate-800"}`}>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="font-mono text-sm text-emerald-400">{formatTime(item.start_seconds)}</span>
+                        <span className="rounded bg-slate-800 px-2 py-1 text-xs capitalize">{item.team}</span>
+                      </div>
+                      <p className="mt-2 font-semibold capitalize">{eventLabel(item)}</p>
+                      <div className="mt-2 flex flex-wrap gap-1 text-[11px] font-bold uppercase tracking-[0.12em]">
+                        <span className="rounded bg-slate-900 px-2 py-1 text-slate-400">{eventCategory(item).replace("_", " ")}</span>
+                        <span className={`rounded px-2 py-1 ${review.status === "confirmed" ? "bg-emerald-950 text-emerald-300" : review.status === "flagged" ? "bg-amber-950 text-amber-300" : "bg-slate-900 text-slate-400"}`}>{review.status}</span>
+                        <span className="rounded bg-slate-900 px-2 py-1 text-slate-400">{review.source} · {review.confidence}%</span>
+                        {item.clip_requested && <span className="rounded bg-sky-950 px-2 py-1 text-sky-300">clip</span>}
+                      </div>
+                      <p className="mt-2 truncate text-xs text-slate-500">{item.field_zone || item.notes || `${Math.round(item.end_seconds - item.start_seconds)} second window`}</p>
+                    </button>
+                  );
+                })}
                 {!events.length && <div className="rounded-lg border border-dashed border-slate-700 p-8 text-center text-sm text-slate-500">Play the video and use the quick-tag buttons to build the timeline.</div>}
+                {Boolean(events.length && !filteredEvents.length) && <div className="rounded-lg border border-dashed border-slate-700 p-8 text-center text-sm text-slate-500">No events match the current review filters.</div>}
               </div>
             </div>
           </aside>

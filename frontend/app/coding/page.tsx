@@ -43,6 +43,7 @@ type ShortcutBinding = {
 const SHORTCUT_STORAGE_KEY = "rugby-video-analysis:coding-shortcuts:v1";
 
 const DEFAULT_SHORTCUTS: ShortcutBinding[] = [
+  { id: "tag_blank", label: "Blank event", group: "event", shortcut: "KeyB", eventType: "custom", duration: 8 },
   { id: "tag_carry", label: "Carry", group: "event", shortcut: "Digit1", eventType: "carry", duration: 6 },
   { id: "tag_tackle", label: "Tackle", group: "event", shortcut: "Digit2", eventType: "tackle", duration: 5 },
   { id: "tag_ruck", label: "Ruck", group: "event", shortcut: "Digit3", eventType: "ruck", duration: 6 },
@@ -143,6 +144,7 @@ export default function CodingWorkspace() {
   const [playbackRate, setPlaybackRate] = useState(1);
   const [shortcuts, setShortcuts] = useState<ShortcutBinding[]>(DEFAULT_SHORTCUTS);
   const [editingShortcutId, setEditingShortcutId] = useState<string | null>(null);
+  const [selectedEventId, setSelectedEventId] = useState<number | null>(null);
   const [notice, setNotice] = useState("Loading coding workspace...");
   const [busy, setBusy] = useState(false);
 
@@ -201,6 +203,7 @@ export default function CodingWorkspace() {
   const homeTeam = teams.find((team) => team.id === selectedMatch?.home_team_id);
   const awayTeam = teams.find((team) => team.id === selectedMatch?.away_team_id);
   const selectedVideo = videos.find((video) => video.id === selectedVideoId) ?? null;
+  const selectedEvent = events.find((event) => event.id === selectedEventId) ?? null;
 
   const eventCounts = useMemo(() => {
     return events.reduce<Record<string, number>>((counts, event) => {
@@ -241,7 +244,8 @@ export default function CodingWorkspace() {
         clip_requested: false,
       });
       setEvents((current) => [...current, created].sort((a, b) => a.start_seconds - b.start_seconds));
-      setNotice(`${type} coded at ${formatTime(start)} for ${selectedTeam}.`);
+      setSelectedEventId(created.id);
+      setNotice(type === "custom" ? `Blank event created at ${formatTime(start)}. Edit it in the timeline panel.` : `${type} coded at ${formatTime(start)} for ${selectedTeam}.`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Unable to create event");
     } finally {
@@ -341,6 +345,33 @@ export default function CodingWorkspace() {
       fieldZone: String(form.get("field_zone") || "").trim(),
     });
     event.currentTarget.reset();
+  }
+
+  async function submitEventEdit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedEvent) return;
+    const form = new FormData(event.currentTarget);
+    setBusy(true);
+    try {
+      const updated = await codingApi.updateEvent(selectedEvent.id, {
+        event_type: String(form.get("event_type")) as EventType,
+        team: String(form.get("team")) as EventTeam,
+        start_seconds: Number(form.get("start_seconds")),
+        end_seconds: Number(form.get("end_seconds")),
+        player_name: null,
+        outcome: String(form.get("outcome") || "").trim() || null,
+        notes: String(form.get("notes") || "").trim() || null,
+        phase_number: form.get("phase_number") ? Number(form.get("phase_number")) : null,
+        field_zone: String(form.get("field_zone") || "").trim() || null,
+      });
+      setEvents((current) => current.map((item) => item.id === updated.id ? updated : item).sort((a, b) => a.start_seconds - b.start_seconds));
+      setSelectedEventId(updated.id);
+      setNotice(`${updated.event_type} updated at ${formatTime(updated.start_seconds)}.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Unable to update event");
+    } finally {
+      setBusy(false);
+    }
   }
 
   function seekTo(seconds: number) {
@@ -463,6 +494,36 @@ export default function CodingWorkspace() {
           </section>
 
           <aside className="space-y-5">
+            <form onSubmit={submitEventEdit} className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="font-bold">Edit selected event</h2>
+                  <p className="text-xs text-slate-500">Select a timeline event, then shape it into the rugby action you need.</p>
+                </div>
+                {selectedEvent && <span className="rounded bg-slate-950 px-2 py-1 text-xs font-bold text-emerald-400">#{selectedEvent.id}</span>}
+              </div>
+              {selectedEvent ? (
+                <div className="grid gap-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <select key={`type-${selectedEvent.id}`} name="event_type" defaultValue={selectedEvent.event_type} className={inputClass}>{EVENT_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}</select>
+                    <select key={`team-${selectedEvent.id}`} name="team" defaultValue={selectedEvent.team} className={inputClass}><option value="home">{homeTeam?.name ?? "Home"}</option><option value="away">{awayTeam?.name ?? "Away"}</option><option value="neutral">Neutral</option></select>
+                    <input key={`start-${selectedEvent.id}`} name="start_seconds" type="number" min="0" step="0.1" defaultValue={selectedEvent.start_seconds} className={inputClass} />
+                    <input key={`end-${selectedEvent.id}`} name="end_seconds" type="number" min="0.1" step="0.1" defaultValue={selectedEvent.end_seconds} className={inputClass} />
+                    <input key={`outcome-${selectedEvent.id}`} name="outcome" placeholder="Outcome or detail" defaultValue={selectedEvent.outcome ?? ""} className={inputClass} />
+                    <input key={`zone-${selectedEvent.id}`} name="field_zone" placeholder="Field zone" defaultValue={selectedEvent.field_zone ?? ""} className={inputClass} />
+                    <input key={`phase-${selectedEvent.id}`} name="phase_number" type="number" min="1" placeholder="Phase" defaultValue={selectedEvent.phase_number ?? ""} className={inputClass} />
+                  </div>
+                  <textarea key={`notes-${selectedEvent.id}`} name="notes" placeholder="Analyst notes" defaultValue={selectedEvent.notes ?? ""} className={inputClass} />
+                  <div className="flex gap-2">
+                    <button type="submit" disabled={busy} className="flex-1 rounded-lg bg-emerald-400 px-4 py-2 font-bold text-slate-950 disabled:opacity-40">Save event</button>
+                    <button type="button" onClick={() => seekTo(selectedEvent.start_seconds)} className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-bold">Play</button>
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-lg border border-dashed border-slate-700 p-8 text-center text-sm text-slate-500">Press the blank-event key or select an event from the timeline.</div>
+              )}
+            </form>
+
             <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
               <h2 className="font-bold">Live event summary</h2>
               <div className="mt-3 grid grid-cols-3 gap-2">
@@ -474,7 +535,7 @@ export default function CodingWorkspace() {
             <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
               <div className="mb-3 flex items-center justify-between"><h2 className="font-bold">Timeline</h2><span className="text-xs text-slate-500">Chronological</span></div>
               <div className="max-h-[680px] space-y-2 overflow-y-auto pr-1">
-                {events.map((item) => <button key={item.id} type="button" onClick={() => seekTo(item.start_seconds)} className="w-full rounded-lg border border-slate-800 bg-slate-950 p-3 text-left hover:border-emerald-400"><div className="flex items-center justify-between gap-3"><span className="font-mono text-sm text-emerald-400">{formatTime(item.start_seconds)}</span><span className="rounded bg-slate-800 px-2 py-1 text-xs capitalize">{item.team}</span></div><p className="mt-2 font-semibold capitalize">{item.event_type}</p><p className="mt-1 truncate text-xs text-slate-500">{item.player_name || item.outcome || item.notes || `${Math.round(item.end_seconds - item.start_seconds)} second window`}</p></button>)}
+                {events.map((item) => <button key={item.id} type="button" onClick={() => { setSelectedEventId(item.id); seekTo(item.start_seconds); }} className={`w-full rounded-lg border bg-slate-950 p-3 text-left hover:border-emerald-400 ${selectedEventId === item.id ? "border-emerald-400" : "border-slate-800"}`}><div className="flex items-center justify-between gap-3"><span className="font-mono text-sm text-emerald-400">{formatTime(item.start_seconds)}</span><span className="rounded bg-slate-800 px-2 py-1 text-xs capitalize">{item.team}</span></div><p className="mt-2 font-semibold capitalize">{item.event_type}</p><p className="mt-1 truncate text-xs text-slate-500">{item.outcome || item.field_zone || item.notes || `${Math.round(item.end_seconds - item.start_seconds)} second window`}</p></button>)}
                 {!events.length && <div className="rounded-lg border border-dashed border-slate-700 p-8 text-center text-sm text-slate-500">Play the video and use the quick-tag buttons to build the timeline.</div>}
               </div>
             </div>

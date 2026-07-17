@@ -11,16 +11,67 @@ const EVENT_TYPES: EventType[] = [
   "kick", "turnover", "penalty", "try", "conversion", "card", "stoppage", "custom",
 ];
 
-const QUICK_TAGS: { key: string; label: string; type: EventType; duration: number }[] = [
-  { key: "1", label: "Carry", type: "carry", duration: 6 },
-  { key: "2", label: "Tackle", type: "tackle", duration: 5 },
-  { key: "3", label: "Ruck", type: "ruck", duration: 6 },
-  { key: "4", label: "Pass", type: "pass", duration: 4 },
-  { key: "5", label: "Kick", type: "kick", duration: 8 },
-  { key: "6", label: "Lineout", type: "lineout", duration: 18 },
-  { key: "7", label: "Scrum", type: "scrum", duration: 22 },
-  { key: "8", label: "Penalty", type: "penalty", duration: 8 },
-  { key: "9", label: "Try", type: "try", duration: 12 },
+type VideoCommand =
+  | "play_pause"
+  | "seek_back_5"
+  | "seek_forward_5"
+  | "seek_back_10"
+  | "seek_forward_10"
+  | "seek_back_5m"
+  | "seek_forward_5m"
+  | "seek_back_10m"
+  | "seek_forward_10m"
+  | "step_back"
+  | "step_forward"
+  | "speed_down"
+  | "speed_up"
+  | "speed_quarter"
+  | "speed_half"
+  | "speed_normal"
+  | "speed_double";
+
+type ShortcutBinding = {
+  id: string;
+  label: string;
+  group: "event" | "video";
+  shortcut: string;
+  eventType?: EventType;
+  duration?: number;
+  command?: VideoCommand;
+};
+
+const SHORTCUT_STORAGE_KEY = "rugby-video-analysis:coding-shortcuts:v1";
+
+const DEFAULT_SHORTCUTS: ShortcutBinding[] = [
+  { id: "tag_carry", label: "Carry", group: "event", shortcut: "Digit1", eventType: "carry", duration: 6 },
+  { id: "tag_tackle", label: "Tackle", group: "event", shortcut: "Digit2", eventType: "tackle", duration: 5 },
+  { id: "tag_ruck", label: "Ruck", group: "event", shortcut: "Digit3", eventType: "ruck", duration: 6 },
+  { id: "tag_pass", label: "Pass", group: "event", shortcut: "Digit4", eventType: "pass", duration: 4 },
+  { id: "tag_kick", label: "Kick", group: "event", shortcut: "Digit5", eventType: "kick", duration: 8 },
+  { id: "tag_lineout", label: "Lineout", group: "event", shortcut: "Digit6", eventType: "lineout", duration: 18 },
+  { id: "tag_scrum", label: "Scrum", group: "event", shortcut: "Digit7", eventType: "scrum", duration: 22 },
+  { id: "tag_penalty", label: "Penalty", group: "event", shortcut: "Digit8", eventType: "penalty", duration: 8 },
+  { id: "tag_try", label: "Try", group: "event", shortcut: "Digit9", eventType: "try", duration: 12 },
+  { id: "tag_turnover", label: "Turnover", group: "event", shortcut: "KeyO", eventType: "turnover", duration: 8 },
+  { id: "tag_maul", label: "Maul", group: "event", shortcut: "KeyM", eventType: "maul", duration: 10 },
+  { id: "tag_stoppage", label: "Stoppage", group: "event", shortcut: "KeyX", eventType: "stoppage", duration: 10 },
+  { id: "video_play_pause", label: "Play / pause", group: "video", shortcut: "Space", command: "play_pause" },
+  { id: "video_back_5", label: "Back 5 seconds", group: "video", shortcut: "ArrowLeft", command: "seek_back_5" },
+  { id: "video_forward_5", label: "Forward 5 seconds", group: "video", shortcut: "ArrowRight", command: "seek_forward_5" },
+  { id: "video_back_10", label: "Back 10 seconds", group: "video", shortcut: "Shift+ArrowLeft", command: "seek_back_10" },
+  { id: "video_forward_10", label: "Forward 10 seconds", group: "video", shortcut: "Shift+ArrowRight", command: "seek_forward_10" },
+  { id: "video_back_5m", label: "Back 5 minutes", group: "video", shortcut: "Alt+ArrowLeft", command: "seek_back_5m" },
+  { id: "video_forward_5m", label: "Forward 5 minutes", group: "video", shortcut: "Alt+ArrowRight", command: "seek_forward_5m" },
+  { id: "video_back_10m", label: "Back 10 minutes", group: "video", shortcut: "Alt+Shift+ArrowLeft", command: "seek_back_10m" },
+  { id: "video_forward_10m", label: "Forward 10 minutes", group: "video", shortcut: "Alt+Shift+ArrowRight", command: "seek_forward_10m" },
+  { id: "video_step_back", label: "Step back", group: "video", shortcut: "Comma", command: "step_back" },
+  { id: "video_step_forward", label: "Step forward", group: "video", shortcut: "Period", command: "step_forward" },
+  { id: "video_speed_down", label: "Decrease speed", group: "video", shortcut: "BracketLeft", command: "speed_down" },
+  { id: "video_speed_up", label: "Increase speed", group: "video", shortcut: "BracketRight", command: "speed_up" },
+  { id: "video_speed_quarter", label: "Set speed 0.25x", group: "video", shortcut: "Shift+Digit1", command: "speed_quarter" },
+  { id: "video_speed_half", label: "Set speed 0.5x", group: "video", shortcut: "Shift+Digit2", command: "speed_half" },
+  { id: "video_speed_normal", label: "Set speed 1x", group: "video", shortcut: "Shift+Digit3", command: "speed_normal" },
+  { id: "video_speed_double", label: "Set speed 2x", group: "video", shortcut: "Shift+Digit4", command: "speed_double" },
 ];
 
 const inputClass = "w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-emerald-400";
@@ -30,6 +81,53 @@ function formatTime(seconds: number) {
   const minutes = Math.floor(value / 60);
   const remaining = Math.floor(value % 60);
   return `${String(minutes).padStart(2, "0")}:${String(remaining).padStart(2, "0")}`;
+}
+
+function normaliseShortcut(shortcut: string) {
+  return shortcut.split("+").filter(Boolean).join("+");
+}
+
+function shortcutFromKeyboardEvent(event: KeyboardEvent | React.KeyboardEvent) {
+  const parts = [];
+  if (event.ctrlKey) parts.push("Ctrl");
+  if (event.altKey) parts.push("Alt");
+  if (event.shiftKey) parts.push("Shift");
+  if (event.metaKey) parts.push("Meta");
+  parts.push(event.code);
+  return normaliseShortcut(parts.join("+"));
+}
+
+function shortcutLabel(shortcut: string) {
+  return shortcut
+    .replace("Digit", "")
+    .replace("Key", "")
+    .replace("ArrowLeft", "Left")
+    .replace("ArrowRight", "Right")
+    .replace("BracketLeft", "[")
+    .replace("BracketRight", "]")
+    .replace("Comma", ",")
+    .replace("Period", ".")
+    .replace("Space", "Space");
+}
+
+function shortcutEditable(event: KeyboardEvent) {
+  const target = event.target as HTMLElement | null;
+  return target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.tagName === "SELECT" || target?.isContentEditable;
+}
+
+function loadShortcutBindings() {
+  if (typeof window === "undefined") return DEFAULT_SHORTCUTS;
+  const saved = window.localStorage.getItem(SHORTCUT_STORAGE_KEY);
+  if (!saved) return DEFAULT_SHORTCUTS;
+  try {
+    const parsed = JSON.parse(saved) as Partial<ShortcutBinding>[];
+    return DEFAULT_SHORTCUTS.map((binding) => ({
+      ...binding,
+      shortcut: parsed.find((item) => item.id === binding.id)?.shortcut || binding.shortcut,
+    }));
+  } catch {
+    return DEFAULT_SHORTCUTS;
+  }
 }
 
 export default function CodingWorkspace() {
@@ -42,8 +140,20 @@ export default function CodingWorkspace() {
   const [selectedVideoId, setSelectedVideoId] = useState<number | null>(null);
   const [selectedTeam, setSelectedTeam] = useState<EventTeam>("home");
   const [currentTime, setCurrentTime] = useState(0);
+  const [playbackRate, setPlaybackRate] = useState(1);
+  const [shortcuts, setShortcuts] = useState<ShortcutBinding[]>(DEFAULT_SHORTCUTS);
+  const [editingShortcutId, setEditingShortcutId] = useState<string | null>(null);
   const [notice, setNotice] = useState("Loading coding workspace...");
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setShortcuts(loadShortcutBindings());
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(SHORTCUT_STORAGE_KEY, JSON.stringify(shortcuts.map(({ id, shortcut }) => ({ id, shortcut }))));
+  }, [shortcuts]);
 
   const loadWorkspace = useCallback(async () => {
     try {
@@ -99,7 +209,18 @@ export default function CodingWorkspace() {
     }, {});
   }, [events]);
 
-  const createEvent = useCallback(async (type: EventType, duration = 8, extras?: { player?: string; notes?: string; outcome?: string }) => {
+  const eventShortcuts = useMemo(() => shortcuts.filter((shortcut) => shortcut.group === "event"), [shortcuts]);
+  const videoShortcuts = useMemo(() => shortcuts.filter((shortcut) => shortcut.group === "video"), [shortcuts]);
+
+  const shortcutConflict = useMemo(() => {
+    const counts = shortcuts.reduce<Record<string, number>>((items, shortcut) => {
+      items[shortcut.shortcut] = (items[shortcut.shortcut] ?? 0) + 1;
+      return items;
+    }, {});
+    return (shortcut: string) => counts[shortcut] > 1;
+  }, [shortcuts]);
+
+  const createEvent = useCallback(async (type: EventType, duration = 8, extras?: { notes?: string; outcome?: string; phaseNumber?: number | null; fieldZone?: string }) => {
     if (!selectedMatchId || !selectedVideoId) return;
     const start = Math.max(0, videoRef.current?.currentTime ?? currentTime);
     const end = Math.min(videoRef.current?.duration || start + duration, start + duration);
@@ -112,11 +233,11 @@ export default function CodingWorkspace() {
         team: selectedTeam,
         start_seconds: Number(start.toFixed(2)),
         end_seconds: Number(Math.max(start + 0.5, end).toFixed(2)),
-        player_name: extras?.player || null,
+        player_name: null,
         outcome: extras?.outcome || null,
         notes: extras?.notes || null,
-        phase_number: null,
-        field_zone: null,
+        phase_number: extras?.phaseNumber ?? null,
+        field_zone: extras?.fieldZone || null,
         clip_requested: false,
       });
       setEvents((current) => [...current, created].sort((a, b) => a.start_seconds - b.start_seconds));
@@ -128,40 +249,96 @@ export default function CodingWorkspace() {
     }
   }, [currentTime, selectedMatchId, selectedTeam, selectedVideoId]);
 
+  const runVideoCommand = useCallback((command: VideoCommand) => {
+    const video = videoRef.current;
+    if (!video) return;
+    const seek = (seconds: number) => {
+      video.currentTime = Math.min(Math.max(0, video.currentTime + seconds), video.duration || video.currentTime + seconds);
+    };
+    const setSpeed = (speed: number) => {
+      const next = Math.min(Math.max(speed, 0.25), 2);
+      video.playbackRate = next;
+      setPlaybackRate(next);
+      setNotice(`Playback speed set to ${next}x.`);
+    };
+
+    if (command === "play_pause") {
+      if (video.paused) void video.play(); else video.pause();
+    } else if (command === "seek_back_5") seek(-5);
+    else if (command === "seek_forward_5") seek(5);
+    else if (command === "seek_back_10") seek(-10);
+    else if (command === "seek_forward_10") seek(10);
+    else if (command === "seek_back_5m") seek(-300);
+    else if (command === "seek_forward_5m") seek(300);
+    else if (command === "seek_back_10m") seek(-600);
+    else if (command === "seek_forward_10m") seek(600);
+    else if (command === "step_back") {
+      video.pause();
+      seek(-0.04);
+    } else if (command === "step_forward") {
+      video.pause();
+      seek(0.04);
+    } else if (command === "speed_down") setSpeed(Number((video.playbackRate - 0.25).toFixed(2)));
+    else if (command === "speed_up") setSpeed(Number((video.playbackRate + 0.25).toFixed(2)));
+    else if (command === "speed_quarter") setSpeed(0.25);
+    else if (command === "speed_half") setSpeed(0.5);
+    else if (command === "speed_normal") setSpeed(1);
+    else if (command === "speed_double") setSpeed(2);
+  }, []);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.tagName === "SELECT") return;
-      const video = videoRef.current;
-      if (!video) return;
-      if (event.code === "Space") {
-        event.preventDefault();
-        if (video.paused) void video.play(); else video.pause();
-      } else if (event.key === "ArrowLeft") {
-        event.preventDefault();
-        video.currentTime = Math.max(0, video.currentTime - 5);
-      } else if (event.key === "ArrowRight") {
-        event.preventDefault();
-        video.currentTime = Math.min(video.duration || video.currentTime + 5, video.currentTime + 5);
-      } else {
-        const tag = QUICK_TAGS.find((item) => item.key === event.key);
-        if (tag) {
-          event.preventDefault();
-          void createEvent(tag.type, tag.duration);
-        }
+      if (editingShortcutId || shortcutEditable(event)) return;
+      const shortcut = shortcutFromKeyboardEvent(event);
+      const binding = shortcuts.find((item) => item.shortcut === shortcut);
+      if (!binding) return;
+      event.preventDefault();
+      if (binding.group === "event" && binding.eventType) {
+        void createEvent(binding.eventType, binding.duration);
+      } else if (binding.group === "video" && binding.command) {
+        runVideoCommand(binding.command);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [createEvent]);
+  }, [createEvent, editingShortcutId, runVideoCommand, shortcuts]);
+
+  const updateShortcut = useCallback((bindingId: string, shortcut: string) => {
+    const duplicate = shortcuts.some((binding) => binding.id !== bindingId && binding.shortcut === shortcut);
+    setShortcuts((current) => current.map((binding) => binding.id === bindingId ? { ...binding, shortcut } : binding));
+    setEditingShortcutId(null);
+    setNotice(duplicate ? `${shortcutLabel(shortcut)} is mapped to more than one action.` : "Keyboard shortcut updated.");
+  }, [shortcuts]);
+
+  useEffect(() => {
+    if (!editingShortcutId) return;
+    const onCapture = (event: KeyboardEvent) => {
+      event.preventDefault();
+      if (event.code === "Escape") {
+        setEditingShortcutId(null);
+        setNotice("Shortcut edit cancelled.");
+        return;
+      }
+      updateShortcut(editingShortcutId, shortcutFromKeyboardEvent(event));
+    };
+    window.addEventListener("keydown", onCapture, true);
+    return () => window.removeEventListener("keydown", onCapture, true);
+  }, [editingShortcutId, updateShortcut]);
+
+  function resetShortcuts() {
+    setShortcuts(DEFAULT_SHORTCUTS);
+    setEditingShortcutId(null);
+    setNotice("Keyboard shortcuts reset to defaults.");
+  }
 
   async function submitCustomEvent(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     await createEvent(String(form.get("event_type")) as EventType, Number(form.get("duration") || 8), {
-      player: String(form.get("player_name") || "").trim(),
       outcome: String(form.get("outcome") || "").trim(),
       notes: String(form.get("notes") || "").trim(),
+      phaseNumber: form.get("phase_number") ? Number(form.get("phase_number")) : null,
+      fieldZone: String(form.get("field_zone") || "").trim(),
     });
     event.currentTarget.reset();
   }
@@ -181,8 +358,8 @@ export default function CodingWorkspace() {
             <h1 className="mt-1 text-2xl font-bold">Match Coding Workspace</h1>
           </div>
           <nav className="flex gap-2 text-sm">
-            <Link href="/" className="rounded-lg border border-slate-700 px-3 py-2">Workspace</Link>
-            <Link href="/catalog" className="rounded-lg border border-slate-700 px-3 py-2">Programme data</Link>
+            <Link href="/upload" className="rounded-lg border border-slate-700 px-3 py-2">Upload Match</Link>
+            <Link href="/reports" className="rounded-lg border border-slate-700 px-3 py-2">Reports</Link>
           </nav>
         </div>
       </header>
@@ -214,6 +391,7 @@ export default function CodingWorkspace() {
                   playsInline
                   className="aspect-video w-full bg-black"
                   onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
+                  onRateChange={(event) => setPlaybackRate(event.currentTarget.playbackRate)}
                   onError={() => setNotice("Source video is unavailable. Free Render storage is temporary and may have been cleared after sleep or redeploy.")}
                 />
               ) : <div className="flex aspect-video items-center justify-center text-slate-500">Select a match with uploaded footage.</div>}
@@ -221,24 +399,67 @@ export default function CodingWorkspace() {
 
             <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <div><h2 className="font-bold">Quick coding</h2><p className="text-xs text-slate-500">Space play/pause · arrows ±5 seconds · number keys create tags</p></div>
+                <div><h2 className="font-bold">Quick coding</h2><p className="text-xs text-slate-500">Use your mapped keys to tag team-level events at the current video time.</p></div>
                 <div className="flex rounded-lg border border-slate-700 p-1 text-sm">
                   {(["home", "away", "neutral"] as EventTeam[]).map((team) => <button key={team} type="button" onClick={() => setSelectedTeam(team)} className={`rounded-md px-3 py-1.5 capitalize ${selectedTeam === team ? "bg-emerald-400 font-bold text-slate-950" : "text-slate-300"}`}>{team === "home" ? homeTeam?.name ?? "Home" : team === "away" ? awayTeam?.name ?? "Away" : "Neutral"}</button>)}
                 </div>
               </div>
               <div className="grid grid-cols-3 gap-2 md:grid-cols-5 lg:grid-cols-9">
-                {QUICK_TAGS.map((tag) => <button key={tag.type} type="button" disabled={busy || !selectedVideoId} onClick={() => void createEvent(tag.type, tag.duration)} className="rounded-lg border border-slate-700 bg-slate-950 px-2 py-3 text-sm hover:border-emerald-400 disabled:opacity-40"><span className="block text-xs text-slate-500">{tag.key}</span>{tag.label}</button>)}
+                {eventShortcuts.map((binding) => <button key={binding.id} type="button" disabled={busy || !selectedVideoId || !binding.eventType} onClick={() => binding.eventType && void createEvent(binding.eventType, binding.duration)} className="rounded-lg border border-slate-700 bg-slate-950 px-2 py-3 text-sm hover:border-emerald-400 disabled:opacity-40"><span className="block text-xs text-slate-500">{shortcutLabel(binding.shortcut)}</span>{binding.label}</button>)}
               </div>
             </div>
 
             <form onSubmit={submitCustomEvent} className="grid gap-3 rounded-xl border border-slate-800 bg-slate-900 p-4 md:grid-cols-2 lg:grid-cols-4">
+              <div className="md:col-span-2 lg:col-span-4">
+                <h2 className="font-bold">Custom team-level event</h2>
+                <p className="mt-1 text-xs text-slate-500">Add field zone, phase and outcome without collecting individual player analytics.</p>
+              </div>
               <select name="event_type" className={inputClass} defaultValue="custom">{EVENT_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}</select>
-              <input name="player_name" placeholder="Player" className={inputClass} />
               <input name="outcome" placeholder="Outcome" className={inputClass} />
+              <input name="field_zone" placeholder="Field zone" className={inputClass} />
+              <input name="phase_number" type="number" min="1" placeholder="Phase" className={inputClass} />
               <input name="duration" type="number" min="1" max="300" defaultValue="8" className={inputClass} />
               <textarea name="notes" placeholder="Analyst notes" className={`${inputClass} md:col-span-2 lg:col-span-3`} />
               <button type="submit" disabled={busy || !selectedVideoId} className="rounded-lg bg-emerald-400 px-4 py-2 font-bold text-slate-950 disabled:opacity-40">Add event at {formatTime(currentTime)}</button>
             </form>
+
+            <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="font-bold">Keyboard mapping</h2>
+                  <p className="text-xs text-slate-500">Click Change, press the new key combination, or press Escape to cancel. Playback is currently {playbackRate}x.</p>
+                </div>
+                <button type="button" onClick={resetShortcuts} className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-bold">Reset defaults</button>
+              </div>
+
+              <section className="grid gap-4 lg:grid-cols-2">
+                <div>
+                  <h3 className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Event keys</h3>
+                  <div className="grid gap-2">
+                    {eventShortcuts.map((binding) => (
+                      <div key={binding.id} className="grid grid-cols-[1fr_auto_auto] items-center gap-2 rounded-lg border border-slate-800 bg-slate-950 p-3">
+                        <span className="text-sm font-semibold">{binding.label}</span>
+                        <kbd className={`rounded border px-2 py-1 text-xs font-bold ${shortcutConflict(binding.shortcut) ? "border-rose-400 text-rose-400" : "border-slate-700 text-emerald-400"}`}>{editingShortcutId === binding.id ? "Press keys..." : shortcutLabel(binding.shortcut)}</kbd>
+                        <button type="button" onClick={() => setEditingShortcutId(binding.id)} className="rounded border border-slate-700 px-2 py-1 text-xs font-bold">Change</button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <h3 className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Video controls</h3>
+                  <div className="grid gap-2">
+                    {videoShortcuts.map((binding) => (
+                      <div key={binding.id} className="grid grid-cols-[1fr_auto_auto] items-center gap-2 rounded-lg border border-slate-800 bg-slate-950 p-3">
+                        <span className="text-sm font-semibold">{binding.label}</span>
+                        <kbd className={`rounded border px-2 py-1 text-xs font-bold ${shortcutConflict(binding.shortcut) ? "border-rose-400 text-rose-400" : "border-slate-700 text-emerald-400"}`}>{editingShortcutId === binding.id ? "Press keys..." : shortcutLabel(binding.shortcut)}</kbd>
+                        <button type="button" onClick={() => setEditingShortcutId(binding.id)} className="rounded border border-slate-700 px-2 py-1 text-xs font-bold">Change</button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </section>
+            </div>
           </section>
 
           <aside className="space-y-5">

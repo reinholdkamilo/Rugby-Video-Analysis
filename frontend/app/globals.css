@@ -78,6 +78,35 @@ body main :is(section, article, form, aside, header, .rounded-xl, .rounded-2xl) 
   display: none !important;
 }
 
+.design-custom-block {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 90;
+  display: grid;
+  min-width: 80px;
+  min-height: 36px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  padding: 16px;
+  color: var(--ink);
+  font-weight: 800;
+  box-shadow: var(--shadow-sm);
+}
+
+.design-custom-block--button {
+  min-height: 44px;
+  border-color: var(--yellow);
+  background: var(--yellow);
+}
+
+.design-custom-block--text {
+  place-items: start;
+  box-shadow: none;
+}
+
 .design-studio-toggle {
   position: fixed;
   right: 18px;
@@ -259,7 +288,7 @@ body main :is(section, article, form, aside, header, .rounded-xl, .rounded-2xl) 
 
 .design-tabs {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(6, 1fr);
   gap: 5px;
   border: 1px solid rgba(255,255,255,.1);
   border-radius: 12px;
@@ -286,6 +315,13 @@ body main :is(section, article, form, aside, header, .rounded-xl, .rounded-2xl) 
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.design-block-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
 }
 
 .design-empty {
@@ -324,6 +360,12 @@ body main :is(section, article, form, aside, header, .rounded-xl, .rounded-2xl) 
   border-color: rgba(245,180,0,.42) !important;
   background: rgba(245,180,0,.16) !important;
   color: #ffe59a !important;
+}
+
+.design-danger {
+  border-color: rgba(255,113,113,.46) !important;
+  background: rgba(255,113,113,.15) !important;
+  color: #ffc9c9 !important;
 }
 
 /* Header */

@@ -15,12 +15,16 @@ type ThemeSettings = {
   spacingScale: number;
   radius: number;
   contentWidth: number;
+  snapGrid: number;
 };
 
 type ElementDesign = {
   id: string;
   label: string;
+  custom?: boolean;
+  kind?: "block" | "button" | "text" | "row" | "column";
   hidden?: boolean;
+  deleted?: boolean;
   order?: number;
   x?: number;
   y?: number;
@@ -29,6 +33,7 @@ type ElementDesign = {
   minHeight?: number;
   layout?: LayoutMode;
   columns?: number;
+  rows?: number;
   gap?: number;
   padding?: number;
   margin?: number;
@@ -68,6 +73,7 @@ const DEFAULT_THEME: ThemeSettings = {
   spacingScale: 1,
   radius: 18,
   contentWidth: 1440,
+  snapGrid: 12,
 };
 
 const DEFAULT_SETTINGS: DesignSettings = {
@@ -151,6 +157,11 @@ function numericValue(value: string) {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
+function snap(value: number, grid: number) {
+  const size = Math.max(1, grid);
+  return Math.round(value / size) * size;
+}
+
 function closestDesignElement(target: EventTarget | null) {
   return target instanceof HTMLElement ? target.closest<HTMLElement>("[data-design-id]") : null;
 }
@@ -164,10 +175,10 @@ export function AppDesignStudio() {
   const [open, setOpen] = useState(false);
   const [elements, setElements] = useState<ElementDesign[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [panelTab, setPanelTab] = useState<"element" | "layout" | "text" | "style" | "page">("element");
+  const [panelTab, setPanelTab] = useState<"element" | "layout" | "blocks" | "text" | "style" | "page">("element");
 
   const currentPage = useMemo(() => pageSettings(settings, key), [key, settings]);
-  const currentElements = currentPage.elements.length ? currentPage.elements : elements;
+  const currentElements = elements.length ? elements : currentPage.elements;
   const selected = currentElements.find((item) => item.id === selectedId) ?? null;
 
   const updateElement = useCallback((id: string, updates: Partial<ElementDesign>) => {
@@ -215,29 +226,32 @@ export function AppDesignStudio() {
         if (design.layout === "grid") {
           element.style.display = "grid";
           element.style.gridTemplateColumns = `repeat(${design.columns ?? 2}, minmax(0, 1fr))`;
+          element.style.gridTemplateRows = design.rows ? `repeat(${design.rows}, minmax(0, auto))` : "";
         } else {
           element.style.display = "flex";
           element.style.flexDirection = design.layout === "row" ? "row" : "column";
           element.style.flexWrap = "wrap";
+          element.style.gridTemplateRows = "";
         }
       } else {
         element.classList.remove("design-layout-controlled");
         if (!active) {
           element.style.display = "";
           element.style.gridTemplateColumns = "";
+          element.style.gridTemplateRows = "";
           element.style.flexDirection = "";
           element.style.flexWrap = "";
         }
       }
 
-      if (design?.text && isTextEditableElement(element)) {
+      if (design?.text && (isTextEditableElement(element) || design.custom)) {
         element.textContent = design.text;
       }
-      element.contentEditable = open && isTextEditableElement(element) ? "true" : "false";
+      element.contentEditable = open && (isTextEditableElement(element) || Boolean(design?.custom)) ? "true" : "false";
     });
   }, [key, open, selectedId, settings]);
 
-  const detectElements = useCallback(() => {
+  const detectElements = useCallback((): ElementDesign[] => {
     const main = document.querySelector("main");
     if (!main) return [];
     const candidates = Array.from(main.querySelectorAll<HTMLElement>(editableSelector));
@@ -293,7 +307,11 @@ export function AppDesignStudio() {
     const sync = () => {
       const detected = detectElements();
       const saved = pageSettings(settings, key).elements;
-      const merged = detected.map((item) => saved.find((element) => element.id === item.id) ?? item);
+      const custom = saved.filter((item) => item.custom && !item.deleted);
+      const merged: ElementDesign[] = [
+        ...detected.map((item) => saved.find((element) => element.id === item.id) ?? item),
+        ...custom,
+      ].filter((item) => !item.deleted);
       setElements(merged.sort((a, b) => (a.order ?? 0) - (b.order ?? 0)));
     };
     const timer = window.setTimeout(sync, 100);
@@ -316,7 +334,8 @@ export function AppDesignStudio() {
     };
     const onBlur = (event: FocusEvent) => {
       const element = closestDesignElement(event.target);
-      if (!element || !isTextEditableElement(element)) return;
+      const design = currentElements.find((item) => item.id === element?.dataset.designId);
+      if (!element || (!isTextEditableElement(element) && !design?.custom)) return;
       updateElement(element.dataset.designId ?? "", { text: element.textContent?.trim() ?? "" });
     };
     document.addEventListener("click", onClick, true);
@@ -325,7 +344,7 @@ export function AppDesignStudio() {
       document.removeEventListener("click", onClick, true);
       document.removeEventListener("blur", onBlur, true);
     };
-  }, [open, updateElement]);
+  }, [currentElements, open, updateElement]);
 
   useEffect(() => {
     const onMove = (event: MouseEvent) => {
@@ -334,13 +353,13 @@ export function AppDesignStudio() {
       event.preventDefault();
       if (state.mode === "move") {
         updateElement(state.id, {
-          x: Math.round(state.baseX + event.clientX - state.startX),
-          y: Math.round(state.baseY + event.clientY - state.startY),
+          x: snap(state.baseX + event.clientX - state.startX, settings.theme.snapGrid),
+          y: snap(state.baseY + event.clientY - state.startY, settings.theme.snapGrid),
         });
       } else {
         updateElement(state.id, {
-          width: Math.max(80, Math.round(state.baseWidth + event.clientX - state.startX)),
-          height: Math.max(36, Math.round(state.baseHeight + event.clientY - state.startY)),
+          width: Math.max(80, snap(state.baseWidth + event.clientX - state.startX, settings.theme.snapGrid)),
+          height: Math.max(36, snap(state.baseHeight + event.clientY - state.startY, settings.theme.snapGrid)),
         });
       }
     };
@@ -353,7 +372,7 @@ export function AppDesignStudio() {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
-  }, [updateElement]);
+  }, [settings.theme.snapGrid, updateElement]);
 
   function updateTheme(updates: Partial<ThemeSettings>) {
     setSettings((current) => ({ ...current, theme: { ...current.theme, ...updates } }));
@@ -375,6 +394,54 @@ export function AppDesignStudio() {
     const reordered = list.map((item, order) => ({ ...item, order }));
     setSettings((current) => ({ ...current, pages: { ...current.pages, [key]: { elements: reordered } } }));
     setElements(reordered);
+  }
+
+  function addCustomElement(kind: NonNullable<ElementDesign["kind"]>) {
+    const customCount = currentElements.filter((item) => item.custom).length;
+    const defaults: Record<NonNullable<ElementDesign["kind"]>, Partial<ElementDesign>> = {
+      block: { label: "New block", text: "New block", width: 320, height: 180, padding: 20, background: "#ffffff", color: "#13221f", borderColor: "#dfe6e2", radius: 14, layout: "stack", gap: 12 },
+      row: { label: "New row", text: "New row", width: 640, height: 120, padding: 16, background: "#ffffff", color: "#13221f", borderColor: "#dfe6e2", radius: 12, layout: "row", gap: 12 },
+      column: { label: "New column", text: "New column", width: 260, height: 360, padding: 16, background: "#ffffff", color: "#13221f", borderColor: "#dfe6e2", radius: 12, layout: "stack", gap: 12 },
+      button: { label: "New button", text: "New button", width: 160, height: 48, padding: 12, background: settings.theme.action, color: "#13221f", borderColor: settings.theme.action, radius: 10, fontWeight: 900 },
+      text: { label: "New text", text: "New text", width: 280, height: 80, padding: 8, background: "#ffffff", color: "#13221f", borderColor: "#dfe6e2", radius: 8, fontSize: 18, fontWeight: 700 },
+    };
+    const defaultDesign = defaults[kind];
+    const next: ElementDesign = {
+      id: `${key}-custom-${kind}-${Date.now()}`,
+      label: defaultDesign.label ?? readableLabel(kind),
+      custom: true,
+      kind,
+      order: currentElements.length + 1,
+      x: snap(48 + customCount * 24, settings.theme.snapGrid),
+      y: snap(120 + customCount * 24, settings.theme.snapGrid),
+      ...defaultDesign,
+    };
+    setSettings((current) => {
+      const page = pageSettings(current, key);
+      return { ...current, pages: { ...current.pages, [key]: { elements: [...page.elements, next] } } };
+    });
+    setElements((current) => [...current, next]);
+    setSelectedId(next.id);
+    setPanelTab("element");
+  }
+
+  function deleteSelected() {
+    if (!selectedId) return;
+    const selectedElement = currentElements.find((item) => item.id === selectedId);
+    setSettings((current) => {
+      const page = pageSettings(current, key);
+      const existing = page.elements.find((item) => item.id === selectedId) ?? selectedElement;
+      const nextElements = selectedElement?.custom
+        ? page.elements.filter((item) => item.id !== selectedId)
+        : page.elements.some((item) => item.id === selectedId)
+          ? page.elements.map((item) => item.id === selectedId ? { ...item, hidden: true, deleted: true } : item)
+          : existing
+            ? [...page.elements, { ...existing, hidden: true, deleted: true }]
+            : page.elements;
+      return { ...current, pages: { ...current.pages, [key]: { elements: nextElements } } };
+    });
+    setElements((current) => current.filter((item) => item.id !== selectedId));
+    setSelectedId(null);
   }
 
   function resetSelected() {
@@ -443,7 +510,7 @@ export function AppDesignStudio() {
           </div>
 
           <div className="design-tabs">
-            {(["element", "layout", "text", "style", "page"] as const).map((tab) => (
+            {(["element", "layout", "blocks", "text", "style", "page"] as const).map((tab) => (
               <button key={tab} type="button" onClick={() => setPanelTab(tab)} className={panelTab === tab ? "is-active" : ""}>{readableLabel(tab)}</button>
             ))}
           </div>
@@ -462,6 +529,7 @@ export function AppDesignStudio() {
                   <div className="design-button-row">
                     <button type="button" onClick={() => updateCurrent({ x: 0, y: 0 })}>Reset position</button>
                     <button type="button" onClick={resetSelected}>Reset element</button>
+                    <button type="button" className="design-danger" onClick={deleteSelected}>Delete</button>
                   </div>
                 </>
               ) : <p className="design-empty">Click any section, card, text, button or tool on the page.</p>}
@@ -473,12 +541,27 @@ export function AppDesignStudio() {
               <h3>Layout</h3>
               <label>Mode <select value={selected?.layout ?? "default"} onChange={(event) => updateCurrent({ layout: event.target.value as LayoutMode })}><option value="default">Default</option><option value="stack">Stack</option><option value="row">Row</option><option value="grid">Grid</option></select></label>
               <label>Columns <input type="range" min="1" max="8" step="1" value={selected?.columns ?? 2} onChange={(event) => updateCurrent({ columns: Number(event.target.value) })} /></label>
+              <label>Rows <input type="range" min="1" max="8" step="1" value={selected?.rows ?? 1} onChange={(event) => updateCurrent({ rows: Number(event.target.value) })} /></label>
               <label>Gap <input type="range" min="0" max="48" step="1" value={selected?.gap ?? 12} onChange={(event) => updateCurrent({ gap: Number(event.target.value) })} /></label>
               <label>Padding <input type="range" min="0" max="64" step="1" value={selected?.padding ?? 16} onChange={(event) => updateCurrent({ padding: Number(event.target.value) })} /></label>
               <label>Margin <input type="range" min="0" max="64" step="1" value={selected?.margin ?? 0} onChange={(event) => updateCurrent({ margin: Number(event.target.value) })} /></label>
               <label>Align <select value={selected?.align ?? "stretch"} onChange={(event) => updateCurrent({ align: event.target.value as ElementDesign["align"] })}><option value="stretch">Stretch</option><option value="start">Left/top</option><option value="center">Center</option><option value="end">Right/bottom</option></select></label>
               <label>Width <input type="number" min="0" value={selected?.width ?? ""} onChange={(event) => updateCurrent({ width: numericValue(event.target.value) })} /></label>
               <label>Height <input type="number" min="0" value={selected?.height ?? ""} onChange={(event) => updateCurrent({ height: numericValue(event.target.value) })} /></label>
+            </section>
+          ) : null}
+
+          {panelTab === "blocks" ? (
+            <section>
+              <h3>Add Blocks</h3>
+              <div className="design-block-grid">
+                <button type="button" onClick={() => addCustomElement("block")}>Block</button>
+                <button type="button" onClick={() => addCustomElement("row")}>Row</button>
+                <button type="button" onClick={() => addCustomElement("column")}>Column</button>
+                <button type="button" onClick={() => addCustomElement("button")}>Button</button>
+                <button type="button" onClick={() => addCustomElement("text")}>Text</button>
+              </div>
+              <p className="design-empty">New blocks are added to this tab. Select them to move, resize, style, edit text or delete.</p>
             </section>
           ) : null}
 
@@ -520,6 +603,7 @@ export function AppDesignStudio() {
                 <label>Spacing <input type="range" min="0.75" max="1.45" step="0.05" value={settings.theme.spacingScale} onChange={(event) => updateTheme({ spacingScale: Number(event.target.value) })} /></label>
                 <label>Corner radius <input type="range" min="0" max="28" step="1" value={settings.theme.radius} onChange={(event) => updateTheme({ radius: Number(event.target.value) })} /></label>
                 <label>Content width <input type="range" min="980" max="1760" step="20" value={settings.theme.contentWidth} onChange={(event) => updateTheme({ contentWidth: Number(event.target.value) })} /></label>
+                <label>Snap grid <input type="range" min="1" max="32" step="1" value={settings.theme.snapGrid} onChange={(event) => updateTheme({ snapGrid: Number(event.target.value) })} /></label>
               </section>
 
               <section>
@@ -539,6 +623,18 @@ export function AppDesignStudio() {
           </div>
         </aside>
       ) : null}
+
+      {currentElements.filter((element) => element.custom && !element.deleted && !element.hidden).map((element) => (
+        <div
+          key={element.id}
+          data-design-id={element.id}
+          className={`design-custom-block design-custom-block--${element.kind ?? "block"}`}
+          hidden={Boolean(element.hidden)}
+          suppressContentEditableWarning
+        >
+          {element.text || element.label}
+        </div>
+      ))}
     </>
   );
 }

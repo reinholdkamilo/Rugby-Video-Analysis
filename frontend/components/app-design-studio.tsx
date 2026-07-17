@@ -270,10 +270,11 @@ export function AppDesignStudio() {
         if (seen.has(element)) return false;
         seen.add(element);
         if (element.closest(".design-studio-panel")) return false;
-        if (element.matches("input,select,textarea,video,source")) return false;
+        if (element.matches("video,source")) return false;
+        if (element.matches("input,select,textarea") && !element.dataset.designId) return false;
         return element.offsetParent !== null || element === main.firstElementChild;
       })
-      .slice(0, 180)
+      .slice(0, 360)
       .map((element, index) => {
         const currentId = element.dataset.designId || `${key}-${element.tagName.toLowerCase()}-${index + 1}`;
         element.dataset.designId = currentId;

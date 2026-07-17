@@ -1,7 +1,9 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+type LayoutMode = "default" | "stack" | "row" | "grid";
 
 type ThemeSettings = {
   ink: string;
@@ -15,15 +17,33 @@ type ThemeSettings = {
   contentWidth: number;
 };
 
-type SectionSetting = {
+type ElementDesign = {
   id: string;
   label: string;
-  hidden: boolean;
-  order: number;
+  hidden?: boolean;
+  order?: number;
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  minHeight?: number;
+  layout?: LayoutMode;
+  columns?: number;
+  gap?: number;
+  padding?: number;
+  margin?: number;
+  align?: "start" | "center" | "end" | "stretch";
+  background?: string;
+  color?: string;
+  borderColor?: string;
+  radius?: number;
+  fontSize?: number;
+  fontWeight?: number;
+  text?: string;
 };
 
 type PageSettings = {
-  sections: SectionSetting[];
+  elements: ElementDesign[];
 };
 
 type DesignSettings = {
@@ -31,7 +51,12 @@ type DesignSettings = {
   pages: Record<string, PageSettings>;
 };
 
-const DESIGN_STORAGE_KEY = "rugby-video-analysis:app-design-studio:v1";
+type DragState =
+  | { mode: "move"; id: string; startX: number; startY: number; baseX: number; baseY: number }
+  | { mode: "resize"; id: string; startX: number; startY: number; baseWidth: number; baseHeight: number };
+
+const DESIGN_STORAGE_KEY = "rugby-video-analysis:app-design-studio:v2";
+const LEGACY_DESIGN_STORAGE_KEY = "rugby-video-analysis:app-design-studio:v1";
 
 const DEFAULT_THEME: ThemeSettings = {
   ink: "#13221f",
@@ -50,6 +75,29 @@ const DEFAULT_SETTINGS: DesignSettings = {
   pages: {},
 };
 
+const editableSelector = [
+  "main > header",
+  "main > div",
+  "main > section",
+  "main section",
+  "main article",
+  "main form",
+  "main aside",
+  "main .rounded-xl",
+  "main .rounded-lg",
+  "main button",
+  "main a",
+  "main h1",
+  "main h2",
+  "main h3",
+  "main h4",
+  "main p",
+  "main label",
+  "main kbd",
+].join(",");
+
+const textSelector = "h1,h2,h3,h4,p,span,strong,small,a,button,label,kbd";
+
 function pageKey(pathname: string) {
   return pathname === "/" ? "home" : pathname.replace(/^\/+/, "").split("/")[0] || "home";
 }
@@ -63,14 +111,18 @@ function readableLabel(value: string) {
 }
 
 function elementLabel(element: Element, fallback: string) {
-  const heading = element.querySelector("h1,h2,h3");
+  const heading = element.matches(textSelector) ? element : element.querySelector("h1,h2,h3,h4,p,button,a,label");
   const text = heading?.textContent?.trim() || element.getAttribute("aria-label") || fallback;
-  return readableLabel(text.slice(0, 52));
+  return readableLabel(text.slice(0, 54));
+}
+
+function elementSelector(id: string) {
+  return `[data-design-id="${CSS.escape(id)}"]`;
 }
 
 function loadSettings(): DesignSettings {
   if (typeof window === "undefined") return DEFAULT_SETTINGS;
-  const saved = window.localStorage.getItem(DESIGN_STORAGE_KEY);
+  const saved = window.localStorage.getItem(DESIGN_STORAGE_KEY) || window.localStorage.getItem(LEGACY_DESIGN_STORAGE_KEY);
   if (!saved) return DEFAULT_SETTINGS;
   try {
     const parsed = JSON.parse(saved) as Partial<DesignSettings>;
@@ -84,20 +136,132 @@ function loadSettings(): DesignSettings {
 }
 
 function pageSettings(settings: DesignSettings, key: string): PageSettings {
-  return settings.pages[key] ?? { sections: [] };
+  return settings.pages[key] ?? { elements: [] };
 }
 
-function sectionSelector(id: string) {
-  return `[data-design-section="${CSS.escape(id)}"]`;
+function isTextEditableElement(element: HTMLElement) {
+  if (!element.matches(textSelector)) return false;
+  if (element.querySelector("input,select,textarea,video")) return false;
+  const text = element.textContent?.trim() ?? "";
+  return Boolean(text) && text.length < 180;
+}
+
+function numericValue(value: string) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function closestDesignElement(target: EventTarget | null) {
+  return target instanceof HTMLElement ? target.closest<HTMLElement>("[data-design-id]") : null;
 }
 
 export function AppDesignStudio() {
   const pathname = usePathname();
   const key = pageKey(pathname);
+  const dragRef = useRef<DragState | null>(null);
   const [settings, setSettings] = useState<DesignSettings>(DEFAULT_SETTINGS);
   const [ready, setReady] = useState(false);
   const [open, setOpen] = useState(false);
-  const [sections, setSections] = useState<SectionSetting[]>([]);
+  const [elements, setElements] = useState<ElementDesign[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [panelTab, setPanelTab] = useState<"element" | "layout" | "text" | "style" | "page">("element");
+
+  const currentPage = useMemo(() => pageSettings(settings, key), [key, settings]);
+  const currentElements = currentPage.elements.length ? currentPage.elements : elements;
+  const selected = currentElements.find((item) => item.id === selectedId) ?? null;
+
+  const updateElement = useCallback((id: string, updates: Partial<ElementDesign>) => {
+    setSettings((current) => {
+      const page = pageSettings(current, key);
+      const existing = page.elements.find((item) => item.id === id) ?? elements.find((item) => item.id === id) ?? { id, label: readableLabel(id) };
+      const nextElement = { ...existing, ...updates };
+      const nextElements = page.elements.some((item) => item.id === id)
+        ? page.elements.map((item) => item.id === id ? nextElement : item)
+        : [...page.elements, nextElement];
+      return { ...current, pages: { ...current.pages, [key]: { elements: nextElements } } };
+    });
+    setElements((current) => current.map((item) => item.id === id ? { ...item, ...updates } : item));
+  }, [elements, key]);
+
+  const applyElementDesigns = useCallback(() => {
+    const saved = pageSettings(settings, key).elements;
+    const active = open || saved.length > 0;
+    document.body.classList.toggle("design-mode-active", open);
+    document.querySelectorAll<HTMLElement>("[data-design-id]").forEach((element) => {
+      const design = saved.find((item) => item.id === element.dataset.designId);
+      element.classList.toggle("design-editable", open);
+      element.classList.toggle("design-selected", open && element.dataset.designId === selectedId);
+      element.hidden = Boolean(design?.hidden);
+      element.classList.toggle("design-hidden-section", Boolean(design?.hidden));
+      element.style.order = design?.order !== undefined ? String(design.order) : "";
+      element.style.transform = design?.x || design?.y ? `translate(${design.x ?? 0}px, ${design.y ?? 0}px)` : "";
+      element.style.width = design?.width ? `${design.width}px` : "";
+      element.style.height = design?.height ? `${design.height}px` : "";
+      element.style.minHeight = design?.minHeight ? `${design.minHeight}px` : "";
+      element.style.gap = design?.gap !== undefined ? `${design.gap}px` : "";
+      element.style.padding = design?.padding !== undefined ? `${design.padding}px` : "";
+      element.style.margin = design?.margin !== undefined ? `${design.margin}px` : "";
+      element.style.background = design?.background ?? "";
+      element.style.color = design?.color ?? "";
+      element.style.borderColor = design?.borderColor ?? "";
+      element.style.borderRadius = design?.radius !== undefined ? `${design.radius}px` : "";
+      element.style.fontSize = design?.fontSize ? `${design.fontSize}px` : "";
+      element.style.fontWeight = design?.fontWeight ? String(design.fontWeight) : "";
+      element.style.justifyContent = design?.align && design.align !== "stretch" ? design.align : "";
+      element.style.alignItems = design?.align ?? "";
+
+      if (design?.layout && design.layout !== "default") {
+        element.classList.add("design-layout-controlled");
+        if (design.layout === "grid") {
+          element.style.display = "grid";
+          element.style.gridTemplateColumns = `repeat(${design.columns ?? 2}, minmax(0, 1fr))`;
+        } else {
+          element.style.display = "flex";
+          element.style.flexDirection = design.layout === "row" ? "row" : "column";
+          element.style.flexWrap = "wrap";
+        }
+      } else {
+        element.classList.remove("design-layout-controlled");
+        if (!active) {
+          element.style.display = "";
+          element.style.gridTemplateColumns = "";
+          element.style.flexDirection = "";
+          element.style.flexWrap = "";
+        }
+      }
+
+      if (design?.text && isTextEditableElement(element)) {
+        element.textContent = design.text;
+      }
+      element.contentEditable = open && isTextEditableElement(element) ? "true" : "false";
+    });
+  }, [key, open, selectedId, settings]);
+
+  const detectElements = useCallback(() => {
+    const main = document.querySelector("main");
+    if (!main) return [];
+    const candidates = Array.from(main.querySelectorAll<HTMLElement>(editableSelector));
+    const seen = new Set<HTMLElement>();
+    return candidates
+      .filter((element) => {
+        if (seen.has(element)) return false;
+        seen.add(element);
+        if (element.closest(".design-studio-panel")) return false;
+        if (element.matches("input,select,textarea,video,source")) return false;
+        return element.offsetParent !== null || element === main.firstElementChild;
+      })
+      .slice(0, 180)
+      .map((element, index) => {
+        const currentId = element.dataset.designId || `${key}-${element.tagName.toLowerCase()}-${index + 1}`;
+        element.dataset.designId = currentId;
+        return {
+          id: currentId,
+          label: elementLabel(element, `${element.tagName.toLowerCase()} ${index + 1}`),
+          hidden: false,
+          order: index,
+        };
+      });
+  }, [key]);
 
   useEffect(() => {
     setSettings(loadSettings());
@@ -124,95 +288,106 @@ export function AppDesignStudio() {
     root.style.setProperty("--design-content-width", `${settings.theme.contentWidth}px`);
   }, [settings.theme]);
 
-  const detectSections = useCallback(() => {
-    const main = document.querySelector("main");
-    if (!main) return [];
-    const candidates = Array.from(main.querySelectorAll(":scope > header, :scope > div > section, :scope > section, :scope > div > form, :scope > div > div, :scope section > section"));
-    const seen = new Set<Element>();
-    return candidates
-      .filter((element) => {
-        if (seen.has(element)) return false;
-        seen.add(element);
-        return element instanceof HTMLElement && element.offsetParent !== null;
-      })
-      .slice(0, 24)
-      .map((element, index) => {
-        const currentId = element.getAttribute("data-design-section") || `${key}-${index + 1}`;
-        element.setAttribute("data-design-section", currentId);
-        return {
-          id: currentId,
-          label: elementLabel(element, `Section ${index + 1}`),
-          hidden: false,
-          order: index,
-        };
-      });
-  }, [key]);
-
   useEffect(() => {
     if (!ready) return;
     const sync = () => {
-      const detected = detectSections();
-      const saved = pageSettings(settings, key).sections;
-      const merged = detected.map((item) => saved.find((section) => section.id === item.id) ?? item);
-      setSections(merged.sort((a, b) => a.order - b.order));
+      const detected = detectElements();
+      const saved = pageSettings(settings, key).elements;
+      const merged = detected.map((item) => saved.find((element) => element.id === item.id) ?? item);
+      setElements(merged.sort((a, b) => (a.order ?? 0) - (b.order ?? 0)));
     };
-    const timer = window.setTimeout(sync, 80);
+    const timer = window.setTimeout(sync, 100);
     return () => window.clearTimeout(timer);
-  }, [detectSections, key, pathname, ready, settings]);
+  }, [detectElements, key, pathname, ready, settings]);
 
   useEffect(() => {
-    const savedSections = pageSettings(settings, key).sections;
-    const current = savedSections.length ? savedSections : sections;
-    const editableActive = open || savedSections.length > 0;
-    document.querySelectorAll(".design-editable-parent").forEach((element) => {
-      element.classList.remove("design-editable-parent");
-    });
-    for (const section of current) {
-      const element = document.querySelector<HTMLElement>(sectionSelector(section.id));
-      if (!element) continue;
-      element.parentElement?.classList.toggle("design-editable-parent", editableActive);
-      element.style.order = String(section.order);
-      element.hidden = section.hidden;
-      element.classList.toggle("design-hidden-section", section.hidden);
-    }
-  }, [key, open, sections, settings]);
+    applyElementDesigns();
+  }, [applyElementDesigns, elements]);
 
-  const currentPage = useMemo(() => pageSettings(settings, key), [key, settings]);
-  const currentSections = currentPage.sections.length ? currentPage.sections : sections;
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (event: MouseEvent) => {
+      if ((event.target as HTMLElement | null)?.closest(".design-studio-panel,.design-studio-toggle,.design-resize-handle,.design-drag-handle")) return;
+      const element = closestDesignElement(event.target);
+      if (!element) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setSelectedId(element.dataset.designId ?? null);
+    };
+    const onBlur = (event: FocusEvent) => {
+      const element = closestDesignElement(event.target);
+      if (!element || !isTextEditableElement(element)) return;
+      updateElement(element.dataset.designId ?? "", { text: element.textContent?.trim() ?? "" });
+    };
+    document.addEventListener("click", onClick, true);
+    document.addEventListener("blur", onBlur, true);
+    return () => {
+      document.removeEventListener("click", onClick, true);
+      document.removeEventListener("blur", onBlur, true);
+    };
+  }, [open, updateElement]);
+
+  useEffect(() => {
+    const onMove = (event: MouseEvent) => {
+      const state = dragRef.current;
+      if (!state) return;
+      event.preventDefault();
+      if (state.mode === "move") {
+        updateElement(state.id, {
+          x: Math.round(state.baseX + event.clientX - state.startX),
+          y: Math.round(state.baseY + event.clientY - state.startY),
+        });
+      } else {
+        updateElement(state.id, {
+          width: Math.max(80, Math.round(state.baseWidth + event.clientX - state.startX)),
+          height: Math.max(36, Math.round(state.baseHeight + event.clientY - state.startY)),
+        });
+      }
+    };
+    const onUp = () => {
+      dragRef.current = null;
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [updateElement]);
 
   function updateTheme(updates: Partial<ThemeSettings>) {
     setSettings((current) => ({ ...current, theme: { ...current.theme, ...updates } }));
   }
 
-  function updateSections(nextSections: SectionSetting[]) {
-    const normalised = nextSections.map((section, index) => ({ ...section, order: index }));
-    setSections(normalised);
-    setSettings((current) => ({
-      ...current,
-      pages: {
-        ...current.pages,
-        [key]: { sections: normalised },
-      },
-    }));
+  function updateCurrent(updates: Partial<ElementDesign>) {
+    if (!selectedId) return;
+    updateElement(selectedId, updates);
   }
 
-  function moveSection(sectionId: string, direction: -1 | 1) {
-    const list = [...currentSections].sort((a, b) => a.order - b.order);
-    const index = list.findIndex((section) => section.id === sectionId);
+  function moveElement(direction: -1 | 1) {
+    if (!selectedId) return;
+    const list = [...currentElements].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    const index = list.findIndex((item) => item.id === selectedId);
     const nextIndex = index + direction;
     if (index < 0 || nextIndex < 0 || nextIndex >= list.length) return;
     const [item] = list.splice(index, 1);
     list.splice(nextIndex, 0, item);
-    updateSections(list);
+    const reordered = list.map((item, order) => ({ ...item, order }));
+    setSettings((current) => ({ ...current, pages: { ...current.pages, [key]: { elements: reordered } } }));
+    setElements(reordered);
   }
 
-  function toggleSection(sectionId: string) {
-    updateSections(currentSections.map((section) => section.id === sectionId ? { ...section, hidden: !section.hidden } : section));
+  function resetSelected() {
+    if (!selectedId) return;
+    setSettings((current) => {
+      const page = pageSettings(current, key);
+      return { ...current, pages: { ...current.pages, [key]: { elements: page.elements.filter((item) => item.id !== selectedId) } } };
+    });
   }
 
   function resetCurrentPage() {
-    const detected = detectSections();
-    setSections(detected);
+    setSelectedId(null);
+    setElements(detectElements());
     setSettings((current) => {
       const pages = { ...current.pages };
       delete pages[key];
@@ -221,68 +396,147 @@ export function AppDesignStudio() {
   }
 
   function resetAllDesign() {
+    setSelectedId(null);
     setSettings(DEFAULT_SETTINGS);
-    setSections(detectSections());
+    setElements(detectElements());
   }
+
+  function startHandleDrag(mode: DragState["mode"], event: ReactMouseEvent<HTMLButtonElement>) {
+    if (!selectedId) return;
+    const element = document.querySelector<HTMLElement>(elementSelector(selectedId));
+    if (!element) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const rect = element.getBoundingClientRect();
+    if (mode === "move") {
+      dragRef.current = { mode, id: selectedId, startX: event.clientX, startY: event.clientY, baseX: selected?.x ?? 0, baseY: selected?.y ?? 0 };
+    } else {
+      dragRef.current = { mode, id: selectedId, startX: event.clientX, startY: event.clientY, baseWidth: selected?.width ?? Math.round(rect.width), baseHeight: selected?.height ?? Math.round(rect.height) };
+    }
+  }
+
+  const selectedRect = selectedId && open ? document.querySelector<HTMLElement>(elementSelector(selectedId))?.getBoundingClientRect() : null;
 
   if (!ready) return null;
 
   return (
     <>
-      <button
-        type="button"
-        className="design-studio-toggle"
-        onClick={() => setOpen((value) => !value)}
-        aria-expanded={open}
-      >
+      <button type="button" className="design-studio-toggle" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
         Design
       </button>
+
+      {open && selectedRect ? (
+        <div className="design-selection-tools" style={{ left: selectedRect.left, top: selectedRect.top, width: selectedRect.width, height: selectedRect.height }}>
+          <button type="button" className="design-drag-handle" onMouseDown={(event) => startHandleDrag("move", event)}>Move</button>
+          <button type="button" className="design-resize-handle" onMouseDown={(event) => startHandleDrag("resize", event)}>Resize</button>
+        </div>
+      ) : null}
 
       {open ? (
         <aside className="design-studio-panel" aria-label="App design studio">
           <div className="design-studio-panel__head">
             <div>
               <p>Design Mode</p>
-              <h2>{readableLabel(key)} Tab</h2>
+              <h2>{selected ? selected.label : `${readableLabel(key)} Tab`}</h2>
             </div>
             <button type="button" onClick={() => setOpen(false)}>Close</button>
           </div>
 
-          <section>
-            <h3>Theme</h3>
-            <label>Text <input type="color" value={settings.theme.ink} onChange={(event) => updateTheme({ ink: event.target.value })} /></label>
-            <label>Background <input type="color" value={settings.theme.canvas} onChange={(event) => updateTheme({ canvas: event.target.value })} /></label>
-            <label>Cards <input type="color" value={settings.theme.surface} onChange={(event) => updateTheme({ surface: event.target.value })} /></label>
-            <label>Accent <input type="color" value={settings.theme.accent} onChange={(event) => updateTheme({ accent: event.target.value })} /></label>
-            <label>Action <input type="color" value={settings.theme.action} onChange={(event) => updateTheme({ action: event.target.value })} /></label>
-          </section>
+          <div className="design-tabs">
+            {(["element", "layout", "text", "style", "page"] as const).map((tab) => (
+              <button key={tab} type="button" onClick={() => setPanelTab(tab)} className={panelTab === tab ? "is-active" : ""}>{readableLabel(tab)}</button>
+            ))}
+          </div>
 
-          <section>
-            <h3>Page Shape</h3>
-            <label>Text size <input type="range" min="0.85" max="1.25" step="0.05" value={settings.theme.textScale} onChange={(event) => updateTheme({ textScale: Number(event.target.value) })} /></label>
-            <label>Spacing <input type="range" min="0.75" max="1.45" step="0.05" value={settings.theme.spacingScale} onChange={(event) => updateTheme({ spacingScale: Number(event.target.value) })} /></label>
-            <label>Corner radius <input type="range" min="0" max="28" step="1" value={settings.theme.radius} onChange={(event) => updateTheme({ radius: Number(event.target.value) })} /></label>
-            <label>Content width <input type="range" min="980" max="1760" step="20" value={settings.theme.contentWidth} onChange={(event) => updateTheme({ contentWidth: Number(event.target.value) })} /></label>
-          </section>
+          {panelTab === "element" ? (
+            <section>
+              <h3>Selected Element</h3>
+              {selected ? (
+                <>
+                  <label>Name <input value={selected.label} onChange={(event) => updateCurrent({ label: event.target.value })} /></label>
+                  <div className="design-button-row">
+                    <button type="button" onClick={() => moveElement(-1)}>Move up</button>
+                    <button type="button" onClick={() => moveElement(1)}>Move down</button>
+                    <button type="button" onClick={() => updateCurrent({ hidden: !selected.hidden })}>{selected.hidden ? "Show" : "Hide"}</button>
+                  </div>
+                  <div className="design-button-row">
+                    <button type="button" onClick={() => updateCurrent({ x: 0, y: 0 })}>Reset position</button>
+                    <button type="button" onClick={resetSelected}>Reset element</button>
+                  </div>
+                </>
+              ) : <p className="design-empty">Click any section, card, text, button or tool on the page.</p>}
+            </section>
+          ) : null}
 
-          <section>
-            <div className="design-section-title">
-              <h3>Sections</h3>
-              <button type="button" onClick={resetCurrentPage}>Reset tab</button>
-            </div>
-            <div className="design-section-list">
-              {currentSections.map((section, index) => (
-                <div key={section.id} className="design-section-row">
-                  <span>{section.label}</span>
-                  <button type="button" onClick={() => moveSection(section.id, -1)} disabled={index === 0}>Up</button>
-                  <button type="button" onClick={() => moveSection(section.id, 1)} disabled={index === currentSections.length - 1}>Down</button>
-                  <button type="button" onClick={() => toggleSection(section.id)}>{section.hidden ? "Show" : "Hide"}</button>
+          {panelTab === "layout" ? (
+            <section>
+              <h3>Layout</h3>
+              <label>Mode <select value={selected?.layout ?? "default"} onChange={(event) => updateCurrent({ layout: event.target.value as LayoutMode })}><option value="default">Default</option><option value="stack">Stack</option><option value="row">Row</option><option value="grid">Grid</option></select></label>
+              <label>Columns <input type="range" min="1" max="8" step="1" value={selected?.columns ?? 2} onChange={(event) => updateCurrent({ columns: Number(event.target.value) })} /></label>
+              <label>Gap <input type="range" min="0" max="48" step="1" value={selected?.gap ?? 12} onChange={(event) => updateCurrent({ gap: Number(event.target.value) })} /></label>
+              <label>Padding <input type="range" min="0" max="64" step="1" value={selected?.padding ?? 16} onChange={(event) => updateCurrent({ padding: Number(event.target.value) })} /></label>
+              <label>Margin <input type="range" min="0" max="64" step="1" value={selected?.margin ?? 0} onChange={(event) => updateCurrent({ margin: Number(event.target.value) })} /></label>
+              <label>Align <select value={selected?.align ?? "stretch"} onChange={(event) => updateCurrent({ align: event.target.value as ElementDesign["align"] })}><option value="stretch">Stretch</option><option value="start">Left/top</option><option value="center">Center</option><option value="end">Right/bottom</option></select></label>
+              <label>Width <input type="number" min="0" value={selected?.width ?? ""} onChange={(event) => updateCurrent({ width: numericValue(event.target.value) })} /></label>
+              <label>Height <input type="number" min="0" value={selected?.height ?? ""} onChange={(event) => updateCurrent({ height: numericValue(event.target.value) })} /></label>
+            </section>
+          ) : null}
+
+          {panelTab === "text" ? (
+            <section>
+              <h3>Text</h3>
+              <p className="design-empty">Text can also be edited directly on the page while Design Mode is open.</p>
+              <label>Override <textarea value={selected?.text ?? ""} onChange={(event) => updateCurrent({ text: event.target.value })} /></label>
+              <label>Font size <input type="range" min="10" max="72" step="1" value={selected?.fontSize ?? 16} onChange={(event) => updateCurrent({ fontSize: Number(event.target.value) })} /></label>
+              <label>Font weight <input type="range" min="300" max="950" step="50" value={selected?.fontWeight ?? 700} onChange={(event) => updateCurrent({ fontWeight: Number(event.target.value) })} /></label>
+              <label>Text colour <input type="color" value={selected?.color ?? settings.theme.ink} onChange={(event) => updateCurrent({ color: event.target.value })} /></label>
+            </section>
+          ) : null}
+
+          {panelTab === "style" ? (
+            <section>
+              <h3>Style</h3>
+              <label>Background <input type="color" value={selected?.background ?? settings.theme.surface} onChange={(event) => updateCurrent({ background: event.target.value })} /></label>
+              <label>Text <input type="color" value={selected?.color ?? settings.theme.ink} onChange={(event) => updateCurrent({ color: event.target.value })} /></label>
+              <label>Border <input type="color" value={selected?.borderColor ?? "#dfe6e2"} onChange={(event) => updateCurrent({ borderColor: event.target.value })} /></label>
+              <label>Radius <input type="range" min="0" max="40" step="1" value={selected?.radius ?? settings.theme.radius} onChange={(event) => updateCurrent({ radius: Number(event.target.value) })} /></label>
+            </section>
+          ) : null}
+
+          {panelTab === "page" ? (
+            <>
+              <section>
+                <h3>Theme</h3>
+                <label>Text <input type="color" value={settings.theme.ink} onChange={(event) => updateTheme({ ink: event.target.value })} /></label>
+                <label>Background <input type="color" value={settings.theme.canvas} onChange={(event) => updateTheme({ canvas: event.target.value })} /></label>
+                <label>Cards <input type="color" value={settings.theme.surface} onChange={(event) => updateTheme({ surface: event.target.value })} /></label>
+                <label>Accent <input type="color" value={settings.theme.accent} onChange={(event) => updateTheme({ accent: event.target.value })} /></label>
+                <label>Action <input type="color" value={settings.theme.action} onChange={(event) => updateTheme({ action: event.target.value })} /></label>
+              </section>
+
+              <section>
+                <h3>Page Shape</h3>
+                <label>Text size <input type="range" min="0.85" max="1.25" step="0.05" value={settings.theme.textScale} onChange={(event) => updateTheme({ textScale: Number(event.target.value) })} /></label>
+                <label>Spacing <input type="range" min="0.75" max="1.45" step="0.05" value={settings.theme.spacingScale} onChange={(event) => updateTheme({ spacingScale: Number(event.target.value) })} /></label>
+                <label>Corner radius <input type="range" min="0" max="28" step="1" value={settings.theme.radius} onChange={(event) => updateTheme({ radius: Number(event.target.value) })} /></label>
+                <label>Content width <input type="range" min="980" max="1760" step="20" value={settings.theme.contentWidth} onChange={(event) => updateTheme({ contentWidth: Number(event.target.value) })} /></label>
+              </section>
+
+              <section>
+                <h3>Detected Elements</h3>
+                <div className="design-section-list">
+                  {currentElements.slice(0, 40).map((element) => (
+                    <button key={element.id} type="button" className={element.id === selectedId ? "is-active" : ""} onClick={() => setSelectedId(element.id)}>{element.label}</button>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </section>
+              </section>
+            </>
+          ) : null}
 
-          <button type="button" className="design-reset-all" onClick={resetAllDesign}>Reset all app design</button>
+          <div className="design-button-row">
+            <button type="button" onClick={resetCurrentPage}>Reset tab</button>
+            <button type="button" className="design-reset-all" onClick={resetAllDesign}>Reset all</button>
+          </div>
         </aside>
       ) : null}
     </>

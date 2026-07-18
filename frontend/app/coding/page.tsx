@@ -100,6 +100,7 @@ const REVIEW_STORAGE_KEY = "rugby-video-analysis:coding-review:v1";
 const VIDEO_LAYOUT_STORAGE_KEY = "rugby-video-analysis:coding-video-layout:v1";
 const CODING_LAYOUT_STORAGE_KEY = "rugby-video-analysis:coding-layout:v1";
 const HUD_LAYOUT_STORAGE_KEY = "rugby-video-analysis:coding-hud-layout:v1";
+const QUICK_CODE_CAPTURE_SECONDS = 10;
 
 const DEFAULT_QUICK_COLUMN_ORDER: QuickColumnId[] = ["home", "away"];
 const DEFAULT_CODING_LAYOUT: CodingLayout = {
@@ -714,10 +715,12 @@ export default function CodingWorkspace() {
     ? "rounded-lg border border-slate-800 bg-slate-900 p-2"
     : "rounded-lg border border-slate-800 bg-slate-900 p-3";
 
-  const createEvent = useCallback(async (type: EventType, duration = 8, extras?: { notes?: string; outcome?: string; phaseNumber?: number | null; fieldZone?: string; label?: string; team?: EventTeam | "selected" }) => {
+  const createEvent = useCallback(async (type: EventType, duration = 8, extras?: { notes?: string; outcome?: string; phaseNumber?: number | null; fieldZone?: string; label?: string; team?: EventTeam | "selected"; centeredWindow?: boolean }) => {
     if (!selectedMatchId || !selectedVideoId) return;
-    const start = Math.max(0, videoRef.current?.currentTime ?? currentTime);
-    const end = Math.min(videoRef.current?.duration || start + duration, start + duration);
+    const playhead = Math.max(0, videoRef.current?.currentTime ?? currentTime);
+    const safeDuration = Math.max(0.5, duration);
+    const start = extras?.centeredWindow ? Math.max(0, playhead - safeDuration / 2) : playhead;
+    const end = Math.min(videoRef.current?.duration || start + safeDuration, extras?.centeredWindow ? playhead + safeDuration / 2 : start + safeDuration);
     const team = extras?.team && extras.team !== "selected" ? extras.team : selectedTeam;
     setBusy(true);
     try {
@@ -741,7 +744,7 @@ export default function CodingWorkspace() {
       const label = extras?.label || extras?.outcome || type;
       const codedTeamLabel = teamLabel(team);
       setLastCodedEvent({ event: created, label, teamLabel: codedTeamLabel });
-      setNotice(`${label} saved to the timeline at ${formatTime(start)} for ${codedTeamLabel}${zoneText}. Reports update from saved timeline events.`);
+      setNotice(`${label} saved from ${formatTime(start)} to ${formatTime(created.end_seconds)} for ${codedTeamLabel}${zoneText}. Reports update from saved timeline events.`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Unable to create event");
     } finally {
@@ -751,12 +754,13 @@ export default function CodingWorkspace() {
 
   const createEventFromBinding = useCallback((binding: ShortcutBinding) => {
     if (!binding.eventType) return;
-    void createEvent(binding.eventType, binding.duration, {
+    void createEvent(binding.eventType, QUICK_CODE_CAPTURE_SECONDS, {
       outcome: binding.outcome || (binding.custom ? binding.label : undefined),
       notes: binding.notes,
       fieldZone: binding.fieldZone,
       label: binding.label,
       team: binding.team,
+      centeredWindow: true,
     });
   }, [createEvent]);
 

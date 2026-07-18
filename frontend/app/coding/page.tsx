@@ -95,6 +95,7 @@ type ShortcutBinding = {
 };
 
 const SHORTCUT_STORAGE_KEY = "rugby-video-analysis:coding-shortcuts:v1";
+const EVENT_LIBRARY_RESET_STORAGE_KEY = "rugby-video-analysis:coding-event-library-reset:v1";
 const REVIEW_STORAGE_KEY = "rugby-video-analysis:coding-review:v1";
 const VIDEO_LAYOUT_STORAGE_KEY = "rugby-video-analysis:coding-video-layout:v1";
 const CODING_LAYOUT_STORAGE_KEY = "rugby-video-analysis:coding-layout:v1";
@@ -168,49 +169,9 @@ const EVENT_SOURCES: { value: EventSource; label: string }[] = [
   { value: "imported", label: "Imported" },
 ];
 
-const HOME_EVENT_KEYS = ["Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6", "Digit7", "Digit8", "Digit9", "Digit0", "Minus", "Equal", "Backquote"];
 const ZONE_KEYS = ["KeyA", "KeyS", "KeyD", "KeyF", "KeyG", "KeyH", "KeyJ", "KeyK"];
-const BASE_EVENT_SHORTCUTS: Omit<ShortcutBinding, "id" | "shortcut" | "team">[] = [
-  { label: "Carry", group: "event", eventType: "carry", duration: 6, category: "attack" },
-  { label: "Tackle", group: "event", eventType: "tackle", duration: 5, category: "defence" },
-  { label: "Ruck", group: "event", eventType: "ruck", duration: 6, category: "possession" },
-  { label: "Pass", group: "event", eventType: "pass", duration: 4, category: "attack" },
-  { label: "Kick", group: "event", eventType: "kick", duration: 8, category: "kicking" },
-  { label: "Lineout", group: "event", eventType: "lineout", duration: 18, category: "set_piece" },
-  { label: "Scrum", group: "event", eventType: "scrum", duration: 22, category: "set_piece" },
-  { label: "Penalty", group: "event", eventType: "penalty", duration: 8, category: "discipline" },
-  { label: "Try", group: "event", eventType: "try", duration: 12, category: "attack" },
-  { label: "Turnover", group: "event", eventType: "turnover", duration: 8, category: "transition" },
-  { label: "Maul", group: "event", eventType: "maul", duration: 10, category: "set_piece" },
-  { label: "Stoppage", group: "event", eventType: "stoppage", duration: 10, category: "core" },
-  { label: "Blank event", group: "event", eventType: "custom", duration: 8, category: "core" },
-];
-
-const VARIANT_EVENT_SHORTCUTS: Omit<ShortcutBinding, "id" | "shortcut" | "team">[] = [
-  { label: "Dominant carry", group: "event", eventType: "carry", duration: 6, category: "attack", outcome: "Dominant carry", variant: true },
-  { label: "Missed tackle", group: "event", eventType: "tackle", duration: 5, category: "defence", outcome: "Missed tackle", variant: true },
-  { label: "Ruck won", group: "event", eventType: "ruck", duration: 6, category: "possession", outcome: "Ruck won", variant: true },
-  { label: "Forward pass", group: "event", eventType: "pass", duration: 4, category: "attack", outcome: "Forward pass", variant: true },
-  { label: "Contestable kick", group: "event", eventType: "kick", duration: 8, category: "kicking", outcome: "Contestable kick", variant: true },
-  { label: "Lineout lost", group: "event", eventType: "lineout", duration: 18, category: "set_piece", outcome: "Lineout lost", variant: true },
-  { label: "Scrum lost", group: "event", eventType: "scrum", duration: 22, category: "set_piece", outcome: "Scrum lost", variant: true },
-  { label: "Penalty conceded", group: "event", eventType: "penalty", duration: 8, category: "discipline", outcome: "Penalty conceded", variant: true },
-  { label: "Line break", group: "event", eventType: "carry", duration: 10, category: "attack", outcome: "Line break", variant: true },
-  { label: "Jackal win", group: "event", eventType: "turnover", duration: 8, category: "defence", outcome: "Jackal win", variant: true },
-  { label: "Maul lost", group: "event", eventType: "maul", duration: 10, category: "set_piece", outcome: "Maul lost", variant: true },
-  { label: "Drop out", group: "event", eventType: "kick", duration: 10, category: "kicking", outcome: "Drop out", variant: true },
-  { label: "Quick restart", group: "event", eventType: "kickoff", duration: 8, category: "kicking", outcome: "Quick restart", variant: true },
-];
 
 const DEFAULT_SHORTCUTS: ShortcutBinding[] = [
-  ...BASE_EVENT_SHORTCUTS.flatMap((binding, index) => [
-    { ...binding, id: `tag_home_${binding.eventType}_${index}`, label: binding.label, shortcut: HOME_EVENT_KEYS[index], team: "home" as const },
-    { ...binding, id: `tag_away_${binding.eventType}_${index}`, label: binding.label, shortcut: "Unassigned", team: "away" as const },
-  ]),
-  ...VARIANT_EVENT_SHORTCUTS.flatMap((binding, index) => [
-    { ...binding, id: `tag_home_variant_${binding.eventType}_${index}`, label: binding.label, shortcut: `Shift+${HOME_EVENT_KEYS[index]}`, team: "home" as const },
-    { ...binding, id: `tag_away_variant_${binding.eventType}_${index}`, label: binding.label, shortcut: "Unassigned", team: "away" as const },
-  ]),
   { id: "zone_own_22", label: "Own 22m", group: "zone", shortcut: ZONE_KEYS[0], fieldZone: "Own 22m", zoneLength: "Inside defensive 22m" },
   { id: "zone_own_half", label: "Own half", group: "zone", shortcut: ZONE_KEYS[1], fieldZone: "Own half", zoneLength: "Outside own 22m to halfway" },
   { id: "zone_outside_50m", label: "Outside 50m", group: "zone", shortcut: ZONE_KEYS[2], fieldZone: "Outside 50m", zoneLength: "Outside 50m/halfway line" },
@@ -361,6 +322,11 @@ function mirrorHomeBindingToAway(binding: ShortcutBinding): ShortcutBinding {
   };
 }
 
+function awayPairIdForHome(binding: ShortcutBinding) {
+  if (binding.id.startsWith("custom_")) return binding.id.endsWith("_away") ? binding.id : `${binding.id}_away`;
+  return binding.id.replace(/^tag_home_/, "tag_away_");
+}
+
 function homePairIdForAway(binding: ShortcutBinding) {
   if (binding.id.startsWith("custom_") && binding.id.endsWith("_away")) return binding.id.replace(/_away$/, "");
   return binding.id.replace(/^tag_away_/, "tag_home_");
@@ -369,9 +335,16 @@ function homePairIdForAway(binding: ShortcutBinding) {
 function loadShortcutBindings() {
   if (typeof window === "undefined") return DEFAULT_SHORTCUTS;
   const saved = window.localStorage.getItem(SHORTCUT_STORAGE_KEY);
-  if (!saved) return DEFAULT_SHORTCUTS;
+  if (!saved) {
+    window.localStorage.setItem(EVENT_LIBRARY_RESET_STORAGE_KEY, "2026-07-18");
+    return DEFAULT_SHORTCUTS;
+  }
   try {
-    const parsed = JSON.parse(saved) as Partial<ShortcutBinding>[];
+    const eventLibraryAlreadyReset = window.localStorage.getItem(EVENT_LIBRARY_RESET_STORAGE_KEY) === "2026-07-18";
+    const parsed = (JSON.parse(saved) as Partial<ShortcutBinding>[]).filter((item) => (
+      eventLibraryAlreadyReset || item.group !== "event"
+    ));
+    if (!eventLibraryAlreadyReset) window.localStorage.setItem(EVENT_LIBRARY_RESET_STORAGE_KEY, "2026-07-18");
     const defaults = DEFAULT_SHORTCUTS.map((binding) => {
       const savedBinding = parsed.find((item) => item.id === binding.id);
       const savedLabel = savedBinding?.label ? displayEventLabel({ label: String(savedBinding.label) } as ShortcutBinding) : binding.label;
@@ -901,7 +874,36 @@ export default function CodingWorkspace() {
     setShortcuts(DEFAULT_SHORTCUTS);
     setEditingShortcutId(null);
     setActiveZoneId(null);
-    setNotice("Keyboard shortcuts, zone keys and custom library events reset to defaults.");
+    setQuickEditBindingId(null);
+    setNotice("Keyboard shortcuts and zone keys reset. Rugby event buttons are empty so you can build them from scratch.");
+  }
+
+  function unassignAllEventButtons() {
+    setShortcuts((current) => current.map((binding) => (
+      binding.group === "event" ? { ...binding, shortcut: "Unassigned" } : binding
+    )));
+    setEditingShortcutId(null);
+    setNotice("All rugby event buttons are now unassigned. Zone and playback shortcuts were not changed.");
+  }
+
+  function deleteAllEventButtons() {
+    const eventButtonCount = shortcuts.filter((binding) => binding.group === "event").length;
+    if (!eventButtonCount) {
+      setNotice("There are no rugby event buttons to delete.");
+      return;
+    }
+    const confirmed = window.confirm(`Delete all ${eventButtonCount} rugby event button${eventButtonCount === 1 ? "" : "s"}? Zone keys, video controls and timeline events will not be changed.`);
+    if (!confirmed) return;
+    setShortcuts((current) => current.filter((binding) => binding.group !== "event"));
+    setHudLayouts((current) => ({
+      home: { ...current.home, buttonOrder: [] },
+      away: { ...current.away, buttonOrder: [] },
+    }));
+    setEditingShortcutId(null);
+    setQuickEditBindingId(null);
+    setDraggingShortcutId(null);
+    setDraggingHudButton(null);
+    setNotice("All rugby event buttons deleted. Add Home events to rebuild; Away copies will be created unassigned.");
   }
 
   function updateCodingLayout(updates: Partial<CodingLayout>) {
@@ -1106,18 +1108,34 @@ export default function CodingWorkspace() {
   }
 
   function updateLibraryEvent(bindingId: string, updates: Partial<ShortcutBinding>) {
-    setShortcuts((current) => current.map((binding) => (
-      binding.id === bindingId
-        ? { ...binding, ...updates, outcome: updates.label ?? binding.outcome ?? binding.label }
-        : binding
-    )));
+    setShortcuts((current) => {
+      const original = current.find((binding) => binding.id === bindingId);
+      const pairedAwayId = original?.group === "event" && original.team === "home" ? awayPairIdForHome(original) : null;
+      return current.map((binding) => {
+        if (binding.id === bindingId) {
+          return { ...binding, ...updates, outcome: updates.label ?? binding.outcome ?? binding.label };
+        }
+        if (pairedAwayId && binding.id === pairedAwayId) {
+          return {
+            ...binding,
+            ...updates,
+            id: binding.id,
+            team: "away",
+            shortcut: "Unassigned",
+            outcome: updates.label ?? updates.outcome ?? binding.outcome ?? binding.label,
+          };
+        }
+        return binding;
+      });
+    });
   }
 
   function deleteLibraryEvent(bindingId: string) {
     const binding = shortcuts.find((item) => item.id === bindingId);
-    setShortcuts((current) => current.filter((item) => item.id !== bindingId));
+    const pairedAwayId = binding?.group === "event" && binding.team === "home" ? awayPairIdForHome(binding) : null;
+    setShortcuts((current) => current.filter((item) => item.id !== bindingId && item.id !== pairedAwayId));
     if (bindingId === activeZoneId) setActiveZoneId(null);
-    setNotice(`${binding?.label ?? "Custom item"} removed from the keyboard library.`);
+    setNotice(`${binding?.label ?? "Custom item"} removed from the keyboard library${pairedAwayId ? " with its Away copy" : ""}.`);
   }
 
   function updateReview(eventId: number, updates: Partial<ReviewMeta>) {
@@ -1492,6 +1510,12 @@ export default function CodingWorkspace() {
                 <button type="button" onClick={() => setQuickAddPanel((current) => current === "zone" ? null : "zone")} className="rounded-lg border border-slate-700 px-3 py-2 font-bold text-slate-200">
                   Add zone
                 </button>
+                <button type="button" onClick={unassignAllEventButtons} className="rounded-lg border border-slate-700 px-3 py-2 font-bold text-slate-200">
+                  Unassign all
+                </button>
+                <button type="button" onClick={deleteAllEventButtons} className="rounded-lg border border-rose-900 px-3 py-2 font-bold text-rose-300">
+                  Delete all
+                </button>
                 <button type="button" onClick={() => setShowAdvancedMapping((current) => !current)} className="rounded-lg border border-slate-700 px-3 py-2 font-bold text-slate-200">
                   {showAdvancedMapping ? "Hide settings" : "Settings"}
                 </button>
@@ -1798,18 +1822,20 @@ export default function CodingWorkspace() {
                 <p className="text-xs text-slate-500">This replaces the old quick-code library. Edit event names, outcomes and keys from the mapping itself. Playback is {playbackRate}x.</p>
               </div>
               <div className="flex flex-wrap gap-2">
-                <button type="button" onClick={resetShortcuts} className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-bold">Reset defaults</button>
+                <button type="button" onClick={unassignAllEventButtons} className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-bold">Unassign all</button>
+                <button type="button" onClick={deleteAllEventButtons} className="rounded-lg border border-rose-900 px-3 py-2 text-sm font-bold text-rose-300">Delete all</button>
+                <button type="button" onClick={resetShortcuts} className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-bold">Reset zone/video keys</button>
               </div>
             </div>
 
             <form onSubmit={submitLibraryEvent} className="mb-4 grid gap-3 rounded-lg border border-slate-800 bg-slate-950 p-3 md:grid-cols-2 xl:grid-cols-7" data-design-id="coding-keyboard-add-event-form" data-design-label="Keyboard add event form" data-design-priority="300">
               <input name="label" placeholder="New event name" className={`${inputClass} xl:col-span-2`} data-design-id="coding-keyboard-add-label" data-design-label="Keyboard add event name field" />
               <select name="category" className={inputClass} defaultValue="attack" data-design-id="coding-keyboard-add-category" data-design-label="Keyboard add category field">{EVENT_LIBRARY_CATEGORIES.map((category) => <option key={category.value} value={category.value}>{category.label}</option>)}</select>
-              <select name="team" className={inputClass} defaultValue="selected" data-design-id="coding-keyboard-add-team" data-design-label="Keyboard add team field">
-                <option value="selected">Selected team</option>
+              <select name="team" className={inputClass} defaultValue="home" data-design-id="coding-keyboard-add-team" data-design-label="Keyboard add team field">
                 <option value="home">{homeTeam?.name ?? "Home"}</option>
                 <option value="away">{awayTeam?.name ?? "Away"}</option>
                 <option value="neutral">Neutral</option>
+                <option value="selected">Selected team</option>
               </select>
               <input name="shortcut" placeholder="Key code e.g. KeyA" className={inputClass} data-design-id="coding-keyboard-add-shortcut" data-design-label="Keyboard add shortcut field" />
               <input name="duration" type="number" min="1" max="300" defaultValue="8" className={inputClass} data-design-id="coding-keyboard-add-duration" data-design-label="Keyboard add duration field" />
@@ -1854,7 +1880,7 @@ export default function CodingWorkspace() {
                           <button type="button" onClick={() => setEditingShortcutId(binding.id)} className="rounded border border-slate-700 px-3 py-2 text-sm font-bold" data-design-id={`coding-keyboard-${designId(binding.id)}-change-key`} data-design-label={`${binding.label} change key button`}>Change key</button>
                         </div>
                         <input value={binding.notes ?? ""} onChange={(event) => updateLibraryEvent(binding.id, { notes: event.target.value })} placeholder="Default note" className={`${inputClass} mt-2`} aria-label={`${binding.label} note`} data-design-id={`coding-keyboard-${designId(binding.id)}-note`} data-design-label={`${binding.label} note field`} />
-                        {binding.custom && <button type="button" onClick={() => deleteLibraryEvent(binding.id)} className="mt-2 w-full rounded border border-rose-900 px-3 py-2 text-sm font-bold text-rose-300" data-design-id={`coding-keyboard-${designId(binding.id)}-delete`} data-design-label={`${binding.label} delete custom button`}>Delete custom event</button>}
+                        <button type="button" onClick={() => deleteLibraryEvent(binding.id)} className="mt-2 w-full rounded border border-rose-900 px-3 py-2 text-sm font-bold text-rose-300" data-design-id={`coding-keyboard-${designId(binding.id)}-delete`} data-design-label={`${binding.label} delete button`}>Delete rugby event</button>
                             </div>
                           ))}
                         </div>

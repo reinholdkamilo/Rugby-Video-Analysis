@@ -1113,7 +1113,7 @@ export default function CodingWorkspace() {
               </form>
             ) : null}
 
-            <div className="grid gap-4 xl:grid-cols-2">
+            <div className="grid gap-4 md:grid-cols-2">
               {quickMatrixColumns.map((column, columnIndex) => (
                 <div
                   key={column.id}
@@ -1137,17 +1137,13 @@ export default function CodingWorkspace() {
                       <h3 className="text-sm font-bold uppercase tracking-[0.14em] text-slate-300">{column.title}</h3>
                       <p className="text-xs text-slate-500">{column.subtitle}</p>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span className="rounded bg-slate-900 px-2 py-1 text-xs font-bold text-slate-500">{column.items.length}</span>
-                      <span className="text-xs text-slate-600">Drag</span>
-                    </div>
+                    <span className="text-xs text-slate-600">Drag</span>
                   </div>
                   <div className="grid gap-3">
                     {column.sections.map((section) => (
                       <div key={section.id} className="rounded-lg border border-slate-800 bg-slate-900 p-3" data-design-id={`coding-quick-${column.id}-${section.id}-section`} data-design-label={`${column.title} ${section.title} quick section`}>
-                        <div className="mb-2 flex items-center justify-between gap-2">
+                        <div className="mb-2">
                           <h4 className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">{section.title}</h4>
-                          <span className="rounded bg-slate-950 px-2 py-1 text-[11px] font-bold text-slate-500">{section.items.length}</span>
                         </div>
                         <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>
                           {section.items.map((binding) => (

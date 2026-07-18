@@ -100,7 +100,7 @@ const REVIEW_STORAGE_KEY = "rugby-video-analysis:coding-review:v1";
 const VIDEO_LAYOUT_STORAGE_KEY = "rugby-video-analysis:coding-video-layout:v1";
 const CODING_LAYOUT_STORAGE_KEY = "rugby-video-analysis:coding-layout:v1";
 const HUD_LAYOUT_STORAGE_KEY = "rugby-video-analysis:coding-hud-layout:v1";
-const QUICK_CODE_CAPTURE_SECONDS = 10;
+const QUICK_CODE_CAPTURE_SECONDS = 15;
 
 const DEFAULT_QUICK_COLUMN_ORDER: QuickColumnId[] = ["home", "away"];
 const DEFAULT_CODING_LAYOUT: CodingLayout = {

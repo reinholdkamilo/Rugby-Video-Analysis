@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { EventTeam, EventType, Match, Team, TimelineEvent, VideoAsset, api } from "@/lib/api";
 
 type EventCategory = "core" | "attack" | "defence" | "set_piece" | "discipline" | "transition" | "kicking" | "possession";
@@ -85,6 +85,15 @@ function countText(events: TimelineEvent[], team: EventTeam, pattern: RegExp) {
   return eventsFor(events, team).filter((event) => pattern.test(`${event.event_type} ${event.outcome ?? ""} ${event.notes ?? ""} ${event.field_zone ?? ""}`)).length;
 }
 
+function normalisedOutcome(event: TimelineEvent) {
+  return (event.outcome ?? "").toLowerCase().replace(/_/g, " ").trim();
+}
+
+function outcomeIs(event: TimelineEvent, labels: string[]) {
+  const outcome = normalisedOutcome(event);
+  return labels.includes(outcome);
+}
+
 function percent(value: number, total: number) {
   if (!total) return 0;
   return Math.max(0, Math.min(100, Math.round((value / total) * 100)));
@@ -95,12 +104,27 @@ function scoreFor(events: TimelineEvent[], team: EventTeam) {
 }
 
 function scoringPoints(event: TimelineEvent) {
-  const outcome = (event.outcome ?? "").toLowerCase().replace(/_/g, " ");
-  if (event.event_type === "try") return 5;
-  if (event.event_type === "conversion") return 2;
-  if (event.event_type === "penalty" && ["goal", "penalty goal", "penalty kick goal"].includes(outcome)) return 3;
-  if (event.event_type === "kick" && outcome === "drop goal") return 3;
+  if (isTry(event)) return 5;
+  if (isConversion(event)) return 2;
+  if (isPenaltyGoal(event)) return 3;
+  if (isDropGoal(event)) return 3;
   return 0;
+}
+
+function isTry(event: TimelineEvent) {
+  return event.event_type === "try" || outcomeIs(event, ["try"]);
+}
+
+function isConversion(event: TimelineEvent) {
+  return event.event_type === "conversion" || outcomeIs(event, ["conversion"]);
+}
+
+function isPenaltyGoal(event: TimelineEvent) {
+  return event.event_type === "penalty" && outcomeIs(event, ["goal", "penalty goal", "penalty kick goal"]);
+}
+
+function isDropGoal(event: TimelineEvent) {
+  return outcomeIs(event, ["drop goal"]);
 }
 
 function zoneCount(events: TimelineEvent[], team: EventTeam, pattern: RegExp) {
@@ -113,9 +137,24 @@ function teamShare(events: TimelineEvent[], team: EventTeam) {
   return percent(eventsFor(events, team).length, home + away);
 }
 
+function opposition(team: EventTeam): EventTeam {
+  if (team === "home") return "away";
+  if (team === "away") return "home";
+  return "neutral";
+}
+
+function impliedCarryCount(events: TimelineEvent[], team: EventTeam) {
+  return eventTypeCount(events, opposition(team), "tackle");
+}
+
+function attackingActions(events: TimelineEvent[], team: EventTeam) {
+  return typeCount(events, team, ATTACK_TYPES) + impliedCarryCount(events, team);
+}
+
 function metricRows(events: TimelineEvent[], homeName: string, awayName: string) {
   return [
-    ["Carries", eventTypeCount(events, "home", "carry"), eventTypeCount(events, "away", "carry")],
+    ["Carries coded", eventTypeCount(events, "home", "carry"), eventTypeCount(events, "away", "carry")],
+    ["Carries implied from tackles", impliedCarryCount(events, "home"), impliedCarryCount(events, "away")],
     ["Passes", eventTypeCount(events, "home", "pass"), eventTypeCount(events, "away", "pass")],
     ["Kicks", typeCount(events, "home", KICKING_TYPES), typeCount(events, "away", KICKING_TYPES)],
     ["Linebreaks", countText(events, "home", /line ?break/i), countText(events, "away", /line ?break/i)],
@@ -131,6 +170,25 @@ function metricRows(events: TimelineEvent[], homeName: string, awayName: string)
 function topRows(events: TimelineEvent[], team: EventTeam, title: string, limit = 4) {
   const rows = sortedEntries(countBy(eventsFor(events, team), (event) => event.outcome || event.event_type)).slice(0, limit);
   return { title, rows: rows.length ? rows : [["No coded events", 0] as [string, number]] };
+}
+
+function teamSummaryRows(events: TimelineEvent[], team: EventTeam, limit = 4): [string, number][] {
+  const rows = sortedEntries(
+    countBy(
+      eventsFor(events, team).filter((event) => !isTry(event) && !isConversion(event) && !isPenaltyGoal(event) && !isDropGoal(event)),
+      (event) => event.outcome || event.event_type,
+    ),
+  ).slice(0, limit);
+  return rows.length ? rows : [["No non-scoring events", 0] as [string, number]];
+}
+
+function scoringRowsFor(events: TimelineEvent[], team: EventTeam): [string, number][] {
+  return [
+    ["Tries", eventsFor(events, team).filter(isTry).length],
+    ["Conversions", eventsFor(events, team).filter(isConversion).length],
+    ["Penalty goals", eventsFor(events, team).filter(isPenaltyGoal).length],
+    ["Drop goals", eventsFor(events, team).filter(isDropGoal).length],
+  ];
 }
 
 function typeRows(events: TimelineEvent[], team: EventTeam, types: EventType[], title: string, limit = 4) {
@@ -211,8 +269,8 @@ export default function PrintableReportPage() {
       .slice(0, 20);
   }, [events]);
 
-  const homeAttack = typeCount(events, "home", ATTACK_TYPES);
-  const awayAttack = typeCount(events, "away", ATTACK_TYPES);
+  const homeAttack = attackingActions(events, "home");
+  const awayAttack = attackingActions(events, "away");
   const homeDefence = typeCount(events, "home", DEFENCE_TYPES);
   const awayDefence = typeCount(events, "away", DEFENCE_TYPES);
   const homeBreakdown = typeCount(events, "home", BREAKDOWN_TYPES);
@@ -263,9 +321,9 @@ export default function PrintableReportPage() {
           </div>
           <SectionBar left={homeName} center="Snapshot" right={awayName} />
           <div className="snapshot-grid">
-            <RosterColumn teamName={homeName} rows={topRows(events, "home", "Starting players").rows} tone="home" />
+            <RosterColumn teamName={homeName} rows={[...scoringRowsFor(events, "home"), ...teamSummaryRows(events, "home", 4)].slice(0, 8)} tone="home" />
             <ComparisonSnapshot rows={dashboardRows} />
-            <RosterColumn teamName={awayName} rows={topRows(events, "away", "Starting players").rows} tone="away" />
+            <RosterColumn teamName={awayName} rows={[...scoringRowsFor(events, "away"), ...teamSummaryRows(events, "away", 4)].slice(0, 8)} tone="away" />
           </div>
         </ReportPage>
 
@@ -1120,18 +1178,15 @@ function FixtureStrip({ match, video }: { match: Match | null; video: VideoAsset
 }
 
 function ScoreBlock({ homeName, awayName, homeScore, awayScore, events }: { homeName: string; awayName: string; homeScore: number; awayScore: number; events: TimelineEvent[] }) {
-  const scoringRows = [
-    ["Tries", eventsFor(events, "home", ["try"]).map((event) => event.outcome || formatTime(event.start_seconds)).join(", "), eventsFor(events, "away", ["try"]).map((event) => event.outcome || formatTime(event.start_seconds)).join(", ")],
-    ["Conversions", eventsFor(events, "home", ["conversion"]).map((event) => event.outcome || formatTime(event.start_seconds)).join(", "), eventsFor(events, "away", ["conversion"]).map((event) => event.outcome || formatTime(event.start_seconds)).join(", ")],
-    ["Penalty Goals", eventsFor(events, "home", ["penalty"]).map((event) => event.outcome || formatTime(event.start_seconds)).join(", "), eventsFor(events, "away", ["penalty"]).map((event) => event.outcome || formatTime(event.start_seconds)).join(", ")],
-    ["Drop Goals", countText(events, "home", /drop/i) ? "Coded" : "", countText(events, "away", /drop/i) ? "Coded" : ""],
-  ];
+  const homeScoring = Object.fromEntries(scoringRowsFor(events, "home"));
+  const awayScoring = Object.fromEntries(scoringRowsFor(events, "away"));
+  const scoringRows = ["Tries", "Conversions", "Penalty goals", "Drop goals"].map((label) => [label, homeScoring[label] ?? 0, awayScoring[label] ?? 0] as const);
   return (
     <>
       <div className="score-block"><h3>{homeName}</h3><strong>{homeScore} - {awayScore}</strong><h3>{awayName}</h3></div>
       <div className="scorer-rows">
         {scoringRows.map(([label, home, away]) => (
-          <><div key={`${label}-home`}>{home || "-"}</div><div key={label} className="label">{label}</div><div key={`${label}-away`}>{away || "-"}</div></>
+          <Fragment key={label}><div>{home || "-"}</div><div className="label">{label}</div><div>{away || "-"}</div></Fragment>
         ))}
       </div>
     </>
@@ -1212,9 +1267,7 @@ function TwoColumnReport({ homeName, awayName, left, right }: { homeName: string
 function RosterColumn({ teamName, rows, tone }: { teamName: string; rows: [string, number][]; tone: ReportTone }) {
   return (
     <div>
-      <StatList title={`${teamName} leaders`} rows={rows} tone={tone} />
-      <div style={{ height: 18 }} />
-      <StatList title="Reserves / Bench" rows={rows.slice(0, 6)} tone={tone} />
+      <StatList title={`${teamName} team summary`} rows={rows} tone={tone} />
     </div>
   );
 }

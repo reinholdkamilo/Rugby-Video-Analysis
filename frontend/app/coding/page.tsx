@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { EventTeam, EventType, Match, Team, TimelineEvent, VideoAsset } from "@/lib/api";
 import { codingApi, sourceVideoUrl } from "@/lib/coding-api";
@@ -40,6 +40,15 @@ type QuickColumnId = "home" | "away";
 type QuickEventSectionId = "attack" | "defence" | "set_piece" | "ruck" | "transition" | "restart";
 type QuickAddPanel = "event" | "zone" | null;
 
+type HudLayout = {
+  visible: boolean;
+  x: number;
+  y: number;
+  width: number;
+  opacity: number;
+  compact: boolean;
+};
+
 type CodingLayout = {
   quickColumns: LayoutColumnCount;
   mappingColumns: LayoutColumnCount;
@@ -51,6 +60,12 @@ type ReviewMeta = {
   status: ReviewStatus;
   source: EventSource;
   confidence: number;
+};
+
+type LastCodedEvent = {
+  event: TimelineEvent;
+  label: string;
+  teamLabel: string;
 };
 
 type ShortcutBinding = {
@@ -75,6 +90,7 @@ const SHORTCUT_STORAGE_KEY = "rugby-video-analysis:coding-shortcuts:v1";
 const REVIEW_STORAGE_KEY = "rugby-video-analysis:coding-review:v1";
 const VIDEO_LAYOUT_STORAGE_KEY = "rugby-video-analysis:coding-video-layout:v1";
 const CODING_LAYOUT_STORAGE_KEY = "rugby-video-analysis:coding-layout:v1";
+const HUD_LAYOUT_STORAGE_KEY = "rugby-video-analysis:coding-hud-layout:v1";
 
 const DEFAULT_QUICK_COLUMN_ORDER: QuickColumnId[] = ["home", "away"];
 const DEFAULT_CODING_LAYOUT: CodingLayout = {
@@ -82,6 +98,15 @@ const DEFAULT_CODING_LAYOUT: CodingLayout = {
   mappingColumns: 4,
   density: "comfortable",
   quickColumnOrder: DEFAULT_QUICK_COLUMN_ORDER,
+};
+
+const DEFAULT_HUD_LAYOUT: HudLayout = {
+  visible: true,
+  x: 16,
+  y: 16,
+  width: 360,
+  opacity: 0.78,
+  compact: false,
 };
 
 const EVENT_LIBRARY_CATEGORIES: { value: EventCategory; label: string }[] = [
@@ -351,6 +376,25 @@ function loadVideoLayoutMode(): VideoLayoutMode {
   return saved === "large" || saved === "theatre" ? saved : "standard";
 }
 
+function loadHudLayout(): HudLayout {
+  if (typeof window === "undefined") return DEFAULT_HUD_LAYOUT;
+  const saved = window.localStorage.getItem(HUD_LAYOUT_STORAGE_KEY);
+  if (!saved) return DEFAULT_HUD_LAYOUT;
+  try {
+    const parsed = JSON.parse(saved) as Partial<HudLayout>;
+    return {
+      visible: typeof parsed.visible === "boolean" ? parsed.visible : DEFAULT_HUD_LAYOUT.visible,
+      x: Number.isFinite(parsed.x) ? Number(parsed.x) : DEFAULT_HUD_LAYOUT.x,
+      y: Number.isFinite(parsed.y) ? Number(parsed.y) : DEFAULT_HUD_LAYOUT.y,
+      width: Number.isFinite(parsed.width) ? Math.min(Math.max(Number(parsed.width), 260), 760) : DEFAULT_HUD_LAYOUT.width,
+      opacity: Number.isFinite(parsed.opacity) ? Math.min(Math.max(Number(parsed.opacity), 0.25), 1) : DEFAULT_HUD_LAYOUT.opacity,
+      compact: Boolean(parsed.compact),
+    };
+  } catch {
+    return DEFAULT_HUD_LAYOUT;
+  }
+}
+
 function loadReviewMeta() {
   if (typeof window === "undefined") return {};
   const saved = window.localStorage.getItem(REVIEW_STORAGE_KEY);
@@ -372,6 +416,7 @@ function defaultReviewMeta(event?: TimelineEvent | null): ReviewMeta {
 
 export default function CodingWorkspace() {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const hudDragRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null);
   const [matches, setMatches] = useState<Match[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
   const [videos, setVideos] = useState<VideoAsset[]>([]);
@@ -399,6 +444,9 @@ export default function CodingWorkspace() {
   const [quickEditBindingId, setQuickEditBindingId] = useState<string | null>(null);
   const [quickAddPanel, setQuickAddPanel] = useState<QuickAddPanel>(null);
   const [showAdvancedMapping, setShowAdvancedMapping] = useState(false);
+  const [hudLayout, setHudLayout] = useState<HudLayout>(DEFAULT_HUD_LAYOUT);
+  const [lastCodedEvent, setLastCodedEvent] = useState<LastCodedEvent | null>(null);
+  const [undoingEventId, setUndoingEventId] = useState<number | null>(null);
   const [notice, setNotice] = useState("Loading coding workspace...");
   const [busy, setBusy] = useState(false);
 
@@ -407,6 +455,7 @@ export default function CodingWorkspace() {
     setReviewMeta(loadReviewMeta());
     setVideoLayout(loadVideoLayoutMode());
     setCodingLayout(loadCodingLayout());
+    setHudLayout(loadHudLayout());
   }, []);
 
   useEffect(() => {
@@ -430,6 +479,11 @@ export default function CodingWorkspace() {
     if (typeof window === "undefined") return;
     window.localStorage.setItem(CODING_LAYOUT_STORAGE_KEY, JSON.stringify(codingLayout));
   }, [codingLayout]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(HUD_LAYOUT_STORAGE_KEY, JSON.stringify(hudLayout));
+  }, [hudLayout]);
 
   const loadWorkspace = useCallback(async () => {
     try {
@@ -571,6 +625,14 @@ export default function CodingWorkspace() {
     return codingLayout.quickColumnOrder.map((columnId) => columns[columnId]);
   }, [awayTeam?.name, codingLayout.quickColumnOrder, eventShortcuts, homeTeam?.name]);
 
+  const hudColumns = useMemo(() => quickMatrixColumns.map((column) => ({
+    ...column,
+    sections: column.sections.map((section) => ({
+      ...section,
+      items: section.items.filter((item) => item.shortcut && item.shortcut !== "Unassigned"),
+    })).filter((section) => section.items.length),
+  })), [quickMatrixColumns]);
+
   const quickEditBinding = useMemo(() => shortcuts.find((binding) => binding.id === quickEditBindingId) ?? null, [quickEditBindingId, shortcuts]);
 
   const customEventShortcuts = useMemo(() => eventShortcuts.filter((shortcut) => shortcut.custom || !["home", "away"].includes(String(shortcut.team))), [eventShortcuts]);
@@ -630,13 +692,16 @@ export default function CodingWorkspace() {
       setEvents((current) => [...current, created].sort((a, b) => a.start_seconds - b.start_seconds));
       setSelectedEventId(created.id);
       const zoneText = created.field_zone ? ` in ${created.field_zone}` : "";
-      setNotice(type === "custom" ? `${extras?.label || extras?.outcome || "Blank event"} saved to the timeline at ${formatTime(start)} for ${team}${zoneText}. Reports update from saved timeline events.` : `${type} saved to the timeline at ${formatTime(start)} for ${team}${zoneText}. Reports update from saved timeline events.`);
+      const label = extras?.label || extras?.outcome || type;
+      const codedTeamLabel = teamLabel(team);
+      setLastCodedEvent({ event: created, label, teamLabel: codedTeamLabel });
+      setNotice(`${label} saved to the timeline at ${formatTime(start)} for ${codedTeamLabel}${zoneText}. Reports update from saved timeline events.`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Unable to create event");
     } finally {
       setBusy(false);
     }
-  }, [activeZone, currentTime, selectedMatchId, selectedTeam, selectedVideoId]);
+  }, [activeZone, currentTime, selectedMatchId, selectedTeam, selectedVideoId, teamLabel]);
 
   const createEventFromBinding = useCallback((binding: ShortcutBinding) => {
     if (!binding.eventType) return;
@@ -648,6 +713,28 @@ export default function CodingWorkspace() {
       team: binding.team,
     });
   }, [createEvent]);
+
+  const undoLastCodedEvent = useCallback(async () => {
+    if (!lastCodedEvent || undoingEventId) return;
+    const eventToUndo = lastCodedEvent.event;
+    setUndoingEventId(eventToUndo.id);
+    try {
+      await codingApi.deleteEvent(eventToUndo.id);
+      setEvents((current) => current.filter((event) => event.id !== eventToUndo.id));
+      setReviewMeta((current) => {
+        const next = { ...current };
+        delete next[eventToUndo.id];
+        return next;
+      });
+      setSelectedEventId((current) => current === eventToUndo.id ? null : current);
+      setLastCodedEvent(null);
+      setNotice(`Undid ${lastCodedEvent.teamLabel} ${lastCodedEvent.label} at ${formatTime(eventToUndo.start_seconds)}.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Unable to undo the last coded event");
+    } finally {
+      setUndoingEventId(null);
+    }
+  }, [lastCodedEvent, undoingEventId]);
 
   const runVideoCommand = useCallback((command: VideoCommand) => {
     const video = videoRef.current;
@@ -689,6 +776,11 @@ export default function CodingWorkspace() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (editingShortcutId || shortcutEditable(event)) return;
+      if ((event.key === "Delete" || event.code === "Delete") && lastCodedEvent) {
+        event.preventDefault();
+        void undoLastCodedEvent();
+        return;
+      }
       const shortcut = shortcutFromKeyboardEvent(event);
       const binding = shortcuts.find((item) => item.shortcut === shortcut);
       if (!binding) return;
@@ -704,7 +796,7 @@ export default function CodingWorkspace() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [createEventFromBinding, editingShortcutId, runVideoCommand, shortcuts]);
+  }, [createEventFromBinding, editingShortcutId, lastCodedEvent, runVideoCommand, shortcuts, undoLastCodedEvent]);
 
   const updateShortcut = useCallback((bindingId: string, shortcut: string) => {
     const duplicate = shortcuts.some((binding) => binding.id !== bindingId && binding.shortcut === shortcut);
@@ -747,6 +839,46 @@ export default function CodingWorkspace() {
     setCodingLayout(DEFAULT_CODING_LAYOUT);
     setNotice("Coding workspace layout reset.");
   }
+
+  function updateHudLayout(updates: Partial<HudLayout>) {
+    setHudLayout((current) => ({ ...current, ...updates }));
+  }
+
+  function resetHudLayout() {
+    setHudLayout(DEFAULT_HUD_LAYOUT);
+    setNotice("Floating key overlay reset.");
+  }
+
+  function startHudDrag(event: ReactMouseEvent<HTMLDivElement>) {
+    hudDragRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: hudLayout.x,
+      originY: hudLayout.y,
+    };
+    event.preventDefault();
+  }
+
+  useEffect(() => {
+    const onMove = (event: MouseEvent) => {
+      const drag = hudDragRef.current;
+      if (!drag) return;
+      setHudLayout((current) => ({
+        ...current,
+        x: Math.max(0, drag.originX + event.clientX - drag.startX),
+        y: Math.max(0, drag.originY + event.clientY - drag.startY),
+      }));
+    };
+    const onUp = () => {
+      hudDragRef.current = null;
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, []);
 
   function moveQuickColumn(targetColumnId: QuickColumnId) {
     if (!draggingColumnId || draggingColumnId === targetColumnId) return;
@@ -1035,13 +1167,18 @@ export default function CodingWorkspace() {
                 <h2 className="font-bold">Playback</h2>
                 <p className="text-xs text-slate-500">Centered video workspace for live coding.</p>
               </div>
-              <div className="flex rounded-lg border border-slate-700 p-1 text-sm">
-                {(["standard", "large", "theatre"] as VideoLayoutMode[]).map((mode) => (
-                  <button key={mode} type="button" onClick={() => setVideoLayout(mode)} className={`rounded-md px-3 py-1.5 capitalize ${videoLayout === mode ? "bg-emerald-400 font-bold text-slate-950" : "text-slate-300"}`}>{mode}</button>
-                ))}
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={() => updateHudLayout({ visible: !hudLayout.visible })} className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-bold">
+                  {hudLayout.visible ? "Hide key overlay" : "Show key overlay"}
+                </button>
+                <div className="flex rounded-lg border border-slate-700 p-1 text-sm">
+                  {(["standard", "large", "theatre"] as VideoLayoutMode[]).map((mode) => (
+                    <button key={mode} type="button" onClick={() => setVideoLayout(mode)} className={`rounded-md px-3 py-1.5 capitalize ${videoLayout === mode ? "bg-emerald-400 font-bold text-slate-950" : "text-slate-300"}`}>{mode}</button>
+                  ))}
+                </div>
               </div>
             </div>
-            <div className={`${videoShellClass} overflow-hidden rounded-xl border border-slate-800 bg-black`}>
+            <div className={`${videoShellClass} relative overflow-hidden rounded-xl border border-slate-800 bg-black`}>
               {selectedVideo ? (
                 <video
                   key={selectedVideo.id}
@@ -1055,6 +1192,94 @@ export default function CodingWorkspace() {
                   onError={() => setNotice("Source video is unavailable. Free Render storage is temporary and may have been cleared after sleep or redeploy.")}
                 />
               ) : <div className="flex aspect-video items-center justify-center text-slate-500">Select a match with uploaded footage.</div>}
+
+              {hudLayout.visible ? (
+                <div
+                  className="absolute z-20 max-h-[80%] overflow-auto rounded-lg border border-white/20 bg-slate-950 p-3 text-white shadow-2xl backdrop-blur"
+                  data-design-id="coding-floating-key-overlay"
+                  data-design-label="Floating key overlay"
+                  style={{
+                    left: hudLayout.x,
+                    top: hudLayout.y,
+                    width: hudLayout.width,
+                    opacity: hudLayout.opacity,
+                  }}
+                >
+                  <div className="mb-3 flex cursor-move items-center justify-between gap-2 border-b border-white/10 pb-2" onMouseDown={startHudDrag}>
+                    <div>
+                      <h3 className="text-sm font-black">Coding keys</h3>
+                      <p className="text-[11px] text-slate-400">Drag this bar. Press Delete to undo the last code.</p>
+                    </div>
+                    <button type="button" onMouseDown={(event) => event.stopPropagation()} onClick={() => updateHudLayout({ visible: false })} className="rounded border border-white/20 px-2 py-1 text-xs font-bold">Hide</button>
+                  </div>
+
+                  <div className="mb-3 grid gap-2 text-[11px] md:grid-cols-2">
+                    <label className="grid gap-1">
+                      <span className="font-bold uppercase tracking-[0.14em] text-slate-400">Opacity</span>
+                      <input type="range" min="25" max="100" value={Math.round(hudLayout.opacity * 100)} onChange={(event) => updateHudLayout({ opacity: Number(event.target.value) / 100 })} />
+                    </label>
+                    <label className="grid gap-1">
+                      <span className="font-bold uppercase tracking-[0.14em] text-slate-400">Width</span>
+                      <input type="range" min="260" max="760" value={hudLayout.width} onChange={(event) => updateHudLayout({ width: Number(event.target.value) })} />
+                    </label>
+                    <button type="button" onClick={() => updateHudLayout({ compact: !hudLayout.compact })} className="rounded border border-white/20 px-2 py-1 font-bold">{hudLayout.compact ? "Full view" : "Compact"}</button>
+                    <button type="button" onClick={resetHudLayout} className="rounded border border-white/20 px-2 py-1 font-bold">Reset overlay</button>
+                  </div>
+
+                  <div className={`grid gap-3 ${hudLayout.compact ? "" : "md:grid-cols-2"}`}>
+                    {hudColumns.map((column) => (
+                      <div key={column.id} className="rounded border border-white/10 bg-white/5 p-2">
+                        <h4 className="mb-2 text-xs font-black uppercase tracking-[0.16em] text-emerald-300">{column.title}</h4>
+                        <div className="grid gap-2">
+                          {column.sections.map((section) => (
+                            <div key={section.id}>
+                              <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">{section.title}</p>
+                              <div className="grid gap-1">
+                                {section.items.map((binding) => (
+                                  <div key={binding.id} className="grid grid-cols-[auto_1fr] items-center gap-2 rounded bg-black/25 px-2 py-1">
+                                    <kbd className="min-w-10 rounded border border-emerald-400/40 px-1.5 py-0.5 text-center text-[11px] font-black text-emerald-300">{shortcutLabel(binding.shortcut)}</kbd>
+                                    <span className="truncate text-xs font-semibold">{displayEventLabel(binding)}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                    {zoneShortcuts.length ? (
+                      <div className={`${hudLayout.compact ? "" : "md:col-span-2"} rounded border border-white/10 bg-white/5 p-2`}>
+                        <h4 className="mb-2 text-xs font-black uppercase tracking-[0.16em] text-emerald-300">Zones</h4>
+                        <div className="grid gap-1" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))" }}>
+                          {zoneShortcuts.filter((zone) => zone.shortcut && zone.shortcut !== "Unassigned").map((zone) => (
+                            <div key={zone.id} className={`grid grid-cols-[auto_1fr] items-center gap-2 rounded px-2 py-1 ${activeZoneId === zone.id ? "bg-emerald-400/20" : "bg-black/25"}`}>
+                              <kbd className="min-w-10 rounded border border-emerald-400/40 px-1.5 py-0.5 text-center text-[11px] font-black text-emerald-300">{shortcutLabel(zone.shortcut)}</kbd>
+                              <span className="truncate text-xs font-semibold">{zone.label}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+
+              {lastCodedEvent ? (
+                <div className="absolute right-3 top-3 z-30 max-w-sm rounded-lg border border-emerald-300/40 bg-slate-950/85 p-3 text-white shadow-2xl backdrop-blur" data-design-id="coding-last-code-toast" data-design-label="Last coded event toast">
+                  <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-emerald-300">Code saved</p>
+                  <p className="mt-1 text-sm font-black">{lastCodedEvent.teamLabel} {lastCodedEvent.label}</p>
+                  <p className="mt-1 text-xs text-slate-300">
+                    {formatTime(lastCodedEvent.event.start_seconds)}
+                    {lastCodedEvent.event.field_zone ? ` - ${lastCodedEvent.event.field_zone}` : ""}
+                  </p>
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <span className="text-[11px] text-slate-400">Press Delete to undo</span>
+                    <button type="button" onClick={() => void undoLastCodedEvent()} disabled={undoingEventId === lastCodedEvent.event.id} className="rounded border border-white/20 px-2 py-1 text-xs font-bold disabled:opacity-40">
+                      {undoingEventId === lastCodedEvent.event.id ? "Undoing" : "Undo"}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
 

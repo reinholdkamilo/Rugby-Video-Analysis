@@ -37,6 +37,7 @@ type VideoLayoutMode = "standard" | "large" | "theatre";
 type LayoutDensity = "compact" | "comfortable";
 type LayoutColumnCount = 2 | 3 | 4;
 type QuickColumnId = "home" | "away";
+type HudPanelId = QuickColumnId;
 type QuickEventSectionId = "attack" | "defence" | "set_piece" | "ruck" | "transition" | "restart";
 type QuickAddPanel = "event" | "zone" | null;
 
@@ -48,6 +49,8 @@ type HudLayout = {
   opacity: number;
   compact: boolean;
 };
+
+type HudLayouts = Record<HudPanelId, HudLayout>;
 
 type CodingLayout = {
   quickColumns: LayoutColumnCount;
@@ -100,13 +103,23 @@ const DEFAULT_CODING_LAYOUT: CodingLayout = {
   quickColumnOrder: DEFAULT_QUICK_COLUMN_ORDER,
 };
 
-const DEFAULT_HUD_LAYOUT: HudLayout = {
-  visible: true,
-  x: 16,
-  y: 16,
-  width: 360,
-  opacity: 0.78,
-  compact: false,
+const DEFAULT_HUD_LAYOUTS: HudLayouts = {
+  home: {
+    visible: true,
+    x: 16,
+    y: 16,
+    width: 300,
+    opacity: 0.78,
+    compact: false,
+  },
+  away: {
+    visible: true,
+    x: 332,
+    y: 16,
+    width: 300,
+    opacity: 0.78,
+    compact: false,
+  },
 };
 
 const EVENT_LIBRARY_CATEGORIES: { value: EventCategory; label: string }[] = [
@@ -376,22 +389,36 @@ function loadVideoLayoutMode(): VideoLayoutMode {
   return saved === "large" || saved === "theatre" ? saved : "standard";
 }
 
-function loadHudLayout(): HudLayout {
-  if (typeof window === "undefined") return DEFAULT_HUD_LAYOUT;
+function normaliseHudLayout(layout: Partial<HudLayout> | undefined, fallback: HudLayout): HudLayout {
+  return {
+    visible: typeof layout?.visible === "boolean" ? layout.visible : fallback.visible,
+    x: Number.isFinite(layout?.x) ? Number(layout?.x) : fallback.x,
+    y: Number.isFinite(layout?.y) ? Number(layout?.y) : fallback.y,
+    width: Number.isFinite(layout?.width) ? Math.min(Math.max(Number(layout?.width), 240), 760) : fallback.width,
+    opacity: Number.isFinite(layout?.opacity) ? Math.min(Math.max(Number(layout?.opacity), 0.25), 1) : fallback.opacity,
+    compact: typeof layout?.compact === "boolean" ? layout.compact : fallback.compact,
+  };
+}
+
+function loadHudLayouts(): HudLayouts {
+  if (typeof window === "undefined") return DEFAULT_HUD_LAYOUTS;
   const saved = window.localStorage.getItem(HUD_LAYOUT_STORAGE_KEY);
-  if (!saved) return DEFAULT_HUD_LAYOUT;
+  if (!saved) return DEFAULT_HUD_LAYOUTS;
   try {
-    const parsed = JSON.parse(saved) as Partial<HudLayout>;
+    const parsed = JSON.parse(saved) as Partial<HudLayout> & Partial<HudLayouts>;
+    if (parsed.home || parsed.away) {
+      return {
+        home: normaliseHudLayout(parsed.home, DEFAULT_HUD_LAYOUTS.home),
+        away: normaliseHudLayout(parsed.away, DEFAULT_HUD_LAYOUTS.away),
+      };
+    }
+    const migratedHome = normaliseHudLayout(parsed, DEFAULT_HUD_LAYOUTS.home);
     return {
-      visible: typeof parsed.visible === "boolean" ? parsed.visible : DEFAULT_HUD_LAYOUT.visible,
-      x: Number.isFinite(parsed.x) ? Number(parsed.x) : DEFAULT_HUD_LAYOUT.x,
-      y: Number.isFinite(parsed.y) ? Number(parsed.y) : DEFAULT_HUD_LAYOUT.y,
-      width: Number.isFinite(parsed.width) ? Math.min(Math.max(Number(parsed.width), 260), 760) : DEFAULT_HUD_LAYOUT.width,
-      opacity: Number.isFinite(parsed.opacity) ? Math.min(Math.max(Number(parsed.opacity), 0.25), 1) : DEFAULT_HUD_LAYOUT.opacity,
-      compact: Boolean(parsed.compact),
+      home: migratedHome,
+      away: { ...DEFAULT_HUD_LAYOUTS.away, y: migratedHome.y, visible: migratedHome.visible, opacity: migratedHome.opacity, compact: migratedHome.compact },
     };
   } catch {
-    return DEFAULT_HUD_LAYOUT;
+    return DEFAULT_HUD_LAYOUTS;
   }
 }
 
@@ -416,7 +443,7 @@ function defaultReviewMeta(event?: TimelineEvent | null): ReviewMeta {
 
 export default function CodingWorkspace() {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const hudDragRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null);
+  const hudDragRef = useRef<{ panelId: HudPanelId; startX: number; startY: number; originX: number; originY: number } | null>(null);
   const [matches, setMatches] = useState<Match[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
   const [videos, setVideos] = useState<VideoAsset[]>([]);
@@ -444,7 +471,7 @@ export default function CodingWorkspace() {
   const [quickEditBindingId, setQuickEditBindingId] = useState<string | null>(null);
   const [quickAddPanel, setQuickAddPanel] = useState<QuickAddPanel>(null);
   const [showAdvancedMapping, setShowAdvancedMapping] = useState(false);
-  const [hudLayout, setHudLayout] = useState<HudLayout>(DEFAULT_HUD_LAYOUT);
+  const [hudLayouts, setHudLayouts] = useState<HudLayouts>(DEFAULT_HUD_LAYOUTS);
   const [lastCodedEvent, setLastCodedEvent] = useState<LastCodedEvent | null>(null);
   const [undoingEventId, setUndoingEventId] = useState<number | null>(null);
   const [notice, setNotice] = useState("Loading coding workspace...");
@@ -455,7 +482,7 @@ export default function CodingWorkspace() {
     setReviewMeta(loadReviewMeta());
     setVideoLayout(loadVideoLayoutMode());
     setCodingLayout(loadCodingLayout());
-    setHudLayout(loadHudLayout());
+    setHudLayouts(loadHudLayouts());
   }, []);
 
   useEffect(() => {
@@ -482,8 +509,8 @@ export default function CodingWorkspace() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    window.localStorage.setItem(HUD_LAYOUT_STORAGE_KEY, JSON.stringify(hudLayout));
-  }, [hudLayout]);
+    window.localStorage.setItem(HUD_LAYOUT_STORAGE_KEY, JSON.stringify(hudLayouts));
+  }, [hudLayouts]);
 
   const loadWorkspace = useCallback(async () => {
     try {
@@ -840,21 +867,38 @@ export default function CodingWorkspace() {
     setNotice("Coding workspace layout reset.");
   }
 
-  function updateHudLayout(updates: Partial<HudLayout>) {
-    setHudLayout((current) => ({ ...current, ...updates }));
+  function updateHudLayout(panelId: HudPanelId, updates: Partial<HudLayout>) {
+    setHudLayouts((current) => ({
+      ...current,
+      [panelId]: { ...current[panelId], ...updates },
+    }));
   }
 
-  function resetHudLayout() {
-    setHudLayout(DEFAULT_HUD_LAYOUT);
-    setNotice("Floating key overlay reset.");
+  function setHudVisibility(visible: boolean) {
+    setHudLayouts((current) => ({
+      home: { ...current.home, visible },
+      away: { ...current.away, visible },
+    }));
   }
 
-  function startHudDrag(event: ReactMouseEvent<HTMLDivElement>) {
+  function resetHudLayout(panelId?: HudPanelId) {
+    if (panelId) {
+      setHudLayouts((current) => ({ ...current, [panelId]: DEFAULT_HUD_LAYOUTS[panelId] }));
+      setNotice(`${panelId === "home" ? "Home" : "Away"} key overlay reset.`);
+      return;
+    }
+    setHudLayouts(DEFAULT_HUD_LAYOUTS);
+    setNotice("Floating key overlays reset.");
+  }
+
+  function startHudDrag(panelId: HudPanelId, event: ReactMouseEvent<HTMLDivElement>) {
+    const layout = hudLayouts[panelId];
     hudDragRef.current = {
+      panelId,
       startX: event.clientX,
       startY: event.clientY,
-      originX: hudLayout.x,
-      originY: hudLayout.y,
+      originX: layout.x,
+      originY: layout.y,
     };
     event.preventDefault();
   }
@@ -863,10 +907,13 @@ export default function CodingWorkspace() {
     const onMove = (event: MouseEvent) => {
       const drag = hudDragRef.current;
       if (!drag) return;
-      setHudLayout((current) => ({
+      setHudLayouts((current) => ({
         ...current,
-        x: Math.max(0, drag.originX + event.clientX - drag.startX),
-        y: Math.max(0, drag.originY + event.clientY - drag.startY),
+        [drag.panelId]: {
+          ...current[drag.panelId],
+          x: Math.max(0, drag.originX + event.clientX - drag.startX),
+          y: Math.max(0, drag.originY + event.clientY - drag.startY),
+        },
       }));
     };
     const onUp = () => {
@@ -1080,6 +1127,78 @@ export default function CodingWorkspace() {
     void videoRef.current.play();
   }
 
+  function renderHudPanel(panelId: HudPanelId) {
+    const layout = hudLayouts[panelId];
+    const column = hudColumns.find((item) => item.id === panelId);
+    if (!layout.visible || !column) return null;
+    const title = panelId === "home" ? "Home coding keys" : "Away coding keys";
+    const teamName = column.subtitle;
+
+    return (
+      <div
+        className="absolute z-20 max-h-[80%] overflow-auto rounded-lg border border-white/20 bg-slate-950 p-3 text-white shadow-2xl backdrop-blur"
+        data-design-id={`coding-floating-${panelId}-key-overlay`}
+        data-design-label={`${panelId === "home" ? "Home" : "Away"} floating key overlay`}
+        style={{
+          left: layout.x,
+          top: layout.y,
+          width: layout.width,
+          opacity: layout.opacity,
+        }}
+      >
+        <div className="mb-3 flex cursor-move items-center justify-between gap-2 border-b border-white/10 pb-2" onMouseDown={(event) => startHudDrag(panelId, event)}>
+          <div>
+            <h3 className="text-sm font-black">{title}</h3>
+            <p className="text-[11px] text-slate-400">{teamName}. Drag this bar. Press Delete to undo.</p>
+          </div>
+          <button type="button" onMouseDown={(event) => event.stopPropagation()} onClick={() => updateHudLayout(panelId, { visible: false })} className="rounded border border-white/20 px-2 py-1 text-xs font-bold">Hide</button>
+        </div>
+
+        <div className="mb-3 grid gap-2 text-[11px] md:grid-cols-2">
+          <label className="grid gap-1">
+            <span className="font-bold uppercase tracking-[0.14em] text-slate-400">Opacity</span>
+            <input type="range" min="25" max="100" value={Math.round(layout.opacity * 100)} onChange={(event) => updateHudLayout(panelId, { opacity: Number(event.target.value) / 100 })} />
+          </label>
+          <label className="grid gap-1">
+            <span className="font-bold uppercase tracking-[0.14em] text-slate-400">Width</span>
+            <input type="range" min="240" max="760" value={layout.width} onChange={(event) => updateHudLayout(panelId, { width: Number(event.target.value) })} />
+          </label>
+          <button type="button" onClick={() => updateHudLayout(panelId, { compact: !layout.compact })} className="rounded border border-white/20 px-2 py-1 font-bold">{layout.compact ? "Full view" : "Compact"}</button>
+          <button type="button" onClick={() => resetHudLayout(panelId)} className="rounded border border-white/20 px-2 py-1 font-bold">Reset {panelId}</button>
+        </div>
+
+        <div className="grid gap-2">
+          {column.sections.map((section) => (
+            <div key={section.id} className="rounded border border-white/10 bg-white/5 p-2">
+              <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">{section.title}</p>
+              <div className="grid gap-1" style={{ gridTemplateColumns: layout.compact ? "1fr" : "repeat(auto-fit, minmax(120px, 1fr))" }}>
+                {section.items.map((binding) => (
+                  <div key={binding.id} className="grid grid-cols-[auto_1fr] items-center gap-2 rounded bg-black/25 px-2 py-1">
+                    <kbd className="min-w-10 rounded border border-emerald-400/40 px-1.5 py-0.5 text-center text-[11px] font-black text-emerald-300">{shortcutLabel(binding.shortcut)}</kbd>
+                    <span className="truncate text-xs font-semibold">{displayEventLabel(binding)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+          {zoneShortcuts.length ? (
+            <div className="rounded border border-white/10 bg-white/5 p-2">
+              <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Zones</p>
+              <div className="grid gap-1" style={{ gridTemplateColumns: layout.compact ? "1fr" : "repeat(auto-fit, minmax(120px, 1fr))" }}>
+                {zoneShortcuts.filter((zone) => zone.shortcut && zone.shortcut !== "Unassigned").map((zone) => (
+                  <div key={zone.id} className={`grid grid-cols-[auto_1fr] items-center gap-2 rounded px-2 py-1 ${activeZoneId === zone.id ? "bg-emerald-400/20" : "bg-black/25"}`}>
+                    <kbd className="min-w-10 rounded border border-emerald-400/40 px-1.5 py-0.5 text-center text-[11px] font-black text-emerald-300">{shortcutLabel(zone.shortcut)}</kbd>
+                    <span className="truncate text-xs font-semibold">{zone.label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-slate-950 text-white">
       <header className="border-b border-slate-800 bg-slate-950/95">
@@ -1168,8 +1287,11 @@ export default function CodingWorkspace() {
                 <p className="text-xs text-slate-500">Centered video workspace for live coding.</p>
               </div>
               <div className="flex flex-wrap gap-2">
-                <button type="button" onClick={() => updateHudLayout({ visible: !hudLayout.visible })} className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-bold">
-                  {hudLayout.visible ? "Hide key overlay" : "Show key overlay"}
+                <button type="button" onClick={() => setHudVisibility(!(hudLayouts.home.visible || hudLayouts.away.visible))} className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-bold">
+                  {hudLayouts.home.visible || hudLayouts.away.visible ? "Hide key overlays" : "Show key overlays"}
+                </button>
+                <button type="button" onClick={() => resetHudLayout()} className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-bold">
+                  Reset overlays
                 </button>
                 <div className="flex rounded-lg border border-slate-700 p-1 text-sm">
                   {(["standard", "large", "theatre"] as VideoLayoutMode[]).map((mode) => (
@@ -1193,76 +1315,8 @@ export default function CodingWorkspace() {
                 />
               ) : <div className="flex aspect-video items-center justify-center text-slate-500">Select a match with uploaded footage.</div>}
 
-              {hudLayout.visible ? (
-                <div
-                  className="absolute z-20 max-h-[80%] overflow-auto rounded-lg border border-white/20 bg-slate-950 p-3 text-white shadow-2xl backdrop-blur"
-                  data-design-id="coding-floating-key-overlay"
-                  data-design-label="Floating key overlay"
-                  style={{
-                    left: hudLayout.x,
-                    top: hudLayout.y,
-                    width: hudLayout.width,
-                    opacity: hudLayout.opacity,
-                  }}
-                >
-                  <div className="mb-3 flex cursor-move items-center justify-between gap-2 border-b border-white/10 pb-2" onMouseDown={startHudDrag}>
-                    <div>
-                      <h3 className="text-sm font-black">Coding keys</h3>
-                      <p className="text-[11px] text-slate-400">Drag this bar. Press Delete to undo the last code.</p>
-                    </div>
-                    <button type="button" onMouseDown={(event) => event.stopPropagation()} onClick={() => updateHudLayout({ visible: false })} className="rounded border border-white/20 px-2 py-1 text-xs font-bold">Hide</button>
-                  </div>
-
-                  <div className="mb-3 grid gap-2 text-[11px] md:grid-cols-2">
-                    <label className="grid gap-1">
-                      <span className="font-bold uppercase tracking-[0.14em] text-slate-400">Opacity</span>
-                      <input type="range" min="25" max="100" value={Math.round(hudLayout.opacity * 100)} onChange={(event) => updateHudLayout({ opacity: Number(event.target.value) / 100 })} />
-                    </label>
-                    <label className="grid gap-1">
-                      <span className="font-bold uppercase tracking-[0.14em] text-slate-400">Width</span>
-                      <input type="range" min="260" max="760" value={hudLayout.width} onChange={(event) => updateHudLayout({ width: Number(event.target.value) })} />
-                    </label>
-                    <button type="button" onClick={() => updateHudLayout({ compact: !hudLayout.compact })} className="rounded border border-white/20 px-2 py-1 font-bold">{hudLayout.compact ? "Full view" : "Compact"}</button>
-                    <button type="button" onClick={resetHudLayout} className="rounded border border-white/20 px-2 py-1 font-bold">Reset overlay</button>
-                  </div>
-
-                  <div className={`grid gap-3 ${hudLayout.compact ? "" : "md:grid-cols-2"}`}>
-                    {hudColumns.map((column) => (
-                      <div key={column.id} className="rounded border border-white/10 bg-white/5 p-2">
-                        <h4 className="mb-2 text-xs font-black uppercase tracking-[0.16em] text-emerald-300">{column.title}</h4>
-                        <div className="grid gap-2">
-                          {column.sections.map((section) => (
-                            <div key={section.id}>
-                              <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">{section.title}</p>
-                              <div className="grid gap-1">
-                                {section.items.map((binding) => (
-                                  <div key={binding.id} className="grid grid-cols-[auto_1fr] items-center gap-2 rounded bg-black/25 px-2 py-1">
-                                    <kbd className="min-w-10 rounded border border-emerald-400/40 px-1.5 py-0.5 text-center text-[11px] font-black text-emerald-300">{shortcutLabel(binding.shortcut)}</kbd>
-                                    <span className="truncate text-xs font-semibold">{displayEventLabel(binding)}</span>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                    {zoneShortcuts.length ? (
-                      <div className={`${hudLayout.compact ? "" : "md:col-span-2"} rounded border border-white/10 bg-white/5 p-2`}>
-                        <h4 className="mb-2 text-xs font-black uppercase tracking-[0.16em] text-emerald-300">Zones</h4>
-                        <div className="grid gap-1" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))" }}>
-                          {zoneShortcuts.filter((zone) => zone.shortcut && zone.shortcut !== "Unassigned").map((zone) => (
-                            <div key={zone.id} className={`grid grid-cols-[auto_1fr] items-center gap-2 rounded px-2 py-1 ${activeZoneId === zone.id ? "bg-emerald-400/20" : "bg-black/25"}`}>
-                              <kbd className="min-w-10 rounded border border-emerald-400/40 px-1.5 py-0.5 text-center text-[11px] font-black text-emerald-300">{shortcutLabel(zone.shortcut)}</kbd>
-                              <span className="truncate text-xs font-semibold">{zone.label}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              ) : null}
+              {renderHudPanel("home")}
+              {renderHudPanel("away")}
 
               {lastCodedEvent ? (
                 <div className="absolute right-3 top-3 z-30 max-w-sm rounded-lg border border-emerald-300/40 bg-slate-950/85 p-3 text-white shadow-2xl backdrop-blur" data-design-id="coding-last-code-toast" data-design-label="Last coded event toast">

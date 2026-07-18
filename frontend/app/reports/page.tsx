@@ -205,6 +205,8 @@ export default function ReportsPage() {
     return selectedSections.includes(section);
   }
 
+  const printReportHref = `/reports/print${selectedMatchId ? `?match_id=${selectedMatchId}${selectedVideoId ? `&video_id=${selectedVideoId}` : ""}` : ""}`;
+
   return (
     <main className="min-h-screen bg-slate-100 text-slate-950">
       <header className="bg-slate-950 text-white print:hidden">
@@ -216,7 +218,7 @@ export default function ReportsPage() {
           <nav className="flex gap-3 text-sm">
             <Link href="/upload" className="rounded-lg border border-slate-700 px-3 py-2">Upload Match</Link>
             <Link href="/coding" className="rounded-lg border border-slate-700 px-3 py-2">Coding</Link>
-            <button type="button" onClick={() => window.print()} className="rounded-lg bg-emerald-400 px-4 py-2 font-bold text-slate-950">Print report</button>
+            <Link href={printReportHref} className="rounded-lg bg-emerald-400 px-4 py-2 font-bold text-slate-950">Open export report</Link>
           </nav>
         </div>
       </header>
@@ -238,6 +240,9 @@ export default function ReportsPage() {
               <label className="flex items-center gap-3 rounded-lg border border-slate-200 p-3 text-sm"><input type="checkbox" checked={clipQueueOnly} onChange={(event) => setClipQueueOnly(event.target.checked)} /> Clip queue only</label>
             </div>
             <p className="mt-4 text-sm text-slate-500">{loading ? "Loading report data..." : notice}</p>
+            <Link href={printReportHref} className="mt-4 block rounded-lg bg-slate-950 px-4 py-3 text-center text-sm font-bold text-white">
+              Open clean print export
+            </Link>
           </div>
 
           <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">

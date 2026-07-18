@@ -383,6 +383,7 @@ def test_report_metrics_scores_only_true_scoring_outcomes() -> None:
         for payload in [
             {"event_type": "try", "team": "home", "start_seconds": 10, "end_seconds": 25, "outcome": "try"},
             {"event_type": "conversion", "team": "home", "start_seconds": 26, "end_seconds": 41, "outcome": "conversion"},
+            {"event_type": "custom", "team": "home", "start_seconds": 42, "end_seconds": 57, "outcome": "Conversion"},
             {"event_type": "penalty", "team": "away", "start_seconds": 50, "end_seconds": 65, "outcome": "touch"},
             {"event_type": "penalty", "team": "away", "start_seconds": 70, "end_seconds": 85, "outcome": "goal"},
         ]:
@@ -398,9 +399,9 @@ def test_report_metrics_scores_only_true_scoring_outcomes() -> None:
             assert response.status_code == 201
         metrics = client.get(f"/api/reports/matches/{match_id}/metrics?video_asset_id={video['id']}").json()
 
-    assert metrics["home_score"] == 7
+    assert metrics["home_score"] == 9
     assert metrics["away_score"] == 3
-    assert [item["points"] for item in metrics["scoring_flow"]] == [5, 2, 3]
+    assert [item["points"] for item in metrics["scoring_flow"]] == [5, 2, 2, 3]
 
 
 def test_delete_organisation_cascades_workspace_and_catalogue() -> None:

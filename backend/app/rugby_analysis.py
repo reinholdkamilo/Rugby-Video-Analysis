@@ -32,13 +32,13 @@ def clean_label(value: str | None) -> str:
 
 def scoring_points(event: TimelineEvent) -> int:
     outcome = clean_label(event.outcome).lower()
-    if event.event_type == EventType.try_event:
+    if event.event_type == EventType.try_event or outcome == "try":
         return 5
-    if event.event_type == EventType.conversion:
+    if event.event_type == EventType.conversion or outcome == "conversion":
         return 2
     if event.event_type == EventType.penalty and outcome in {"goal", "penalty goal", "penalty kick goal"}:
         return 3
-    if event.event_type == EventType.kick and outcome in {"drop goal", "drop_goal"}:
+    if outcome == "drop goal":
         return 3
     return 0
 

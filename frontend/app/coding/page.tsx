@@ -38,6 +38,7 @@ type LayoutDensity = "compact" | "comfortable";
 type LayoutColumnCount = 2 | 3 | 4;
 type QuickColumnId = "home" | "away";
 type HudPanelId = QuickColumnId;
+type HudButtonColumns = 1 | 2 | 3 | 4;
 type QuickEventSectionId = "attack" | "defence" | "set_piece" | "ruck" | "transition" | "restart";
 type QuickAddPanel = "event" | "zone" | null;
 
@@ -48,6 +49,10 @@ type HudLayout = {
   width: number;
   opacity: number;
   compact: boolean;
+  buttonColumns: HudButtonColumns;
+  buttonGap: number;
+  buttonScale: number;
+  buttonOrder: string[];
 };
 
 type HudLayouts = Record<HudPanelId, HudLayout>;
@@ -111,6 +116,10 @@ const DEFAULT_HUD_LAYOUTS: HudLayouts = {
     width: 300,
     opacity: 0.78,
     compact: false,
+    buttonColumns: 2,
+    buttonGap: 6,
+    buttonScale: 1,
+    buttonOrder: [],
   },
   away: {
     visible: true,
@@ -119,6 +128,10 @@ const DEFAULT_HUD_LAYOUTS: HudLayouts = {
     width: 300,
     opacity: 0.78,
     compact: false,
+    buttonColumns: 2,
+    buttonGap: 6,
+    buttonScale: 1,
+    buttonOrder: [],
   },
 };
 
@@ -390,6 +403,9 @@ function loadVideoLayoutMode(): VideoLayoutMode {
 }
 
 function normaliseHudLayout(layout: Partial<HudLayout> | undefined, fallback: HudLayout): HudLayout {
+  const buttonColumns = layout?.buttonColumns === 1 || layout?.buttonColumns === 2 || layout?.buttonColumns === 3 || layout?.buttonColumns === 4
+    ? layout.buttonColumns
+    : fallback.buttonColumns;
   return {
     visible: typeof layout?.visible === "boolean" ? layout.visible : fallback.visible,
     x: Number.isFinite(layout?.x) ? Number(layout?.x) : fallback.x,
@@ -397,6 +413,10 @@ function normaliseHudLayout(layout: Partial<HudLayout> | undefined, fallback: Hu
     width: Number.isFinite(layout?.width) ? Math.min(Math.max(Number(layout?.width), 240), 760) : fallback.width,
     opacity: Number.isFinite(layout?.opacity) ? Math.min(Math.max(Number(layout?.opacity), 0.25), 1) : fallback.opacity,
     compact: typeof layout?.compact === "boolean" ? layout.compact : fallback.compact,
+    buttonColumns,
+    buttonGap: Number.isFinite(layout?.buttonGap) ? Math.min(Math.max(Number(layout?.buttonGap), 0), 18) : fallback.buttonGap,
+    buttonScale: Number.isFinite(layout?.buttonScale) ? Math.min(Math.max(Number(layout?.buttonScale), 0.75), 1.5) : fallback.buttonScale,
+    buttonOrder: Array.isArray(layout?.buttonOrder) ? layout.buttonOrder.map(String) : fallback.buttonOrder,
   };
 }
 
@@ -468,6 +488,7 @@ export default function CodingWorkspace() {
   const [codingLayout, setCodingLayout] = useState<CodingLayout>(DEFAULT_CODING_LAYOUT);
   const [draggingShortcutId, setDraggingShortcutId] = useState<string | null>(null);
   const [draggingColumnId, setDraggingColumnId] = useState<QuickColumnId | null>(null);
+  const [draggingHudButton, setDraggingHudButton] = useState<{ panelId: HudPanelId; bindingId: string } | null>(null);
   const [quickEditBindingId, setQuickEditBindingId] = useState<string | null>(null);
   const [quickAddPanel, setQuickAddPanel] = useState<QuickAddPanel>(null);
   const [showAdvancedMapping, setShowAdvancedMapping] = useState(false);
@@ -956,6 +977,53 @@ export default function CodingWorkspace() {
     setNotice("Quick code moved. Team column saved.");
   }
 
+  function orderedHudItems(panelId: HudPanelId, items: ShortcutBinding[]) {
+    const order = hudLayouts[panelId].buttonOrder;
+    const knownIds = new Set(items.map((item) => item.id));
+    const ordered = order
+      .filter((id) => knownIds.has(id))
+      .map((id) => items.find((item) => item.id === id))
+      .filter((item): item is ShortcutBinding => Boolean(item));
+    return [...ordered, ...items.filter((item) => !order.includes(item.id))];
+  }
+
+  function moveHudButton(panelId: HudPanelId, targetBindingId: string) {
+    if (!draggingHudButton || draggingHudButton.panelId !== panelId || draggingHudButton.bindingId === targetBindingId) return;
+    const allItems = [
+      ...((hudColumns.find((column) => column.id === panelId)?.sections ?? []).flatMap((section) => section.items)),
+      ...zoneShortcuts.filter((zone) => zone.shortcut && zone.shortcut !== "Unassigned"),
+    ];
+    const itemIds = allItems.map((item) => item.id);
+    setHudLayouts((current) => {
+      const existingOrder = current[panelId].buttonOrder.filter((id) => itemIds.includes(id));
+      const baseOrder = [...existingOrder, ...itemIds.filter((id) => !existingOrder.includes(id))].filter((id) => id !== draggingHudButton.bindingId);
+      const targetIndex = baseOrder.indexOf(targetBindingId);
+      baseOrder.splice(targetIndex < 0 ? baseOrder.length : targetIndex, 0, draggingHudButton.bindingId);
+      return {
+        ...current,
+        [panelId]: { ...current[panelId], buttonOrder: baseOrder },
+      };
+    });
+    setDraggingHudButton(null);
+    setNotice(`${panelId === "home" ? "Home" : "Away"} overlay button moved.`);
+  }
+
+  function handleHudButtonClick(event: ReactMouseEvent<HTMLButtonElement>, binding: ShortcutBinding) {
+    if (event.shiftKey) {
+      setQuickEditBindingId(binding.id);
+      setEditingShortcutId(null);
+      return;
+    }
+    if (binding.group === "event") {
+      createEventFromBinding(binding);
+      return;
+    }
+    if (binding.group === "zone") {
+      setActiveZoneId(binding.id);
+      setNotice(`Active coding zone set to ${zoneValue(binding)}.`);
+    }
+  }
+
   function submitLibraryEvent(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -1133,6 +1201,10 @@ export default function CodingWorkspace() {
     if (!layout.visible || !column) return null;
     const title = panelId === "home" ? "Home coding keys" : "Away coding keys";
     const teamName = column.subtitle;
+    const eventItems = column.sections.flatMap((section) => section.items);
+    const zoneItems = zoneShortcuts.filter((zone) => zone.shortcut && zone.shortcut !== "Unassigned");
+    const overlayItems = orderedHudItems(panelId, [...eventItems, ...zoneItems]);
+    const gridTemplateColumns = `repeat(${layout.buttonColumns}, minmax(0, 1fr))`;
 
     return (
       <div
@@ -1167,33 +1239,70 @@ export default function CodingWorkspace() {
           <button type="button" onClick={() => resetHudLayout(panelId)} className="rounded border border-white/20 px-2 py-1 font-bold">Reset {panelId}</button>
         </div>
 
-        <div className="grid gap-2">
-          {column.sections.map((section) => (
-            <div key={section.id} className="rounded border border-white/10 bg-white/5 p-2">
-              <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">{section.title}</p>
-              <div className="grid gap-1" style={{ gridTemplateColumns: layout.compact ? "1fr" : "repeat(auto-fit, minmax(120px, 1fr))" }}>
-                {section.items.map((binding) => (
-                  <div key={binding.id} className="grid grid-cols-[auto_1fr] items-center gap-2 rounded bg-black/25 px-2 py-1">
-                    <kbd className="min-w-10 rounded border border-emerald-400/40 px-1.5 py-0.5 text-center text-[11px] font-black text-emerald-300">{shortcutLabel(binding.shortcut)}</kbd>
-                    <span className="truncate text-xs font-semibold">{displayEventLabel(binding)}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
+        <div className="mb-3 grid gap-2 text-[11px] md:grid-cols-3">
+          <label className="grid gap-1">
+            <span className="font-bold uppercase tracking-[0.14em] text-slate-400">Button columns</span>
+            <select value={layout.buttonColumns} onChange={(event) => updateHudLayout(panelId, { buttonColumns: Number(event.target.value) as HudButtonColumns })} className="rounded border border-white/20 bg-slate-950 px-2 py-1 text-white">
+              {([1, 2, 3, 4] as HudButtonColumns[]).map((count) => <option key={count} value={count}>{count}</option>)}
+            </select>
+          </label>
+          <label className="grid gap-1">
+            <span className="font-bold uppercase tracking-[0.14em] text-slate-400">Spacing</span>
+            <input type="range" min="0" max="18" value={layout.buttonGap} onChange={(event) => updateHudLayout(panelId, { buttonGap: Number(event.target.value) })} />
+          </label>
+          <label className="grid gap-1">
+            <span className="font-bold uppercase tracking-[0.14em] text-slate-400">Button size</span>
+            <input type="range" min="75" max="150" value={Math.round(layout.buttonScale * 100)} onChange={(event) => updateHudLayout(panelId, { buttonScale: Number(event.target.value) / 100 })} />
+          </label>
+        </div>
+
+        <div
+          className="grid"
+          data-design-id={`coding-floating-${panelId}-button-board`}
+          data-design-label={`${panelId === "home" ? "Home" : "Away"} overlay button board`}
+          style={{ gridTemplateColumns, gap: layout.buttonGap }}
+        >
+          {overlayItems.map((binding) => (
+            <button
+              key={binding.id}
+              type="button"
+              draggable
+              title="Click to code or set zone. Shift-click to edit. Drag to move."
+              onClick={(event) => handleHudButtonClick(event, binding)}
+              onDragStart={() => setDraggingHudButton({ panelId, bindingId: binding.id })}
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => {
+                event.preventDefault();
+                moveHudButton(panelId, binding.id);
+              }}
+              onDragEnd={() => setDraggingHudButton(null)}
+              className={`grid min-w-0 grid-cols-[auto_1fr] items-center rounded border border-white/10 bg-black/25 text-left hover:border-emerald-300 ${activeZoneId === binding.id ? "bg-emerald-400/20" : ""}`}
+              style={{
+                gap: Math.max(4, Math.round(8 * layout.buttonScale)),
+                padding: `${Math.round(5 * layout.buttonScale)}px ${Math.round(7 * layout.buttonScale)}px`,
+                minHeight: Math.round(34 * layout.buttonScale),
+              }}
+            >
+              <kbd
+                className="rounded border border-emerald-400/40 text-center font-black text-emerald-300"
+                style={{
+                  minWidth: Math.round(34 * layout.buttonScale),
+                  padding: `${Math.round(2 * layout.buttonScale)}px ${Math.round(5 * layout.buttonScale)}px`,
+                  fontSize: Math.round(11 * layout.buttonScale),
+                }}
+              >
+                {shortcutLabel(binding.shortcut)}
+              </kbd>
+              <span className="min-w-0">
+                <span className="block truncate font-semibold" style={{ fontSize: Math.round(12 * layout.buttonScale) }}>{displayEventLabel(binding)}</span>
+                {!layout.compact ? (
+                  <span className="block truncate uppercase tracking-[0.12em] text-slate-400" style={{ fontSize: Math.round(9 * layout.buttonScale) }}>
+                    {binding.group === "zone" ? "zone" : categoryLabel(binding.category)}
+                  </span>
+                ) : null}
+              </span>
+            </button>
           ))}
-          {zoneShortcuts.length ? (
-            <div className="rounded border border-white/10 bg-white/5 p-2">
-              <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Zones</p>
-              <div className="grid gap-1" style={{ gridTemplateColumns: layout.compact ? "1fr" : "repeat(auto-fit, minmax(120px, 1fr))" }}>
-                {zoneShortcuts.filter((zone) => zone.shortcut && zone.shortcut !== "Unassigned").map((zone) => (
-                  <div key={zone.id} className={`grid grid-cols-[auto_1fr] items-center gap-2 rounded px-2 py-1 ${activeZoneId === zone.id ? "bg-emerald-400/20" : "bg-black/25"}`}>
-                    <kbd className="min-w-10 rounded border border-emerald-400/40 px-1.5 py-0.5 text-center text-[11px] font-black text-emerald-300">{shortcutLabel(zone.shortcut)}</kbd>
-                    <span className="truncate text-xs font-semibold">{zone.label}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : null}
         </div>
       </div>
     );

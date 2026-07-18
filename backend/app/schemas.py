@@ -110,6 +110,9 @@ class EvidenceItemCreate(BaseModel):
     confidence_label: str | None = Field(default=None, max_length=40)
     notes: str | None = Field(default=None, max_length=4000)
     approved_for_training: bool = False
+    status: str = Field(default="unconfirmed", max_length=40)
+    source: str = Field(default="manual", max_length=40)
+    trust_notes: str | None = Field(default=None, max_length=4000)
 
 
 class EvidenceItemUpdate(BaseModel):
@@ -123,6 +126,9 @@ class EvidenceItemUpdate(BaseModel):
     confidence_label: str | None = Field(default=None, max_length=40)
     notes: str | None = Field(default=None, max_length=4000)
     approved_for_training: bool | None = None
+    status: str | None = Field(default=None, max_length=40)
+    source: str | None = Field(default=None, max_length=40)
+    trust_notes: str | None = Field(default=None, max_length=4000)
 
 
 class EvidenceItemRead(ORMModel):
@@ -138,6 +144,9 @@ class EvidenceItemRead(ORMModel):
     confidence_label: str | None
     notes: str | None
     approved_for_training: bool
+    status: str
+    source: str
+    trust_notes: str | None
     created_at: datetime
     updated_at: datetime
 

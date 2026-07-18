@@ -270,7 +270,9 @@ def test_evidence_items_create_update_delete_and_validate_match_links() -> None:
         item_id = created.json()["id"]
 
         listed = client.get(f"/api/evidence-items?match_id={match_id}").json()
-        assert [item["id"] for item in listed] == [item_id]
+        assert item_id in [item["id"] for item in listed]
+        assert any(item["evidence_type"] == "video" and item["source"] == "uploaded_video" for item in listed)
+        assert any(item["timeline_event_id"] == event["id"] and item["source"] == "manual_code" for item in listed)
 
         updated = client.patch(
             f"/api/evidence-items/{item_id}",
@@ -292,7 +294,113 @@ def test_evidence_items_create_update_delete_and_validate_match_links() -> None:
         assert invalid.status_code == 422
 
         assert client.delete(f"/api/evidence-items/{item_id}").status_code == 204
-        assert client.get(f"/api/evidence-items?match_id={match_id}").json() == []
+        remaining = client.get(f"/api/evidence-items?match_id={match_id}").json()
+        assert item_id not in [item["id"] for item in remaining]
+
+
+def test_manual_tackle_creates_confirmed_evidence_and_linked_opposition_carry() -> None:
+    unique = uuid4().hex[:8]
+    with TestClient(app) as client:
+        organisation_id = client.post(
+            "/api/organisations", json={"name": f"Linked Logic {unique}"}
+        ).json()["id"]
+        home_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"Home {unique}"},
+        ).json()["id"]
+        away_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"Away {unique}"},
+        ).json()["id"]
+        match_id = client.post(
+            "/api/matches",
+            json={
+                "organisation_id": organisation_id,
+                "home_team_id": home_id,
+                "away_team_id": away_id,
+                "match_date": "2026-07-12",
+            },
+        ).json()["id"]
+        video = client.post(
+            f"/api/matches/{match_id}/videos",
+            files={"file": ("linked-source.mp4", b"not a real video", "video/mp4")},
+        ).json()
+        tackle = client.post(
+            "/api/timeline-events",
+            json={
+                "match_id": match_id,
+                "video_asset_id": video["id"],
+                "event_type": "tackle",
+                "team": "home",
+                "start_seconds": 40,
+                "end_seconds": 55,
+                "outcome": "dominant tackle",
+                "field_zone": "middle third",
+                "clip_requested": False,
+            },
+        ).json()
+        timeline = client.get(f"/api/timeline-events?match_id={match_id}&video_asset_id={video['id']}").json()
+        linked = [event for event in timeline if event.get("linked_event_id") == tackle["id"]]
+        evidence = client.get(f"/api/evidence-items?match_id={match_id}").json()
+
+    assert tackle["trust_status"] == "confirmed"
+    assert len(linked) == 1
+    assert linked[0]["event_type"] == "carry"
+    assert linked[0]["team"] == "away"
+    assert linked[0]["outcome"] == "negative carry"
+    assert linked[0]["trust_status"] == "linked_unconfirmed"
+    assert any(item["timeline_event_id"] == tackle["id"] and item["status"] == "confirmed" for item in evidence)
+    assert any(item["timeline_event_id"] == linked[0]["id"] and item["status"] == "linked_unconfirmed" for item in evidence)
+
+
+def test_report_metrics_scores_only_true_scoring_outcomes() -> None:
+    unique = uuid4().hex[:8]
+    with TestClient(app) as client:
+        organisation_id = client.post(
+            "/api/organisations", json={"name": f"Report Score {unique}"}
+        ).json()["id"]
+        home_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"Home {unique}"},
+        ).json()["id"]
+        away_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"Away {unique}"},
+        ).json()["id"]
+        match_id = client.post(
+            "/api/matches",
+            json={
+                "organisation_id": organisation_id,
+                "home_team_id": home_id,
+                "away_team_id": away_id,
+                "match_date": "2026-07-12",
+            },
+        ).json()["id"]
+        video = client.post(
+            f"/api/matches/{match_id}/videos",
+            files={"file": ("score-source.mp4", b"not a real video", "video/mp4")},
+        ).json()
+        for payload in [
+            {"event_type": "try", "team": "home", "start_seconds": 10, "end_seconds": 25, "outcome": "try"},
+            {"event_type": "conversion", "team": "home", "start_seconds": 26, "end_seconds": 41, "outcome": "conversion"},
+            {"event_type": "penalty", "team": "away", "start_seconds": 50, "end_seconds": 65, "outcome": "touch"},
+            {"event_type": "penalty", "team": "away", "start_seconds": 70, "end_seconds": 85, "outcome": "goal"},
+        ]:
+            response = client.post(
+                "/api/timeline-events",
+                json={
+                    "match_id": match_id,
+                    "video_asset_id": video["id"],
+                    "clip_requested": False,
+                    **payload,
+                },
+            )
+            assert response.status_code == 201
+        metrics = client.get(f"/api/reports/matches/{match_id}/metrics?video_asset_id={video['id']}").json()
+
+    assert metrics["home_score"] == 7
+    assert metrics["away_score"] == 3
+    assert [item["points"] for item in metrics["scoring_flow"]] == [5, 2, 3]
 
 
 def test_delete_organisation_cascades_workspace_and_catalogue() -> None:

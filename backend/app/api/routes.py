@@ -26,6 +26,7 @@ from app.models import (
     VisionFrameObservation,
 )
 from app.object_storage import abort_multipart_upload, delete_object, is_object_uri
+from app.rugby_analysis import evidence_for_video
 from app.schemas import (
     AnalysisJobCreate,
     AnalysisJobRead,
@@ -253,6 +254,8 @@ def upload_match_video(
     )
     db.add(video)
     try:
+        db.flush()
+        db.add(evidence_for_video(video))
         db.commit()
     except Exception:
         db.rollback()

@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import AnalysisJob, Match, VideoAsset
 from app.object_storage import is_object_storage_enabled, upload_file
+from app.rugby_analysis import evidence_for_video
 
 router = APIRouter(prefix="/api/uploads", tags=["uploads"])
 
@@ -191,6 +192,7 @@ def complete_upload(upload_id: str, db: Session = Depends(get_db)) -> UploadSess
     )
     db.add(video)
     db.flush()
+    db.add(evidence_for_video(video))
     job = AnalysisJob(match_id=metadata["match_id"], video_asset_id=video.id, message="Full match uploaded and queued for processing")
     db.add(job)
     db.commit()

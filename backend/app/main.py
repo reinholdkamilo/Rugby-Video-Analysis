@@ -16,6 +16,7 @@ from app.api.intelligence import router as intelligence_router
 from app.api.media import router as media_router
 from app.api.multipart_uploads import router as multipart_uploads_router
 from app.api.public_media import router as public_media_router
+from app.api.reports import router as reports_router
 from app.api.routes import router as api_router
 from app.api.suggestions import router as suggestions_router
 from app.api.system import router as system_router
@@ -56,11 +57,39 @@ def _configured_origins() -> list[str]:
 
 def _ensure_database_schema() -> None:
     Base.metadata.create_all(bind=engine)
-    if engine.dialect.name != "postgresql":
-        return
     with engine.begin() as connection:
-        connection.execute(text("ALTER TABLE video_assets ALTER COLUMN size_bytes TYPE BIGINT"))
-        connection.execute(text("ALTER TABLE multipart_upload_sessions ALTER COLUMN size_bytes TYPE BIGINT"))
+        if engine.dialect.name == "postgresql":
+            connection.execute(text("ALTER TABLE video_assets ALTER COLUMN size_bytes TYPE BIGINT"))
+            connection.execute(text("ALTER TABLE multipart_upload_sessions ALTER COLUMN size_bytes TYPE BIGINT"))
+            connection.execute(text("ALTER TABLE timeline_events ADD COLUMN IF NOT EXISTS event_source VARCHAR(40) DEFAULT 'manual'"))
+            connection.execute(text("ALTER TABLE timeline_events ADD COLUMN IF NOT EXISTS trust_status VARCHAR(40) DEFAULT 'confirmed'"))
+            connection.execute(text("ALTER TABLE timeline_events ADD COLUMN IF NOT EXISTS linked_event_id INTEGER REFERENCES timeline_events(id) ON DELETE SET NULL"))
+            connection.execute(text("ALTER TABLE timeline_events ADD COLUMN IF NOT EXISTS linked_reason TEXT"))
+            connection.execute(text("ALTER TABLE evidence_items ADD COLUMN IF NOT EXISTS status VARCHAR(40) DEFAULT 'unconfirmed'"))
+            connection.execute(text("ALTER TABLE evidence_items ADD COLUMN IF NOT EXISTS source VARCHAR(40) DEFAULT 'manual'"))
+            connection.execute(text("ALTER TABLE evidence_items ADD COLUMN IF NOT EXISTS trust_notes TEXT"))
+        elif engine.dialect.name == "sqlite":
+            existing: dict[str, set[str]] = {}
+            for table_name in ("timeline_events", "evidence_items"):
+                rows = connection.execute(text(f"PRAGMA table_info({table_name})")).mappings()
+                existing[table_name] = {str(row["name"]) for row in rows}
+            sqlite_columns = {
+                "timeline_events": {
+                    "event_source": "VARCHAR(40) DEFAULT 'manual'",
+                    "trust_status": "VARCHAR(40) DEFAULT 'confirmed'",
+                    "linked_event_id": "INTEGER",
+                    "linked_reason": "TEXT",
+                },
+                "evidence_items": {
+                    "status": "VARCHAR(40) DEFAULT 'unconfirmed'",
+                    "source": "VARCHAR(40) DEFAULT 'manual'",
+                    "trust_notes": "TEXT",
+                },
+            }
+            for table_name, columns in sqlite_columns.items():
+                for column_name, definition in columns.items():
+                    if column_name not in existing[table_name]:
+                        connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}"))
 
 
 @asynccontextmanager
@@ -127,6 +156,7 @@ app.include_router(intelligence_router)
 app.include_router(workspace_router)
 app.include_router(system_router)
 app.include_router(public_media_router)
+app.include_router(reports_router)
 app.mount("/media/thumbnails", StaticFiles(directory=str(THUMBNAIL_DIR)), name="thumbnails")
 app.mount("/media/clips", StaticFiles(directory=str(CLIP_DIR)), name="clips")
 app.mount("/media/vision", StaticFiles(directory=str(VISION_FRAME_DIR)), name="vision")

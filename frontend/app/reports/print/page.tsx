@@ -37,12 +37,6 @@ const CATEGORY_LABELS: Record<EventCategory, string> = {
   possession: "Possession",
 };
 
-const SCORE_VALUES: Partial<Record<EventType, number>> = {
-  try: 5,
-  conversion: 2,
-  penalty: 3,
-};
-
 const ATTACK_TYPES: EventType[] = ["carry", "pass", "try"];
 const DEFENCE_TYPES: EventType[] = ["tackle"];
 const SET_PIECE_TYPES: EventType[] = ["scrum", "lineout", "maul"];
@@ -97,7 +91,16 @@ function percent(value: number, total: number) {
 }
 
 function scoreFor(events: TimelineEvent[], team: EventTeam) {
-  return eventsFor(events, team).reduce((total, event) => total + (SCORE_VALUES[event.event_type] ?? 0), 0);
+  return eventsFor(events, team).reduce((total, event) => total + scoringPoints(event), 0);
+}
+
+function scoringPoints(event: TimelineEvent) {
+  const outcome = (event.outcome ?? "").toLowerCase().replace(/_/g, " ");
+  if (event.event_type === "try") return 5;
+  if (event.event_type === "conversion") return 2;
+  if (event.event_type === "penalty" && ["goal", "penalty goal", "penalty kick goal"].includes(outcome)) return 3;
+  if (event.event_type === "kick" && outcome === "drop goal") return 3;
+  return 0;
 }
 
 function zoneCount(events: TimelineEvent[], team: EventTeam, pattern: RegExp) {

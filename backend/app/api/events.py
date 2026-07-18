@@ -7,8 +7,17 @@ from sqlalchemy.orm import Session, selectinload
 from app.clips import generate_event_clip
 from app.database import get_db
 from app.event_schemas import EventClipRead, TimelineEventCreate, TimelineEventRead, TimelineEventUpdate
-from app.models import AutomaticEventSuggestion, EventClip, Match, TimelineEvent, VideoAsset, VideoProcessingResult
+from app.models import AutomaticEventSuggestion, EventClip, EvidenceItem, Match, TimelineEvent, VideoAsset, VideoProcessingResult
 from app.object_storage import delete_object, is_object_uri
+from app.rugby_analysis import (
+    EVENT_SOURCE_LINKED,
+    EVIDENCE_SOURCE_LINKED,
+    EVIDENCE_SOURCE_MANUAL,
+    TRUST_CONFIRMED,
+    TRUST_LINKED_UNCONFIRMED,
+    evidence_for_event,
+    linked_event_candidates,
+)
 from app.storage import delete_stored_file
 
 router = APIRouter(prefix="/api", tags=["timeline"])
@@ -36,6 +45,45 @@ def delete_media_reference(storage_path: str) -> None:
         logger.warning("Could not delete stored event media %s: %s", storage_path, exc)
 
 
+def create_clip_for_event(event: TimelineEvent, video: VideoAsset, db: Session) -> None:
+    if not event.clip_requested:
+        return
+    try:
+        clip_path, duration = generate_event_clip(video.storage_path, event.id, event.start_seconds, event.end_seconds)
+        event.clip = EventClip(file_path=clip_path, duration_seconds=duration)
+    except (FileNotFoundError, RuntimeError, ValueError) as exc:
+        event.notes = f"{event.notes or ''}\nClip generation failed: {exc}".strip()
+
+
+def add_event_evidence(event: TimelineEvent, db: Session, *, status: str | None = None, source: str | None = None) -> None:
+    db.add(evidence_for_event(event, status=status, source=source))
+
+
+def add_linked_events(parent: TimelineEvent, db: Session) -> None:
+    if parent.event_source == EVENT_SOURCE_LINKED:
+        return
+    for candidate in linked_event_candidates(parent):
+        linked = TimelineEvent(
+            match_id=parent.match_id,
+            video_asset_id=parent.video_asset_id,
+            event_type=candidate.event_type,
+            team=candidate.team,
+            start_seconds=parent.start_seconds,
+            end_seconds=parent.end_seconds,
+            outcome=candidate.outcome,
+            notes=f"Linked rugby logic: {candidate.reason}",
+            field_zone=parent.field_zone,
+            clip_requested=False,
+            event_source=EVENT_SOURCE_LINKED,
+            trust_status=TRUST_LINKED_UNCONFIRMED,
+            linked_event_id=parent.id,
+            linked_reason=candidate.reason,
+        )
+        db.add(linked)
+        db.flush()
+        add_event_evidence(linked, db, status=TRUST_LINKED_UNCONFIRMED, source=EVIDENCE_SOURCE_LINKED)
+
+
 @router.post("/timeline-events", response_model=TimelineEventRead, status_code=status.HTTP_201_CREATED)
 def create_timeline_event(payload: TimelineEventCreate, db: Session = Depends(get_db)) -> TimelineEvent:
     match = db.get(Match, payload.match_id)
@@ -51,19 +99,14 @@ def create_timeline_event(payload: TimelineEventCreate, db: Session = Depends(ge
 
     event = TimelineEvent(**payload.model_dump())
     db.add(event)
+    db.flush()
+
+    create_clip_for_event(event, video, db)
+    evidence_source = EVIDENCE_SOURCE_MANUAL if event.event_source == "manual" else event.event_source
+    add_event_evidence(event, db, status=event.trust_status or TRUST_CONFIRMED, source=evidence_source or EVIDENCE_SOURCE_MANUAL)
+    add_linked_events(event, db)
     db.commit()
     db.refresh(event)
-
-    if event.clip_requested:
-        try:
-            clip_path, duration = generate_event_clip(video.storage_path, event.id, event.start_seconds, event.end_seconds)
-            event.clip = EventClip(file_path=clip_path, duration_seconds=duration)
-            db.commit()
-            db.refresh(event)
-        except (FileNotFoundError, RuntimeError, ValueError) as exc:
-            event.notes = f"{event.notes or ''}\nClip generation failed: {exc}".strip()
-            db.commit()
-            db.refresh(event)
     return get_event_or_404(event.id, db)
 
 
@@ -117,6 +160,11 @@ def delete_timeline_event(event_id: int, db: Session = Depends(get_db)) -> None:
         update(AutomaticEventSuggestion)
         .where(AutomaticEventSuggestion.timeline_event_id == event.id)
         .values(timeline_event_id=None)
+    )
+    db.execute(
+        update(EvidenceItem)
+        .where(EvidenceItem.timeline_event_id == event.id)
+        .values(timeline_event_id=None, trust_notes="Timeline event was deleted; evidence retained for audit.")
     )
     db.delete(event)
     db.commit()

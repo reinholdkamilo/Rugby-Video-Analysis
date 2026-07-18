@@ -21,6 +21,7 @@ from app.models import (
     VideoProcessingResult,
 )
 from app.object_storage import create_presigned_get_url, is_object_uri, materialize
+from app.rugby_analysis import EVENT_SOURCE_AUTO, EVIDENCE_SOURCE_AUTO, TRUST_CONFIRMED, TRUST_UNCONFIRMED, evidence_for_event
 from app.schemas import AnalysisJobRead
 from app.video_processing import probe_video
 
@@ -296,6 +297,8 @@ def accept_suggestion(suggestion_id: int, db: Session = Depends(get_db)) -> Auto
         end_seconds=suggestion.end_seconds,
         notes=f"Accepted automatic suggestion ({suggestion.confidence:.0%} confidence): {suggestion.reason}",
         clip_requested=True,
+        event_source=EVENT_SOURCE_AUTO,
+        trust_status=TRUST_CONFIRMED,
     )
     db.add(event)
     db.flush()
@@ -314,6 +317,7 @@ def accept_suggestion(suggestion_id: int, db: Session = Depends(get_db)) -> Auto
             detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
             event.notes = f"{event.notes}\nClip generation failed: {detail}"
 
+    db.add(evidence_for_event(event, status=TRUST_UNCONFIRMED, source=EVIDENCE_SOURCE_AUTO))
     suggestion.status = SuggestionStatus.accepted
     suggestion.timeline_event_id = event.id
     db.commit()

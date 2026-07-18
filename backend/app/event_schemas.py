@@ -22,6 +22,10 @@ class TimelineEventCreate(BaseModel):
     phase_number: int | None = Field(default=None, ge=1)
     field_zone: str | None = Field(default=None, max_length=100)
     clip_requested: bool = True
+    event_source: str = Field(default="manual", max_length=40)
+    trust_status: str = Field(default="confirmed", max_length=40)
+    linked_event_id: int | None = None
+    linked_reason: str | None = Field(default=None, max_length=2000)
 
     @model_validator(mode="after")
     def validate_timestamps(self):
@@ -43,6 +47,10 @@ class TimelineEventUpdate(BaseModel):
     phase_number: int | None = Field(default=None, ge=1)
     field_zone: str | None = Field(default=None, max_length=100)
     clip_requested: bool | None = None
+    event_source: str | None = Field(default=None, max_length=40)
+    trust_status: str | None = Field(default=None, max_length=40)
+    linked_event_id: int | None = None
+    linked_reason: str | None = Field(default=None, max_length=2000)
 
 
 class EventClipRead(ORMModel):
@@ -67,6 +75,10 @@ class TimelineEventRead(ORMModel):
     phase_number: int | None
     field_zone: str | None
     clip_requested: bool
+    event_source: str
+    trust_status: str
+    linked_event_id: int | None
+    linked_reason: str | None
     created_at: datetime
     updated_at: datetime
     clip: EventClipRead | None = None

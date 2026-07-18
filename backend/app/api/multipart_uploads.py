@@ -16,6 +16,7 @@ from app.object_storage import (
     create_presigned_part_url,
     is_object_storage_enabled,
 )
+from app.rugby_analysis import evidence_for_video
 
 router = APIRouter(prefix="/api/multipart-uploads", tags=["multipart-uploads"])
 
@@ -214,6 +215,7 @@ def complete_upload(payload: MultipartComplete, db: Session = Depends(get_db)) -
     )
     db.add(video)
     db.flush()
+    db.add(evidence_for_video(video))
     job = AnalysisJob(
         match_id=payload.match_id,
         video_asset_id=video.id,

@@ -53,6 +53,8 @@ export default function EvidenceLibraryPage() {
   const [items, setItems] = useState<EvidenceItem[]>([]);
   const [selectedMatchId, setSelectedMatchId] = useState<number | null>(null);
   const [selectedVideoId, setSelectedVideoId] = useState<number | null>(null);
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [sourceFilter, setSourceFilter] = useState("all");
   const [notice, setNotice] = useState("Loading evidence library...");
   const [busy, setBusy] = useState(false);
 
@@ -60,6 +62,11 @@ export default function EvidenceLibraryPage() {
   const selectedMatch = useMemo(() => matches.find((match) => match.id === selectedMatchId) ?? null, [matches, selectedMatchId]);
   const selectedVideo = useMemo(() => videos.find((video) => video.id === selectedVideoId) ?? null, [selectedVideoId, videos]);
   const approvedCount = items.filter((item) => item.approved_for_training).length;
+  const filteredItems = useMemo(() => items.filter((item) => {
+    if (statusFilter !== "all" && item.status !== statusFilter) return false;
+    if (sourceFilter !== "all" && item.source !== sourceFilter) return false;
+    return true;
+  }), [items, sourceFilter, statusFilter]);
 
   const eventLabel = useCallback((event: TimelineEvent) => {
     const label = event.outcome || event.event_type;
@@ -152,6 +159,9 @@ export default function EvidenceLibraryPage() {
         confidence_label: String(form.get("confidence_label") || "").trim() || null,
         notes: String(form.get("notes") || "").trim() || null,
         approved_for_training: form.get("approved_for_training") === "on",
+        status: String(form.get("status") || "unconfirmed"),
+        source: "manual",
+        trust_notes: null,
       });
       setItems((current) => [created, ...current]);
       setNotice(`${created.label} saved to the evidence library.`);
@@ -249,6 +259,12 @@ export default function EvidenceLibraryPage() {
               <input name="source_uri" placeholder="Source link, path, or R2 URI" className={`${inputClass} md:col-span-2`} />
               <input name="timestamp_seconds" type="number" min="0" step="0.1" placeholder="Timestamp seconds" className={inputClass} />
               <input name="confidence_label" placeholder="positive, negative, uncertain" className={inputClass} />
+              <select name="status" className={inputClass} defaultValue="unconfirmed">
+                <option value="unconfirmed">Unconfirmed</option>
+                <option value="confirmed">Confirmed</option>
+                <option value="linked_unconfirmed">Linked / unconfirmed</option>
+                <option value="rejected">Rejected</option>
+              </select>
               <textarea name="notes" placeholder="Notes" className={`${inputClass} min-h-24 md:col-span-2`} />
             </div>
 
@@ -272,9 +288,26 @@ export default function EvidenceLibraryPage() {
                 Refresh
               </button>
             </div>
+            <div className="mb-4 grid gap-3 md:grid-cols-2">
+              <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className={inputClass}>
+                <option value="all">All trust statuses</option>
+                <option value="confirmed">Confirmed</option>
+                <option value="unconfirmed">Unconfirmed</option>
+                <option value="linked_unconfirmed">Linked / unconfirmed</option>
+                <option value="rejected">Rejected</option>
+              </select>
+              <select value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value)} className={inputClass}>
+                <option value="all">All evidence sources</option>
+                <option value="manual_code">Manual codes</option>
+                <option value="uploaded_video">Uploaded videos</option>
+                <option value="auto_analysis">Auto analysis</option>
+                <option value="linked_logic">Linked logic</option>
+                <option value="manual">Manual evidence</option>
+              </select>
+            </div>
 
             <div className="space-y-3">
-              {items.map((item) => {
+              {filteredItems.map((item) => {
                 const linkedEvent = events.find((timelineEvent) => timelineEvent.id === item.timeline_event_id);
                 return (
                   <article key={item.id} className="rounded-lg border border-slate-200 p-4">
@@ -285,6 +318,7 @@ export default function EvidenceLibraryPage() {
                         <p className="mt-1 text-sm text-slate-500">
                           {item.rugby_element || "General"}{item.timestamp_seconds !== null ? ` · ${formatTime(item.timestamp_seconds)}` : ""}
                         </p>
+                        <p className="mt-1 text-xs font-bold uppercase tracking-[0.14em] text-slate-400">{item.status.replace("_", " ")} · {item.source.replace("_", " ")}</p>
                       </div>
                       <span className={`rounded-full px-3 py-1 text-xs font-bold ${item.approved_for_training ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-600"}`}>
                         {item.approved_for_training ? "Training approved" : "Draft"}
@@ -293,6 +327,7 @@ export default function EvidenceLibraryPage() {
                     {linkedEvent ? <p className="mt-3 text-sm text-slate-600">Linked event: {eventLabel(linkedEvent)}</p> : null}
                     {item.source_uri ? <p className="mt-2 break-all text-sm text-slate-600">Source: {item.source_uri}</p> : null}
                     {item.notes ? <p className="mt-2 text-sm text-slate-600">{item.notes}</p> : null}
+                    {item.trust_notes ? <p className="mt-2 text-sm text-amber-700">Trust note: {item.trust_notes}</p> : null}
                     <div className="mt-4 flex flex-wrap gap-2">
                       <button type="button" onClick={() => void toggleTrainingApproval(item)} disabled={busy} className="rounded-lg border border-emerald-600 px-3 py-2 text-sm font-bold text-emerald-700 disabled:opacity-50">
                         {item.approved_for_training ? "Remove approval" : "Approve for training"}
@@ -304,7 +339,7 @@ export default function EvidenceLibraryPage() {
                   </article>
                 );
               })}
-              {!items.length ? <div className="rounded-lg border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">No evidence saved for this match yet.</div> : null}
+              {!filteredItems.length ? <div className="rounded-lg border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">No evidence matches the current filters.</div> : null}
             </div>
           </section>
         </div>

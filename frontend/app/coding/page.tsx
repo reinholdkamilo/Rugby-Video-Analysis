@@ -37,6 +37,8 @@ type VideoLayoutMode = "standard" | "large" | "theatre";
 type LayoutDensity = "compact" | "comfortable";
 type LayoutColumnCount = 2 | 3 | 4;
 type QuickColumnId = "home" | "away";
+type QuickEventSectionId = "attack" | "defence" | "set_piece" | "ruck" | "transition" | "restart";
+type QuickAddPanel = "event" | "zone" | null;
 
 type CodingLayout = {
   quickColumns: LayoutColumnCount;
@@ -91,6 +93,15 @@ const EVENT_LIBRARY_CATEGORIES: { value: EventCategory; label: string }[] = [
   { value: "kicking", label: "Kicking" },
   { value: "possession", label: "Possession" },
   { value: "core", label: "General" },
+];
+
+const QUICK_EVENT_SECTIONS: { id: QuickEventSectionId; title: string }[] = [
+  { id: "attack", title: "Attack" },
+  { id: "defence", title: "Defence" },
+  { id: "set_piece", title: "Set Piece" },
+  { id: "ruck", title: "Ruck" },
+  { id: "transition", title: "Transition" },
+  { id: "restart", title: "Restart" },
 ];
 
 const REVIEW_STATUSES: { value: ReviewStatus; label: string }[] = [
@@ -281,6 +292,16 @@ function categoryLabel(category?: EventCategory) {
   return (category === "core" ? "general" : category ?? "event").replace("_", " ");
 }
 
+function quickSectionForShortcut(binding: ShortcutBinding): QuickEventSectionId {
+  const label = `${binding.label} ${binding.outcome ?? ""} ${binding.eventType ?? ""}`.toLowerCase();
+  if (binding.eventType === "kickoff" || label.includes("restart") || label.includes("drop out") || label.includes("dropout") || label.includes("kickoff")) return "restart";
+  if (binding.eventType === "ruck" || label.includes("ruck") || label.includes("quick ball") || label.includes("slow ball")) return "ruck";
+  if (binding.category === "set_piece" || binding.eventType === "lineout" || binding.eventType === "scrum" || binding.eventType === "maul") return "set_piece";
+  if (binding.category === "transition" || binding.eventType === "turnover" || label.includes("turnover") || label.includes("counter") || label.includes("zone entry") || label.includes("exit")) return "transition";
+  if (binding.category === "defence" || binding.category === "discipline" || binding.eventType === "tackle" || binding.eventType === "penalty" || label.includes("jackal")) return "defence";
+  return "attack";
+}
+
 function loadShortcutBindings() {
   if (typeof window === "undefined") return DEFAULT_SHORTCUTS;
   const saved = window.localStorage.getItem(SHORTCUT_STORAGE_KEY);
@@ -357,7 +378,7 @@ export default function CodingWorkspace() {
   const [events, setEvents] = useState<TimelineEvent[]>([]);
   const [selectedMatchId, setSelectedMatchId] = useState<number | null>(null);
   const [selectedVideoId, setSelectedVideoId] = useState<number | null>(null);
-  const [selectedTeam, setSelectedTeam] = useState<EventTeam>("home");
+  const [selectedTeam] = useState<EventTeam>("home");
   const [currentTime, setCurrentTime] = useState(0);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [shortcuts, setShortcuts] = useState<ShortcutBinding[]>(DEFAULT_SHORTCUTS);
@@ -375,6 +396,9 @@ export default function CodingWorkspace() {
   const [codingLayout, setCodingLayout] = useState<CodingLayout>(DEFAULT_CODING_LAYOUT);
   const [draggingShortcutId, setDraggingShortcutId] = useState<string | null>(null);
   const [draggingColumnId, setDraggingColumnId] = useState<QuickColumnId | null>(null);
+  const [quickEditBindingId, setQuickEditBindingId] = useState<string | null>(null);
+  const [quickAddPanel, setQuickAddPanel] = useState<QuickAddPanel>(null);
+  const [showAdvancedMapping, setShowAdvancedMapping] = useState(false);
   const [notice, setNotice] = useState("Loading coding workspace...");
   const [busy, setBusy] = useState(false);
 
@@ -524,22 +548,30 @@ export default function CodingWorkspace() {
   }, [shortcuts]);
 
   const quickMatrixColumns = useMemo(() => {
-    const columns: Record<QuickColumnId, { id: QuickColumnId; title: string; subtitle: string; items: ShortcutBinding[] }> = {
+    const createSections = (items: ShortcutBinding[]) => QUICK_EVENT_SECTIONS.map((section) => ({
+      ...section,
+      items: items.filter((shortcut) => quickSectionForShortcut(shortcut) === section.id),
+    }));
+    const columns: Record<QuickColumnId, { id: QuickColumnId; title: string; subtitle: string; items: ShortcutBinding[]; sections: ReturnType<typeof createSections> }> = {
       home: {
         id: "home",
         title: "Home",
         subtitle: homeTeam?.name ?? "Home",
-        items: eventShortcuts.filter((shortcut) => shortcut.team === "home" && !shortcut.custom),
+        items: eventShortcuts.filter((shortcut) => shortcut.team === "home"),
+        sections: createSections(eventShortcuts.filter((shortcut) => shortcut.team === "home")),
       },
       away: {
         id: "away",
         title: "Away",
         subtitle: awayTeam?.name ?? "Away",
-        items: eventShortcuts.filter((shortcut) => shortcut.team === "away" && !shortcut.custom),
+        items: eventShortcuts.filter((shortcut) => shortcut.team === "away"),
+        sections: createSections(eventShortcuts.filter((shortcut) => shortcut.team === "away")),
       },
     };
     return codingLayout.quickColumnOrder.map((columnId) => columns[columnId]);
   }, [awayTeam?.name, codingLayout.quickColumnOrder, eventShortcuts, homeTeam?.name]);
+
+  const quickEditBinding = useMemo(() => shortcuts.find((binding) => binding.id === quickEditBindingId) ?? null, [quickEditBindingId, shortcuts]);
 
   const customEventShortcuts = useMemo(() => eventShortcuts.filter((shortcut) => shortcut.custom || !["home", "away"].includes(String(shortcut.team))), [eventShortcuts]);
 
@@ -758,10 +790,10 @@ export default function CodingWorkspace() {
       label,
       group: "event",
       shortcut: String(form.get("shortcut") || "").trim() || "Unassigned",
-      eventType: "custom",
+      eventType: String(form.get("event_type") || "custom") as EventType,
       duration: Number(form.get("duration") || 8),
       category: String(form.get("category") || "attack") as EventCategory,
-      outcome: label,
+      outcome: String(form.get("outcome") || label).trim() || label,
       team: String(form.get("team") || "selected") as ShortcutBinding["team"],
       fieldZone: String(form.get("field_zone") || "").trim() || undefined,
       notes: String(form.get("notes") || "").trim() || undefined,
@@ -769,6 +801,7 @@ export default function CodingWorkspace() {
     };
     setShortcuts((current) => [...current, binding]);
     setNotice(`${label} added to the coding event library.`);
+    setQuickAddPanel(null);
     event.currentTarget.reset();
   }
 
@@ -793,6 +826,7 @@ export default function CodingWorkspace() {
     };
     setShortcuts((current) => [...current, binding]);
     setNotice(`${label} added to the zone keyboard map.`);
+    setQuickAddPanel(null);
     event.currentTarget.reset();
   }
 
@@ -876,6 +910,7 @@ export default function CodingWorkspace() {
       notes: String(form.get("notes") || "").trim(),
       phaseNumber: form.get("phase_number") ? Number(form.get("phase_number")) : null,
       fieldZone: String(form.get("field_zone") || "").trim(),
+      team: String(form.get("team") || "selected") as EventTeam | "selected",
     });
     event.currentTarget.reset();
   }
@@ -1032,18 +1067,53 @@ export default function CodingWorkspace() {
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="font-bold">Quick coding matrix</h2>
-                <p className="text-xs text-slate-500">Home uses number keys. Away uses Q-row keys. Zone keys set the active field zone for the next coded events.</p>
+                <p className="text-xs text-slate-500">Home and away stay side by side. Click to code. Shift-click a button to edit its name, key, team, outcome or zone.</p>
               </div>
-              <div className="flex rounded-lg border border-slate-700 p-1 text-sm">
-                {(["home", "away", "neutral"] as EventTeam[]).map((team) => (
-                  <button key={team} type="button" onClick={() => setSelectedTeam(team)} className={`rounded-md px-3 py-1.5 capitalize ${selectedTeam === team ? "bg-emerald-400 font-bold text-slate-950" : "text-slate-300"}`}>
-                    {team === "home" ? homeTeam?.name ?? "Home" : team === "away" ? awayTeam?.name ?? "Away" : "Neutral"}
-                  </button>
-                ))}
+              <div className="flex flex-wrap gap-2 text-sm">
+                <button type="button" onClick={() => setQuickAddPanel((current) => current === "event" ? null : "event")} className="rounded-lg bg-emerald-400 px-3 py-2 font-bold text-slate-950">
+                  Add rugby element
+                </button>
+                <button type="button" onClick={() => setQuickAddPanel((current) => current === "zone" ? null : "zone")} className="rounded-lg border border-slate-700 px-3 py-2 font-bold text-slate-200">
+                  Add zone
+                </button>
+                <button type="button" onClick={() => setShowAdvancedMapping((current) => !current)} className="rounded-lg border border-slate-700 px-3 py-2 font-bold text-slate-200">
+                  {showAdvancedMapping ? "Hide settings" : "Settings"}
+                </button>
               </div>
             </div>
 
-            <div className={`grid gap-3 ${gridColumnsClass(codingLayout.quickColumns)}`}>
+            {quickAddPanel === "event" ? (
+              <form onSubmit={submitLibraryEvent} className="mb-4 grid gap-3 rounded-lg border border-emerald-900 bg-slate-950 p-3 md:grid-cols-2 xl:grid-cols-8" data-design-id="coding-quick-add-event-form" data-design-label="Quick add rugby element form">
+                <input name="label" placeholder="Rugby element name" className={`${inputClass} xl:col-span-2`} />
+                <select name="team" className={inputClass} defaultValue="home">
+                  <option value="home">{homeTeam?.name ?? "Home"}</option>
+                  <option value="away">{awayTeam?.name ?? "Away"}</option>
+                  <option value="neutral">Neutral</option>
+                  <option value="selected">Selected team</option>
+                </select>
+                <select name="category" className={inputClass} defaultValue="attack">{EVENT_LIBRARY_CATEGORIES.map((category) => <option key={category.value} value={category.value}>{category.label}</option>)}</select>
+                <select name="event_type" className={inputClass} defaultValue="custom">{EVENT_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}</select>
+                <input name="shortcut" placeholder="Key code e.g. Shift+Digit1" className={inputClass} />
+                <input name="duration" type="number" min="1" max="300" defaultValue="8" className={inputClass} />
+                <button type="submit" className="rounded-lg bg-emerald-400 px-4 py-2 font-bold text-slate-950">Create button</button>
+                <input name="outcome" placeholder="Outcome label" className={inputClass} />
+                <input name="field_zone" placeholder="Default zone" className={inputClass} />
+                <textarea name="notes" placeholder="Default note" className={`${inputClass} md:col-span-2 xl:col-span-6`} />
+              </form>
+            ) : null}
+
+            {quickAddPanel === "zone" ? (
+              <form onSubmit={submitZoneShortcut} className="mb-4 grid gap-3 rounded-lg border border-emerald-900 bg-slate-950 p-3 md:grid-cols-2 xl:grid-cols-6" data-design-id="coding-quick-add-zone-form" data-design-label="Quick add zone form">
+                <input name="label" placeholder="Zone name" className={`${inputClass} xl:col-span-2`} />
+                <input name="field_zone" placeholder="Saved zone label" className={inputClass} />
+                <input name="zone_length" placeholder="Zone length e.g. inside 22m" className={inputClass} />
+                <input name="shortcut" placeholder="Key code e.g. KeyA" className={inputClass} />
+                <button type="submit" className="rounded-lg bg-emerald-400 px-4 py-2 font-bold text-slate-950">Create zone</button>
+                <textarea name="notes" placeholder="Zone notes" className={`${inputClass} md:col-span-2 xl:col-span-6`} />
+              </form>
+            ) : null}
+
+            <div className="grid gap-4 xl:grid-cols-2">
               {quickMatrixColumns.map((column, columnIndex) => (
                 <div
                   key={column.id}
@@ -1072,37 +1142,54 @@ export default function CodingWorkspace() {
                       <span className="text-xs text-slate-600">Drag</span>
                     </div>
                   </div>
-                  <div className="grid gap-2">
-                    {column.items.map((binding) => (
-                      <button
-                        key={binding.id}
-                        type="button"
-                        data-design-id={`coding-quick-${designId(binding.id)}-button`}
-                        data-design-label={`${binding.label} quick button`}
-                        draggable
-                        aria-disabled={busy || !selectedVideoId || !binding.eventType}
-                        onDragStart={() => setDraggingShortcutId(binding.id)}
-                        onDragOver={(event) => event.preventDefault()}
-                        onDrop={(event) => {
-                          event.preventDefault();
-                          moveShortcutToColumn(column.id, binding.id);
-                        }}
-                        onDragEnd={() => setDraggingShortcutId(null)}
-                        onClick={() => {
-                          if (busy || !selectedVideoId || !binding.eventType) {
-                            setNotice("Select a source video before coding events. Drag-and-drop layout editing still works.");
-                            return;
-                          }
-                          createEventFromBinding(binding);
-                        }}
-                        className={`${quickButtonClass} ${busy || !selectedVideoId || !binding.eventType ? "opacity-50" : ""} ${draggingShortcutId === binding.id ? "border-emerald-400 opacity-70" : ""}`}
-                      >
-                        <kbd data-design-id={`coding-quick-${designId(binding.id)}-key`} data-design-label={`${binding.label} key badge`} className={`min-w-14 rounded border px-2 py-1 text-center text-xs font-bold ${shortcutConflict(binding.shortcut) ? "border-rose-400 text-rose-400" : "border-slate-700 text-emerald-400"}`}>{shortcutLabel(binding.shortcut)}</kbd>
-                        <span data-design-id={`coding-quick-${designId(binding.id)}-text`} data-design-label={`${binding.label} quick text`}>
-                          <span className="block text-sm font-bold">{displayEventLabel(binding)}</span>
-                          <span className="block text-[11px] uppercase tracking-[0.12em] text-slate-500">{binding.fieldZone || categoryLabel(binding.category)}</span>
-                        </span>
-                      </button>
+                  <div className="grid gap-3">
+                    {column.sections.map((section) => (
+                      <div key={section.id} className="rounded-lg border border-slate-800 bg-slate-900 p-3" data-design-id={`coding-quick-${column.id}-${section.id}-section`} data-design-label={`${column.title} ${section.title} quick section`}>
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <h4 className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">{section.title}</h4>
+                          <span className="rounded bg-slate-950 px-2 py-1 text-[11px] font-bold text-slate-500">{section.items.length}</span>
+                        </div>
+                        <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>
+                          {section.items.map((binding) => (
+                            <button
+                              key={binding.id}
+                              type="button"
+                              title="Click to code. Shift-click to edit."
+                              data-design-id={`coding-quick-${designId(binding.id)}-button`}
+                              data-design-label={`${binding.label} quick button`}
+                              draggable
+                              aria-disabled={busy || !selectedVideoId || !binding.eventType}
+                              onDragStart={() => setDraggingShortcutId(binding.id)}
+                              onDragOver={(event) => event.preventDefault()}
+                              onDrop={(event) => {
+                                event.preventDefault();
+                                moveShortcutToColumn(column.id, binding.id);
+                              }}
+                              onDragEnd={() => setDraggingShortcutId(null)}
+                              onClick={(event) => {
+                                if (event.shiftKey) {
+                                  setQuickEditBindingId(binding.id);
+                                  setEditingShortcutId(null);
+                                  return;
+                                }
+                                if (busy || !selectedVideoId || !binding.eventType) {
+                                  setNotice("Select a source video before coding events. Shift-click a button to edit it without coding.");
+                                  return;
+                                }
+                                createEventFromBinding(binding);
+                              }}
+                              className={`${quickButtonClass} min-h-12 cursor-pointer overflow-hidden ${busy || !selectedVideoId || !binding.eventType ? "opacity-50" : ""} ${draggingShortcutId === binding.id ? "border-emerald-400 opacity-70" : ""}`}
+                            >
+                              <kbd data-design-id={`coding-quick-${designId(binding.id)}-key`} data-design-label={`${binding.label} key badge`} className={`min-w-14 rounded border px-2 py-1 text-center text-xs font-bold ${shortcutConflict(binding.shortcut) ? "border-rose-400 text-rose-400" : "border-slate-700 text-emerald-400"}`}>{shortcutLabel(binding.shortcut)}</kbd>
+                              <span data-design-id={`coding-quick-${designId(binding.id)}-text`} data-design-label={`${binding.label} quick text`} className="min-w-0">
+                                <span className="block truncate text-sm font-bold">{displayEventLabel(binding)}</span>
+                                <span className="block truncate text-[11px] uppercase tracking-[0.12em] text-slate-500">{binding.fieldZone || categoryLabel(binding.category)}</span>
+                              </span>
+                            </button>
+                          ))}
+                          {!section.items.length ? <div className="rounded-lg border border-dashed border-slate-800 px-3 py-2 text-xs text-slate-600">Add an event to this group</div> : null}
+                        </div>
+                      </div>
                     ))}
                   </div>
                 </div>
@@ -1124,12 +1211,85 @@ export default function CodingWorkspace() {
             ) : null}
           </section>
 
-          <section
-            className="rounded-xl border border-slate-800 bg-slate-900 p-4"
-            data-design-id="coding-recent-codes-block"
-            data-design-label="Recent codes block"
-            data-design-priority="18"
-          >
+          {quickEditBinding ? (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4" role="dialog" aria-modal="true" aria-label={`Edit ${quickEditBinding.label}`}>
+              <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-xl border border-slate-700 bg-slate-900 p-4 shadow-2xl">
+                <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-lg font-black">Edit quick code</h2>
+                    <p className="text-xs text-slate-500">Changes save immediately. Press Change key, then hold modifiers and press the final key.</p>
+                  </div>
+                  <button type="button" onClick={() => { setQuickEditBindingId(null); setEditingShortcutId(null); }} className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-bold">Close</button>
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-2">
+                  <label className="grid gap-1 text-xs font-bold uppercase tracking-[0.14em] text-slate-500">
+                    Event name
+                    <input value={quickEditBinding.label} onChange={(event) => updateLibraryEvent(quickEditBinding.id, { label: event.target.value })} className={inputClass} />
+                  </label>
+                  <label className="grid gap-1 text-xs font-bold uppercase tracking-[0.14em] text-slate-500">
+                    Team
+                    <select value={quickEditBinding.team ?? "selected"} onChange={(event) => updateLibraryEvent(quickEditBinding.id, { team: event.target.value as ShortcutBinding["team"] })} className={inputClass}>
+                      <option value="home">{homeTeam?.name ?? "Home"}</option>
+                      <option value="away">{awayTeam?.name ?? "Away"}</option>
+                      <option value="neutral">Neutral</option>
+                      <option value="selected">Selected team</option>
+                    </select>
+                  </label>
+                  <label className="grid gap-1 text-xs font-bold uppercase tracking-[0.14em] text-slate-500">
+                    Rugby group
+                    <select value={quickEditBinding.category ?? "attack"} onChange={(event) => updateLibraryEvent(quickEditBinding.id, { category: event.target.value as EventCategory })} className={inputClass}>
+                      {EVENT_LIBRARY_CATEGORIES.map((category) => <option key={category.value} value={category.value}>{category.label}</option>)}
+                    </select>
+                  </label>
+                  <label className="grid gap-1 text-xs font-bold uppercase tracking-[0.14em] text-slate-500">
+                    Event type
+                    <select value={quickEditBinding.eventType ?? "custom"} onChange={(event) => updateLibraryEvent(quickEditBinding.id, { eventType: event.target.value as EventType })} className={inputClass}>
+                      {EVENT_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
+                    </select>
+                  </label>
+                  <label className="grid gap-1 text-xs font-bold uppercase tracking-[0.14em] text-slate-500">
+                    Outcome
+                    <input value={quickEditBinding.outcome ?? ""} onChange={(event) => updateLibraryEvent(quickEditBinding.id, { outcome: event.target.value })} placeholder="Optional outcome detail" className={inputClass} />
+                  </label>
+                  <label className="grid gap-1 text-xs font-bold uppercase tracking-[0.14em] text-slate-500">
+                    Zone
+                    <input value={quickEditBinding.fieldZone ?? ""} onChange={(event) => updateLibraryEvent(quickEditBinding.id, { fieldZone: event.target.value })} placeholder="Optional default zone" className={inputClass} />
+                  </label>
+                  <label className="grid gap-1 text-xs font-bold uppercase tracking-[0.14em] text-slate-500">
+                    Duration
+                    <input type="number" min="1" max="300" value={quickEditBinding.duration ?? 8} onChange={(event) => updateLibraryEvent(quickEditBinding.id, { duration: Number(event.target.value || 8) })} className={inputClass} />
+                  </label>
+                  <div className="grid gap-1 text-xs font-bold uppercase tracking-[0.14em] text-slate-500">
+                    Shortcut
+                    <div className="grid grid-cols-[1fr_auto] gap-2">
+                      <kbd className={`rounded-lg border bg-slate-950 px-3 py-2 text-sm font-bold normal-case ${shortcutConflict(quickEditBinding.shortcut) ? "border-rose-400 text-rose-400" : "border-slate-700 text-emerald-400"}`}>
+                        {editingShortcutId === quickEditBinding.id ? "Hold modifier + key" : shortcutLabel(quickEditBinding.shortcut)}
+                      </kbd>
+                      <button type="button" onClick={() => setEditingShortcutId(quickEditBinding.id)} className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-bold text-slate-200">Change key</button>
+                    </div>
+                  </div>
+                  <label className="grid gap-1 text-xs font-bold uppercase tracking-[0.14em] text-slate-500 md:col-span-2">
+                    Default note
+                    <textarea value={quickEditBinding.notes ?? ""} onChange={(event) => updateLibraryEvent(quickEditBinding.id, { notes: event.target.value })} className={inputClass} />
+                  </label>
+                </div>
+
+                <div className="mt-4 flex flex-wrap justify-between gap-2">
+                  <button type="button" onClick={() => setQuickEditBindingId(null)} className="rounded-lg bg-emerald-400 px-4 py-2 font-bold text-slate-950">Done</button>
+                  <button type="button" onClick={() => { deleteLibraryEvent(quickEditBinding.id); setQuickEditBindingId(null); setEditingShortcutId(null); }} className="rounded-lg border border-rose-900 px-4 py-2 font-bold text-rose-300">Delete button</button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          <div className="grid gap-4 xl:grid-cols-2" data-design-id="coding-lower-workspace-grid" data-design-label="Recent codes and manual event grid" data-design-priority="18">
+            <section
+              className="rounded-xl border border-slate-800 bg-slate-900 p-4"
+              data-design-id="coding-recent-codes-block"
+              data-design-label="Recent codes block"
+              data-design-priority="18"
+            >
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="font-bold">Recent codes</h2>
@@ -1142,7 +1302,7 @@ export default function CodingWorkspace() {
               </div>
             </div>
             <div
-              className="grid gap-2 lg:grid-cols-5"
+              className="grid max-h-[420px] gap-2 overflow-y-auto pr-1 md:grid-cols-2"
               data-design-id="coding-recent-codes-list"
               data-design-label="Recent codes list"
               data-design-priority="180"
@@ -1167,11 +1327,11 @@ export default function CodingWorkspace() {
                   </button>
                 );
               })}
-              {!recentEvents.length && <div className="rounded-lg border border-dashed border-slate-700 p-6 text-center text-sm text-slate-500 lg:col-span-5">Play the video and use the quick-code matrix to build the timeline.</div>}
+              {!recentEvents.length && <div className="rounded-lg border border-dashed border-slate-700 p-6 text-center text-sm text-slate-500 md:col-span-2">Play the video and use the quick-code matrix to build the timeline.</div>}
             </div>
             {events.length ? (
               <div
-                className="mt-3 grid gap-2 md:grid-cols-4 xl:grid-cols-8"
+                className="mt-3 grid gap-2 md:grid-cols-2 2xl:grid-cols-4"
                 data-design-id="coding-recent-counts-grid"
                 data-design-label="Recent code counts grid"
                 data-design-priority="181"
@@ -1184,28 +1344,36 @@ export default function CodingWorkspace() {
                 ))}
               </div>
             ) : null}
-          </section>
+            </section>
 
-          <form
-            onSubmit={submitCustomEvent}
-            className="grid gap-3 rounded-xl border border-slate-800 bg-slate-900 p-4 md:grid-cols-2 xl:grid-cols-7"
-            data-design-id="coding-manual-event-block"
-            data-design-label="Manual event block"
-            data-design-priority="20"
-          >
-            <div className="md:col-span-2 xl:col-span-7">
+            <form
+              onSubmit={submitCustomEvent}
+              className="grid content-start gap-3 rounded-xl border border-slate-800 bg-slate-900 p-4 md:grid-cols-2"
+              data-design-id="coding-manual-event-block"
+              data-design-label="Manual event block"
+              data-design-priority="20"
+            >
+            <div className="md:col-span-2">
               <h2 className="font-bold">Manual event at {formatTime(currentTime)}</h2>
               <p className="mt-1 text-xs text-slate-500">Use this when the rugby action needs a one-off detail that is not mapped yet.</p>
             </div>
             <select name="event_type" className={inputClass} defaultValue="custom" data-design-id="coding-manual-event-type" data-design-label="Manual event type field">{EVENT_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}</select>
+            <select name="team" className={inputClass} defaultValue="home" data-design-id="coding-manual-team" data-design-label="Manual team field">
+              <option value="home">{homeTeam?.name ?? "Home"}</option>
+              <option value="away">{awayTeam?.name ?? "Away"}</option>
+              <option value="neutral">Neutral</option>
+              <option value="selected">Selected team</option>
+            </select>
             <input name="outcome" placeholder="Outcome" className={inputClass} data-design-id="coding-manual-outcome" data-design-label="Manual outcome field" />
             <input name="field_zone" placeholder="Field zone" className={inputClass} data-design-id="coding-manual-zone" data-design-label="Manual field zone field" />
             <input name="phase_number" type="number" min="1" placeholder="Phase" className={inputClass} data-design-id="coding-manual-phase" data-design-label="Manual phase field" />
             <input name="duration" type="number" min="1" max="300" defaultValue="8" className={inputClass} data-design-id="coding-manual-duration" data-design-label="Manual duration field" />
-            <textarea name="notes" placeholder="Analyst notes" className={`${inputClass} md:col-span-2 xl:col-span-1`} data-design-id="coding-manual-notes" data-design-label="Manual notes field" />
+            <textarea name="notes" placeholder="Analyst notes" className={`${inputClass} md:col-span-2`} data-design-id="coding-manual-notes" data-design-label="Manual notes field" />
             <button type="submit" disabled={busy || !selectedVideoId} className="rounded-lg bg-emerald-400 px-4 py-2 font-bold text-slate-950 disabled:opacity-40" data-design-id="coding-manual-add-button" data-design-label="Manual add event button">Add event</button>
-          </form>
+            </form>
+          </div>
 
+          {showAdvancedMapping ? (
           <section
             className="rounded-xl border border-slate-800 bg-slate-900 p-4"
             data-design-id="coding-keyboard-mapping-block"
@@ -1348,6 +1516,7 @@ export default function CodingWorkspace() {
               </div>
             </div>
           </section>
+          ) : null}
 
           <section
             className="rounded-xl border border-slate-800 bg-slate-900 p-4"

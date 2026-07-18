@@ -169,7 +169,6 @@ const EVENT_SOURCES: { value: EventSource; label: string }[] = [
 ];
 
 const HOME_EVENT_KEYS = ["Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6", "Digit7", "Digit8", "Digit9", "Digit0", "Minus", "Equal", "Backquote"];
-const AWAY_EVENT_KEYS = ["KeyQ", "KeyW", "KeyE", "KeyR", "KeyT", "KeyY", "KeyU", "KeyI", "KeyO", "KeyP", "BracketLeft", "BracketRight", "Backslash"];
 const ZONE_KEYS = ["KeyA", "KeyS", "KeyD", "KeyF", "KeyG", "KeyH", "KeyJ", "KeyK"];
 const BASE_EVENT_SHORTCUTS: Omit<ShortcutBinding, "id" | "shortcut" | "team">[] = [
   { label: "Carry", group: "event", eventType: "carry", duration: 6, category: "attack" },
@@ -206,11 +205,11 @@ const VARIANT_EVENT_SHORTCUTS: Omit<ShortcutBinding, "id" | "shortcut" | "team">
 const DEFAULT_SHORTCUTS: ShortcutBinding[] = [
   ...BASE_EVENT_SHORTCUTS.flatMap((binding, index) => [
     { ...binding, id: `tag_home_${binding.eventType}_${index}`, label: binding.label, shortcut: HOME_EVENT_KEYS[index], team: "home" as const },
-    { ...binding, id: `tag_away_${binding.eventType}_${index}`, label: binding.label, shortcut: AWAY_EVENT_KEYS[index], team: "away" as const },
+    { ...binding, id: `tag_away_${binding.eventType}_${index}`, label: binding.label, shortcut: "Unassigned", team: "away" as const },
   ]),
   ...VARIANT_EVENT_SHORTCUTS.flatMap((binding, index) => [
     { ...binding, id: `tag_home_variant_${binding.eventType}_${index}`, label: binding.label, shortcut: `Shift+${HOME_EVENT_KEYS[index]}`, team: "home" as const },
-    { ...binding, id: `tag_away_variant_${binding.eventType}_${index}`, label: binding.label, shortcut: `Shift+${AWAY_EVENT_KEYS[index]}`, team: "away" as const },
+    { ...binding, id: `tag_away_variant_${binding.eventType}_${index}`, label: binding.label, shortcut: "Unassigned", team: "away" as const },
   ]),
   { id: "zone_own_22", label: "Own 22m", group: "zone", shortcut: ZONE_KEYS[0], fieldZone: "Own 22m", zoneLength: "Inside defensive 22m" },
   { id: "zone_own_half", label: "Own half", group: "zone", shortcut: ZONE_KEYS[1], fieldZone: "Own half", zoneLength: "Outside own 22m to halfway" },
@@ -353,6 +352,20 @@ function quickSectionForShortcut(binding: ShortcutBinding): QuickEventSectionId 
   return "attack";
 }
 
+function mirrorHomeBindingToAway(binding: ShortcutBinding): ShortcutBinding {
+  return {
+    ...binding,
+    id: binding.id.startsWith("custom_") ? `${binding.id}_away` : binding.id.replace(/^tag_home_/, "tag_away_"),
+    shortcut: "Unassigned",
+    team: "away",
+  };
+}
+
+function homePairIdForAway(binding: ShortcutBinding) {
+  if (binding.id.startsWith("custom_") && binding.id.endsWith("_away")) return binding.id.replace(/_away$/, "");
+  return binding.id.replace(/^tag_away_/, "tag_home_");
+}
+
 function loadShortcutBindings() {
   if (typeof window === "undefined") return DEFAULT_SHORTCUTS;
   const saved = window.localStorage.getItem(SHORTCUT_STORAGE_KEY);
@@ -369,9 +382,14 @@ function loadShortcutBindings() {
         label: savedLabel,
         group: binding.group,
         custom: binding.custom,
-        shortcut: savedBinding?.shortcut || binding.shortcut,
+        shortcut: binding.team === "away" ? "Unassigned" : savedBinding?.shortcut || binding.shortcut,
         team: (savedBinding?.team as ShortcutBinding["team"]) || binding.team,
       };
+    });
+    const mirroredDefaults = defaults.map((binding) => {
+      if (!(binding.group === "event" && binding.team === "away")) return binding;
+      const homeBinding = defaults.find((item) => item.id === homePairIdForAway(binding));
+      return homeBinding ? { ...homeBinding, id: binding.id, team: "away" as const, shortcut: "Unassigned" } : binding;
     });
     const custom = parsed
       .filter((item) => item.custom && item.id && item.label && item.shortcut)
@@ -390,7 +408,13 @@ function loadShortcutBindings() {
         zoneLength: item.zoneLength ? String(item.zoneLength) : undefined,
         custom: true,
       }));
-    return [...defaults, ...custom];
+    const customWithoutAwayEvents = custom.filter((item) => !(item.group === "event" && item.team === "away"));
+    const mirroredCustomAway = customWithoutAwayEvents
+      .filter((item) => item.group === "event" && item.team === "home")
+      .map(mirrorHomeBindingToAway);
+    return [...mirroredDefaults, ...customWithoutAwayEvents, ...mirroredCustomAway].map((binding) => (
+      binding.group === "event" && binding.team === "away" ? { ...binding, shortcut: "Unassigned" } : binding
+    ));
   } catch {
     return DEFAULT_SHORTCUTS;
   }
@@ -643,10 +667,11 @@ export default function CodingWorkspace() {
 
   const shortcutConflict = useMemo(() => {
     const counts = shortcuts.reduce<Record<string, number>>((items, shortcut) => {
+      if (!shortcut.shortcut || shortcut.shortcut === "Unassigned") return items;
       items[shortcut.shortcut] = (items[shortcut.shortcut] ?? 0) + 1;
       return items;
     }, {});
-    return (shortcut: string) => counts[shortcut] > 1;
+    return (shortcut: string) => Boolean(shortcut && shortcut !== "Unassigned" && counts[shortcut] > 1);
   }, [shortcuts]);
 
   const quickMatrixColumns = useMemo(() => {
@@ -677,7 +702,7 @@ export default function CodingWorkspace() {
     ...column,
     sections: column.sections.map((section) => ({
       ...section,
-      items: section.items.filter((item) => item.shortcut && item.shortcut !== "Unassigned"),
+      items: section.items,
     })).filter((section) => section.items.length),
   })), [quickMatrixColumns]);
 
@@ -1032,8 +1057,10 @@ export default function CodingWorkspace() {
       setNotice("Name the library event before adding it.");
       return;
     }
+    const id = `custom_${Date.now()}`;
+    const team = String(form.get("team") || "selected") as ShortcutBinding["team"];
     const binding: ShortcutBinding = {
-      id: `custom_${Date.now()}`,
+      id,
       label,
       group: "event",
       shortcut: String(form.get("shortcut") || "").trim() || "Unassigned",
@@ -1041,13 +1068,14 @@ export default function CodingWorkspace() {
       duration: Number(form.get("duration") || 8),
       category: String(form.get("category") || "attack") as EventCategory,
       outcome: String(form.get("outcome") || label).trim() || label,
-      team: String(form.get("team") || "selected") as ShortcutBinding["team"],
+      team,
       fieldZone: String(form.get("field_zone") || "").trim() || undefined,
       notes: String(form.get("notes") || "").trim() || undefined,
       custom: true,
     };
-    setShortcuts((current) => [...current, binding]);
-    setNotice(`${label} added to the coding event library.`);
+    const additions = team === "home" ? [binding, mirrorHomeBindingToAway(binding)] : [binding];
+    setShortcuts((current) => [...current, ...additions]);
+    setNotice(team === "home" ? `${label} added to Home and copied to Away as unassigned.` : `${label} added to the coding event library.`);
     setQuickAddPanel(null);
     event.currentTarget.reset();
   }

@@ -9,9 +9,7 @@ export const apiUrl =
 
 const directUploadApiUrl = (
   process.env.NEXT_PUBLIC_UPLOAD_API_URL ||
-  (typeof window !== "undefined" && window.location.hostname.endsWith("vercel.app")
-    ? "https://rugby-video-analysis-api-free.onrender.com"
-    : apiUrl)
+  apiUrl
 ).replace(/\/$/, "");
 
 export type Organisation = { id: number; name: string; created_at: string };

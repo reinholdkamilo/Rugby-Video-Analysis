@@ -1170,20 +1170,28 @@ export default function CodingWorkspace() {
     if (!confirmed) return;
     const eventIds = new Set(expandedEvents.map((event) => event.id));
     setBusy(true);
+    const previousEvents = events;
+    const previousReviewMeta = reviewMeta;
+    const previousSelectedEventId = selectedEventId;
+    const previousLastCodedEvent = lastCodedEvent;
+    setEvents((current) => current.filter((event) => !eventIds.has(event.id)));
+    setReviewMeta((current) => {
+      const next = { ...current };
+      for (const eventId of eventIds) {
+        delete next[eventId];
+      }
+      return next;
+    });
+    setSelectedEventId((current) => current && eventIds.has(current) ? null : current);
+    setLastCodedEvent((current) => current && eventIds.has(current.event.id) ? null : current);
     try {
       await Promise.all(expandedEvents.map((event) => codingApi.deleteEvent(event.id)));
-      setEvents((current) => current.filter((event) => !eventIds.has(event.id)));
-      setReviewMeta((current) => {
-        const next = { ...current };
-        for (const eventId of eventIds) {
-          delete next[eventId];
-        }
-        return next;
-      });
-      setSelectedEventId((current) => current && eventIds.has(current) ? null : current);
-      setLastCodedEvent((current) => current && eventIds.has(current.event.id) ? null : current);
       setNotice(`${expandedEvents.length} timeline event${expandedEvents.length === 1 ? "" : "s"} deleted.`);
     } catch (error) {
+      setEvents(previousEvents);
+      setReviewMeta(previousReviewMeta);
+      setSelectedEventId(previousSelectedEventId);
+      setLastCodedEvent(previousLastCodedEvent);
       setNotice(error instanceof Error ? error.message : "Unable to delete timeline events");
     } finally {
       setBusy(false);
@@ -1752,21 +1760,32 @@ export default function CodingWorkspace() {
               {recentEvents.map((item) => {
                 const review = reviewForEvent(item);
                 return (
-                  <button
+                  <div
                     key={item.id}
-                    type="button"
+                    role="button"
+                    tabIndex={0}
                     data-design-id={`coding-recent-event-${item.id}`}
                     data-design-label={`${eventLabel(item)} recent code card`}
                     onClick={() => { setSelectedEventId(item.id); seekTo(item.start_seconds); }}
-                    className={`rounded-lg border bg-slate-950 p-3 text-left hover:border-emerald-400 ${selectedEventId === item.id ? "border-emerald-400" : "border-slate-800"}`}
+                    onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { setSelectedEventId(item.id); seekTo(item.start_seconds); } }}
+                    className={`relative cursor-pointer rounded-lg border bg-slate-950 p-3 text-left hover:border-emerald-400 ${selectedEventId === item.id ? "border-emerald-400" : "border-slate-800"}`}
                   >
+                    <button
+                      type="button"
+                      aria-label={`Delete ${eventLabel(item)}`}
+                      onClick={(event) => { event.stopPropagation(); void deleteTimelineEvents([item], `${eventLabel(item)} at ${formatTime(item.start_seconds)}`); }}
+                      disabled={busy}
+                      className="absolute right-2 top-2 rounded-full border border-rose-900 bg-slate-950 px-2 py-0.5 text-xs font-black text-rose-300 hover:border-rose-400 disabled:opacity-40"
+                    >
+                      x
+                    </button>
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-mono text-xs text-emerald-400">{formatTime(item.start_seconds)}</span>
-                      <span className="rounded bg-slate-800 px-2 py-1 text-[11px] capitalize text-slate-300">{teamLabel(item.team)}</span>
+                      <span className="mr-8 rounded bg-slate-800 px-2 py-1 text-[11px] capitalize text-slate-300">{teamLabel(item.team)}</span>
                     </div>
                     <p className="mt-2 truncate text-sm font-bold capitalize">{eventLabel(item)}</p>
                     <p className={`mt-2 text-[11px] font-bold uppercase tracking-[0.12em] ${review.status === "confirmed" ? "text-emerald-300" : review.status === "flagged" ? "text-amber-300" : "text-slate-500"}`}>{review.status}</p>
-                  </button>
+                  </div>
                 );
               })}
               {!recentEvents.length && <div className="rounded-lg border border-dashed border-slate-700 p-6 text-center text-sm text-slate-500 md:col-span-2">Play the video and use the quick-code matrix to build the timeline.</div>}

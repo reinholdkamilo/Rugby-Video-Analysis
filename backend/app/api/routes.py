@@ -145,6 +145,7 @@ def delete_organisation(organisation_id: int, db: Session = Depends(get_db)) -> 
     matches = list(db.scalars(select(Match).where(Match.organisation_id == organisation_id)))
     for match in matches:
         _delete_match_tree(match, db)
+    db.flush()
 
     db.execute(delete(Player).where(Player.organisation_id == organisation_id))
     db.execute(delete(Competition).where(Competition.organisation_id == organisation_id))

@@ -75,6 +75,15 @@ body main :is(section, article, form, aside, header, .rounded-xl, .rounded-2xl) 
   cursor: text !important;
 }
 
+.report-control-label,
+.report-control-label * {
+  color: #13221f !important;
+}
+
+.report-control-label input[type="checkbox"] {
+  color: initial !important;
+}
+
 .design-layout-controlled {
   min-width: 0;
 }

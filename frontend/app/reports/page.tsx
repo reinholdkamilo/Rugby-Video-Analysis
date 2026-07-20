@@ -198,16 +198,22 @@ export default function ReportsPage() {
           <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
             <h2 className="font-bold">Report setup</h2>
             <div className="mt-4 grid gap-3">
-              <select value={selectedMatchId ?? ""} onChange={(event) => setSelectedMatchId(event.target.value ? Number(event.target.value) : null)} className={inputClass}>
+              <select value={selectedMatchId ?? ""} onChange={(event) => setSelectedMatchId(event.target.value ? Number(event.target.value) : null)} className={inputClass} style={{ color: "#13221f" }}>
                 <option value="">Select match</option>
                 {matches.map((match) => <option key={match.id} value={match.id}>{teamName(match.home_team_id)} vs {teamName(match.away_team_id)} - {match.match_date}</option>)}
               </select>
-              <select value={selectedVideoId ?? ""} onChange={(event) => setSelectedVideoId(event.target.value ? Number(event.target.value) : null)} className={inputClass}>
+              <select value={selectedVideoId ?? ""} onChange={(event) => setSelectedVideoId(event.target.value ? Number(event.target.value) : null)} className={inputClass} style={{ color: "#13221f" }}>
                 <option value="">All selected match video</option>
                 {videos.map((video) => <option key={video.id} value={video.id}>{video.original_filename}</option>)}
               </select>
-              <label className="flex items-center gap-3 rounded-lg border border-slate-200 p-3 text-sm text-slate-800"><input type="checkbox" checked={reviewedOnly} onChange={(event) => setReviewedOnly(event.target.checked)} className="h-4 w-4 accent-emerald-600" /> Reviewed events only</label>
-              <label className="flex items-center gap-3 rounded-lg border border-slate-200 p-3 text-sm text-slate-800"><input type="checkbox" checked={clipQueueOnly} onChange={(event) => setClipQueueOnly(event.target.checked)} className="h-4 w-4 accent-emerald-600" /> Clip queue only</label>
+              <label className="report-control-label flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-900" style={{ color: "#13221f" }}>
+                <input type="checkbox" checked={reviewedOnly} onChange={(event) => setReviewedOnly(event.target.checked)} className="h-4 w-4 accent-emerald-600" />
+                <span style={{ color: "#13221f" }}>Reviewed events only</span>
+              </label>
+              <label className="report-control-label flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-900" style={{ color: "#13221f" }}>
+                <input type="checkbox" checked={clipQueueOnly} onChange={(event) => setClipQueueOnly(event.target.checked)} className="h-4 w-4 accent-emerald-600" />
+                <span style={{ color: "#13221f" }}>Clip queue only</span>
+              </label>
             </div>
             <p className="mt-4 text-sm text-slate-500">{loading ? "Loading report data..." : notice}</p>
             <Link href={printReportHref} className="mt-4 block rounded-lg bg-slate-950 px-4 py-3 text-center text-sm font-bold text-white">
@@ -219,8 +225,8 @@ export default function ReportsPage() {
             <h2 className="font-bold">Include categories</h2>
             <div className="mt-3 grid gap-2">
               {(Object.keys(CATEGORY_LABELS) as EventCategory[]).map((category) => (
-                <label key={category} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 p-3 text-sm text-slate-800">
-                  <span>{CATEGORY_LABELS[category]}</span>
+                <label key={category} className="report-control-label flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-900" style={{ color: "#13221f" }}>
+                  <span style={{ color: "#13221f" }}>{CATEGORY_LABELS[category]}</span>
                   <input type="checkbox" checked={selectedCategories.includes(category)} onChange={() => toggleCategory(category)} className="h-4 w-4 accent-emerald-600" />
                 </label>
               ))}
@@ -231,8 +237,8 @@ export default function ReportsPage() {
             <h2 className="font-bold">Report sections</h2>
             <div className="mt-3 grid gap-2">
               {REPORT_SECTIONS.map((section) => (
-                <label key={section} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 p-3 text-sm text-slate-800">
-                  <span>{section}</span>
+                <label key={section} className="report-control-label flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-900" style={{ color: "#13221f" }}>
+                  <span style={{ color: "#13221f" }}>{section}</span>
                   <input type="checkbox" checked={selectedSections.includes(section)} onChange={() => toggleSection(section)} className="h-4 w-4 accent-emerald-600" />
                 </label>
               ))}

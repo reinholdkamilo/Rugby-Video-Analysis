@@ -1,5 +1,6 @@
 import logging
 import os
+import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -119,6 +120,61 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+PRIVATE_REALM = "Rugby Video Analysis Private API"
+PUBLIC_PATHS = {"/", "/health", "/api/system/ready"}
+
+
+def _hosted_private_mode() -> bool:
+    configured = os.getenv("APP_PRIVATE_MODE", "").lower()
+    if configured:
+        return configured in {"1", "true", "yes", "on"}
+    environment = os.getenv("ENVIRONMENT", os.getenv("APP_ENV", "")).lower()
+    if environment in {"production", "staging"}:
+        return True
+    return bool(os.getenv("RENDER") or os.getenv("RENDER_SERVICE_ID") or os.getenv("RENDER_EXTERNAL_URL"))
+
+
+def _private_api_response() -> JSONResponse:
+    return JSONResponse(
+        status_code=401,
+        content={"detail": "Private workspace. Contact the owner for access."},
+        headers={
+            "WWW-Authenticate": f'Basic realm="{PRIVATE_REALM}", charset="UTF-8"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+def _basic_auth_credentials(request: Request) -> tuple[str, str] | None:
+    authorization = request.headers.get("authorization", "")
+    if not authorization.startswith("Basic "):
+        return None
+    try:
+        import base64
+
+        decoded = base64.b64decode(authorization.removeprefix("Basic ")).decode("utf-8")
+        username, password = decoded.split(":", 1)
+        return username, password
+    except Exception:
+        return None
+
+
+@app.middleware("http")
+async def protect_private_api(request: Request, call_next):
+    if request.method == "OPTIONS" or request.url.path in PUBLIC_PATHS or not _hosted_private_mode():
+        return await call_next(request)
+    expected_password = os.getenv("APP_ACCESS_PASSWORD")
+    if not expected_password:
+        return _private_api_response()
+    expected_username = os.getenv("APP_ACCESS_USERNAME", "coach")
+    credentials = _basic_auth_credentials(request)
+    if credentials is not None:
+        username, password = credentials
+        if secrets.compare_digest(username, expected_username) and secrets.compare_digest(password, expected_password):
+            return await call_next(request)
+    return _private_api_response()
+
 
 SAFE_DASHBOARD_READS = {
     "/api/organisations",

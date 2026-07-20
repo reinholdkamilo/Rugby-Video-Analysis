@@ -24,7 +24,8 @@ def test_generate_event_clip_builds_ffmpeg_command(tmp_path: Path, monkeypatch) 
     assert command[0] == "ffmpeg"
     assert "10.500" in command
     assert "7.500" in command
-    assert command[command.index("-c") + 1] == "copy"
+    assert command[command.index("-c:v") + 1] == "libx264"
+    assert command[command.index("-reset_timestamps") + 1] == "1"
     assert str(tmp_path / "event-12.mp4") == command[-1]
 
 

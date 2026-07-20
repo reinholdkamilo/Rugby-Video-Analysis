@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from app.database import SessionLocal
 from app.main import app
-from app.models import VideoAsset
+from app.models import EventClip, VideoAsset
 
 
 def test_create_match_and_analysis_job() -> None:
@@ -296,6 +296,129 @@ def test_evidence_items_create_update_delete_and_validate_match_links() -> None:
         assert client.delete(f"/api/evidence-items/{item_id}").status_code == 204
         remaining = client.get(f"/api/evidence-items?match_id={match_id}").json()
         assert item_id not in [item["id"] for item in remaining]
+
+
+def test_manual_event_clip_creates_clip_evidence(monkeypatch) -> None:
+    unique = uuid4().hex[:8]
+
+    def fake_generate_event_clip(
+        source_path: str,
+        event_id: int,
+        start_seconds: float,
+        end_seconds: float,
+    ) -> tuple[str, float]:
+        return f"clips/event-{event_id}.mp4", end_seconds - start_seconds
+
+    monkeypatch.setattr("app.api.events.generate_event_clip", fake_generate_event_clip)
+    with TestClient(app) as client:
+        organisation_id = client.post(
+            "/api/organisations", json={"name": f"Clip Evidence {unique}"}
+        ).json()["id"]
+        home_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"Home {unique}"},
+        ).json()["id"]
+        away_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"Away {unique}"},
+        ).json()["id"]
+        match_id = client.post(
+            "/api/matches",
+            json={
+                "organisation_id": organisation_id,
+                "home_team_id": home_id,
+                "away_team_id": away_id,
+                "match_date": "2026-07-12",
+            },
+        ).json()["id"]
+        video = client.post(
+            f"/api/matches/{match_id}/videos",
+            files={"file": ("clip-source.mp4", b"not a real video", "video/mp4")},
+        ).json()
+        created = client.post(
+            "/api/timeline-events",
+            json={
+                "match_id": match_id,
+                "video_asset_id": video["id"],
+                "event_type": "carry",
+                "team": "home",
+                "start_seconds": 12.5,
+                "end_seconds": 27.5,
+                "outcome": "carry",
+                "clip_requested": True,
+            },
+        )
+        evidence = client.get(f"/api/evidence-items?match_id={match_id}").json()
+
+    event = created.json()
+    event_evidence = next(item for item in evidence if item["timeline_event_id"] == event["id"])
+    assert created.status_code == 201
+    assert event["clip"]["duration_seconds"] == 15
+    assert event_evidence["evidence_type"] == "clip"
+    assert event_evidence["source_uri"] == f"clips/event-{event['id']}.mp4"
+
+
+def test_delete_stored_evidence_clips_clears_clip_media_without_deleting_events(monkeypatch) -> None:
+    unique = uuid4().hex[:8]
+    deleted_paths: list[str] = []
+    monkeypatch.setattr("app.api.routes._delete_media_reference", deleted_paths.append)
+    with TestClient(app) as client:
+        organisation_id = client.post(
+            "/api/organisations", json={"name": f"Clear Clips {unique}"}
+        ).json()["id"]
+        home_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"Home {unique}"},
+        ).json()["id"]
+        away_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"Away {unique}"},
+        ).json()["id"]
+        match_id = client.post(
+            "/api/matches",
+            json={
+                "organisation_id": organisation_id,
+                "home_team_id": home_id,
+                "away_team_id": away_id,
+                "match_date": "2026-07-12",
+            },
+        ).json()["id"]
+        video = client.post(
+            f"/api/matches/{match_id}/videos",
+            files={"file": ("clear-clips-source.mp4", b"not a real video", "video/mp4")},
+        ).json()
+        event = client.post(
+            "/api/timeline-events",
+            json={
+                "match_id": match_id,
+                "video_asset_id": video["id"],
+                "event_type": "carry",
+                "team": "home",
+                "start_seconds": 15,
+                "end_seconds": 30,
+                "outcome": "carry",
+                "clip_requested": False,
+            },
+        ).json()
+        with SessionLocal() as db:
+            db.add(EventClip(event_id=event["id"], file_path="clips/full-duration-bad.mp4", duration_seconds=3600))
+            db.commit()
+        missing_confirm = client.delete("/api/evidence-items/stored-clips")
+        clear = client.delete("/api/evidence-items/stored-clips?confirm=true")
+        refreshed_event = client.get(f"/api/timeline-events/{event['id']}").json()
+        evidence = client.get(f"/api/evidence-items?match_id={match_id}").json()
+
+    assert missing_confirm.status_code == 422
+    assert clear.status_code == 200
+    assert clear.json()["clips_deleted"] >= 1
+    assert refreshed_event["clip"] is None
+    assert "clips/full-duration-bad.mp4" in deleted_paths
+    assert any(
+        item["timeline_event_id"] == event["id"]
+        and item["evidence_type"] == "clip"
+        and item["source_uri"] is None
+        for item in evidence
+    )
 
 
 def test_manual_tackle_creates_confirmed_evidence_and_linked_opposition_carry() -> None:

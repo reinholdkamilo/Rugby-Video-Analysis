@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy import delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -11,6 +11,7 @@ from app.models import (
     AutomaticEventSuggestion,
     Competition,
     EvidenceItem,
+    EvidenceType,
     EventClip,
     Match,
     MatchContext,
@@ -330,6 +331,31 @@ def list_evidence_items(
     if approved_for_training is not None:
         statement = statement.where(EvidenceItem.approved_for_training == approved_for_training)
     return list(db.scalars(statement))
+
+
+@router.delete("/evidence-items/stored-clips")
+def delete_stored_evidence_clips(
+    confirm: bool = Query(default=False),
+    db: Session = Depends(get_db),
+) -> dict[str, int]:
+    if not confirm:
+        raise HTTPException(status_code=422, detail="Pass confirm=true to delete stored evidence clip media.")
+    clips = list(db.scalars(select(EventClip)))
+    clip_paths = [clip.file_path for clip in clips]
+    for clip in clips:
+        db.delete(clip)
+    evidence_result = db.execute(
+        update(EvidenceItem)
+        .where(EvidenceItem.evidence_type == EvidenceType.clip)
+        .values(
+            source_uri=None,
+            trust_notes="Stored clip media was cleared; regenerate from linked event timing.",
+        )
+    )
+    db.commit()
+    for clip_path in clip_paths:
+        _delete_media_reference(clip_path)
+    return {"clips_deleted": len(clips), "evidence_items_updated": evidence_result.rowcount or 0}
 
 
 @router.patch("/evidence-items/{item_id}", response_model=EvidenceItemRead)

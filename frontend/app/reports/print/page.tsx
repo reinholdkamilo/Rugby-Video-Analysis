@@ -3,46 +3,34 @@
 import Link from "next/link";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { EventTeam, EventType, Match, Team, TimelineEvent, VideoAsset, api } from "@/lib/api";
+import {
+  CATEGORY_LABELS,
+  EventCategory,
+  SemanticEventType,
+  countBySemanticLabel,
+  eventsFor as semanticEventsFor,
+  isConversionEvent,
+  isDropGoalEvent,
+  isLineBreakEvent,
+  isMadeTackleEvent,
+  isMissedTackleEvent,
+  isPenaltyGoalEvent,
+  isTryEvent,
+  semanticCategory,
+  semanticEventLabel,
+  semanticEventType,
+  semanticScoringPoints,
+  semanticTypeCount,
+  semanticTypesCount,
+} from "@/lib/rugby-events";
 
-type EventCategory = "core" | "attack" | "defence" | "set_piece" | "discipline" | "transition" | "kicking" | "possession";
 type ReportTone = "home" | "away" | "neutral";
 
-const EVENT_CATEGORY_BY_TYPE: Record<EventType, EventCategory> = {
-  kickoff: "kicking",
-  scrum: "set_piece",
-  lineout: "set_piece",
-  carry: "attack",
-  tackle: "defence",
-  ruck: "possession",
-  maul: "set_piece",
-  pass: "attack",
-  kick: "kicking",
-  turnover: "transition",
-  penalty: "discipline",
-  try: "attack",
-  conversion: "kicking",
-  card: "discipline",
-  stoppage: "core",
-  custom: "core",
-};
-
-const CATEGORY_LABELS: Record<EventCategory, string> = {
-  core: "Core",
-  attack: "Attack",
-  defence: "Defence",
-  set_piece: "Set piece",
-  discipline: "Discipline",
-  transition: "Transition",
-  kicking: "Kicking",
-  possession: "Possession",
-};
-
-const ATTACK_TYPES: EventType[] = ["carry", "pass", "try"];
-const DEFENCE_TYPES: EventType[] = ["tackle"];
-const SET_PIECE_TYPES: EventType[] = ["scrum", "lineout", "maul"];
-const KICKING_TYPES: EventType[] = ["kick", "kickoff", "conversion"];
-const BREAKDOWN_TYPES: EventType[] = ["ruck", "turnover"];
-const DISCIPLINE_TYPES: EventType[] = ["penalty", "card"];
+const ATTACK_TYPES: SemanticEventType[] = ["carry", "pass", "try", "line_break"];
+const SET_PIECE_TYPES: SemanticEventType[] = ["scrum", "lineout", "maul"];
+const KICKING_TYPES: SemanticEventType[] = ["kick", "kickoff", "conversion"];
+const BREAKDOWN_TYPES: SemanticEventType[] = ["ruck", "turnover"];
+const DISCIPLINE_TYPES: SemanticEventType[] = ["penalty", "card"];
 
 function formatTime(seconds: number) {
   const value = Math.max(0, seconds || 0);
@@ -69,29 +57,20 @@ function teamLabel(team: EventTeam, homeName: string, awayName: string) {
   return "Neutral";
 }
 
-function eventsFor(events: TimelineEvent[], team: EventTeam, types?: EventType[]) {
-  return events.filter((event) => event.team === team && (!types || types.includes(event.event_type)));
+function eventsFor(events: TimelineEvent[], team: EventTeam, types?: SemanticEventType[]) {
+  return semanticEventsFor(events, team, types);
 }
 
-function typeCount(events: TimelineEvent[], team: EventTeam, types: EventType[]) {
-  return eventsFor(events, team, types).length;
+function typeCount(events: TimelineEvent[], team: EventTeam, types: SemanticEventType[]) {
+  return semanticTypesCount(events, team, types);
 }
 
-function eventTypeCount(events: TimelineEvent[], team: EventTeam, type: EventType) {
-  return eventsFor(events, team).filter((event) => event.event_type === type).length;
+function eventTypeCount(events: TimelineEvent[], team: EventTeam, type: SemanticEventType) {
+  return semanticTypeCount(events, team, type);
 }
 
 function countText(events: TimelineEvent[], team: EventTeam, pattern: RegExp) {
   return eventsFor(events, team).filter((event) => pattern.test(`${event.event_type} ${event.outcome ?? ""} ${event.notes ?? ""} ${event.field_zone ?? ""}`)).length;
-}
-
-function normalisedOutcome(event: TimelineEvent) {
-  return (event.outcome ?? "").toLowerCase().replace(/_/g, " ").trim();
-}
-
-function outcomeIs(event: TimelineEvent, labels: string[]) {
-  const outcome = normalisedOutcome(event);
-  return labels.includes(outcome);
 }
 
 function percent(value: number, total: number) {
@@ -104,27 +83,23 @@ function scoreFor(events: TimelineEvent[], team: EventTeam) {
 }
 
 function scoringPoints(event: TimelineEvent) {
-  if (isTry(event)) return 5;
-  if (isConversion(event)) return 2;
-  if (isPenaltyGoal(event)) return 3;
-  if (isDropGoal(event)) return 3;
-  return 0;
+  return semanticScoringPoints(event);
 }
 
 function isTry(event: TimelineEvent) {
-  return event.event_type === "try" || outcomeIs(event, ["try"]);
+  return isTryEvent(event);
 }
 
 function isConversion(event: TimelineEvent) {
-  return event.event_type === "conversion" || outcomeIs(event, ["conversion"]);
+  return isConversionEvent(event);
 }
 
 function isPenaltyGoal(event: TimelineEvent) {
-  return event.event_type === "penalty" && outcomeIs(event, ["goal", "penalty goal", "penalty kick goal"]);
+  return isPenaltyGoalEvent(event);
 }
 
 function isDropGoal(event: TimelineEvent) {
-  return outcomeIs(event, ["drop goal"]);
+  return isDropGoalEvent(event);
 }
 
 function zoneCount(events: TimelineEvent[], team: EventTeam, pattern: RegExp) {
@@ -144,7 +119,7 @@ function opposition(team: EventTeam): EventTeam {
 }
 
 function impliedCarryCount(events: TimelineEvent[], team: EventTeam) {
-  return eventTypeCount(events, opposition(team), "tackle");
+  return eventsFor(events, opposition(team)).filter(isMadeTackleEvent).length;
 }
 
 function attackingActions(events: TimelineEvent[], team: EventTeam) {
@@ -157,7 +132,7 @@ function metricRows(events: TimelineEvent[], homeName: string, awayName: string)
     ["Carries implied from tackles", impliedCarryCount(events, "home"), impliedCarryCount(events, "away")],
     ["Passes", eventTypeCount(events, "home", "pass"), eventTypeCount(events, "away", "pass")],
     ["Kicks", typeCount(events, "home", KICKING_TYPES), typeCount(events, "away", KICKING_TYPES)],
-    ["Linebreaks", countText(events, "home", /line ?break/i), countText(events, "away", /line ?break/i)],
+    ["Linebreaks", eventsFor(events, "home").filter(isLineBreakEvent).length, eventsFor(events, "away").filter(isLineBreakEvent).length],
     ["Turnovers conceded", eventTypeCount(events, "home", "turnover"), eventTypeCount(events, "away", "turnover")],
     ["Tackles made", eventTypeCount(events, "home", "tackle"), eventTypeCount(events, "away", "tackle")],
     ["Penalties conceded", eventTypeCount(events, "home", "penalty"), eventTypeCount(events, "away", "penalty")],
@@ -167,16 +142,11 @@ function metricRows(events: TimelineEvent[], homeName: string, awayName: string)
   ].map(([label, home, away]) => ({ label: String(label), home: Number(home), away: Number(away), homeName, awayName }));
 }
 
-function topRows(events: TimelineEvent[], team: EventTeam, title: string, limit = 4) {
-  const rows = sortedEntries(countBy(eventsFor(events, team), (event) => event.outcome || event.event_type)).slice(0, limit);
-  return { title, rows: rows.length ? rows : [["No coded events", 0] as [string, number]] };
-}
-
 function teamSummaryRows(events: TimelineEvent[], team: EventTeam, limit = 4): [string, number][] {
   const rows = sortedEntries(
     countBy(
       eventsFor(events, team).filter((event) => !isTry(event) && !isConversion(event) && !isPenaltyGoal(event) && !isDropGoal(event)),
-      (event) => event.outcome || event.event_type,
+      semanticEventLabel,
     ),
   ).slice(0, limit);
   return rows.length ? rows : [["No non-scoring events", 0] as [string, number]];
@@ -191,9 +161,17 @@ function scoringRowsFor(events: TimelineEvent[], team: EventTeam): [string, numb
   ];
 }
 
-function typeRows(events: TimelineEvent[], team: EventTeam, types: EventType[], title: string, limit = 4) {
-  const rows = sortedEntries(countBy(eventsFor(events, team, types), (event) => event.outcome || event.event_type)).slice(0, limit);
+function typeRows(events: TimelineEvent[], team: EventTeam, types: SemanticEventType[], title: string, limit = 4) {
+  const rows = sortedEntries(countBy(eventsFor(events, team, types), semanticEventLabel)).slice(0, limit);
   return { title, rows: rows.length ? rows : [["No coded events", 0] as [string, number]] };
+}
+
+function madeTackleCount(events: TimelineEvent[], team: EventTeam) {
+  return eventsFor(events, team).filter(isMadeTackleEvent).length;
+}
+
+function missedTackleCount(events: TimelineEvent[], team: EventTeam) {
+  return eventsFor(events, team).filter(isMissedTackleEvent).length;
 }
 
 export default function PrintableReportPage() {
@@ -257,22 +235,22 @@ export default function PrintableReportPage() {
   const homeScore = useMemo(() => scoreFor(events, "home"), [events]);
   const awayScore = useMemo(() => scoreFor(events, "away"), [events]);
   const dashboardRows = useMemo(() => metricRows(events, homeName, awayName), [awayName, events, homeName]);
-  const categoryRows = useMemo(() => sortedEntries(countBy(events, (event) => EVENT_CATEGORY_BY_TYPE[event.event_type])), [events]);
+  const categoryRows = useMemo(() => sortedEntries(countBy(events, semanticCategory)), [events]);
   const zoneRows = useMemo(() => sortedEntries(countBy(events.filter((event) => event.field_zone), (event) => event.field_zone ?? "Unknown")), [events]);
-  const outcomeRows = useMemo(() => sortedEntries(countBy(events.filter((event) => event.outcome), (event) => event.outcome ?? "Outcome not set")), [events]);
+  const outcomeRows = useMemo(() => sortedEntries(countBySemanticLabel(events)), [events]);
   const clipEvents = useMemo(() => events.filter((event) => event.clip_requested), [events]);
   const keyMoments = useMemo(() => {
     const priority = new Set<EventType>(["try", "penalty", "card", "turnover", "kick", "lineout", "scrum"]);
     return events
-      .filter((event) => priority.has(event.event_type) || event.clip_requested || event.notes || event.phase_number)
+      .filter((event) => priority.has(semanticEventType(event) as EventType) || event.clip_requested || event.notes || event.phase_number)
       .sort((a, b) => a.start_seconds - b.start_seconds)
       .slice(0, 20);
   }, [events]);
 
   const homeAttack = attackingActions(events, "home");
   const awayAttack = attackingActions(events, "away");
-  const homeDefence = typeCount(events, "home", DEFENCE_TYPES);
-  const awayDefence = typeCount(events, "away", DEFENCE_TYPES);
+  const homeDefence = madeTackleCount(events, "home") + missedTackleCount(events, "home");
+  const awayDefence = madeTackleCount(events, "away") + missedTackleCount(events, "away");
   const homeBreakdown = typeCount(events, "home", BREAKDOWN_TYPES);
   const awayBreakdown = typeCount(events, "away", BREAKDOWN_TYPES);
   const homeKicking = typeCount(events, "home", KICKING_TYPES);
@@ -338,16 +316,16 @@ export default function PrintableReportPage() {
               <DonutMetric label="Carries On Gainline %" value={percent(countText(events, "away", /neutral|gainline/i), Math.max(1, eventTypeCount(events, "away", "carry")))} tone="away" />
               <DonutMetric label="Carry Efficiency %" value={percent(eventTypeCount(events, "away", "carry") + eventTypeCount(events, "away", "try"), Math.max(1, awayAttack))} tone="away" />
             </DonutRow>
-            <TeamTables left={[topRows(events, "home", "Tries Scored"), typeRows(events, "home", ATTACK_TYPES, "Ball Carries"), typeRows(events, "home", ["pass"], "Passes")]} right={[topRows(events, "away", "Tries Scored"), typeRows(events, "away", ATTACK_TYPES, "Ball Carries"), typeRows(events, "away", ["pass"], "Passes")]} />
+            <TeamTables left={[typeRows(events, "home", ["try"], "Tries Scored"), typeRows(events, "home", ["carry"], "Ball Carries"), typeRows(events, "home", ["pass"], "Passes")]} right={[typeRows(events, "away", ["try"], "Tries Scored"), typeRows(events, "away", ["carry"], "Ball Carries"), typeRows(events, "away", ["pass"], "Passes")]} />
           </DualTeamSection>
           <DualTeamSection title="Defence" homeName={homeName} awayName={awayName}>
             <DonutRow>
               <DonutMetric label="Opp Carries Over Gainline %" value={percent(countText(events, "away", /gainline|dominant|line ?break/i), Math.max(1, eventTypeCount(events, "away", "carry")))} tone="home" />
-              <DonutMetric label="Made Tackle %" value={percent(homeDefence - countText(events, "home", /miss/i), Math.max(1, homeDefence))} tone="home" />
+              <DonutMetric label="Made Tackle %" value={percent(madeTackleCount(events, "home"), Math.max(1, homeDefence))} tone="home" />
               <DonutMetric label="Opp Carries Over Gainline %" value={percent(countText(events, "home", /gainline|dominant|line ?break/i), Math.max(1, eventTypeCount(events, "home", "carry")))} tone="away" />
-              <DonutMetric label="Made Tackle %" value={percent(awayDefence - countText(events, "away", /miss/i), Math.max(1, awayDefence))} tone="away" />
+              <DonutMetric label="Made Tackle %" value={percent(madeTackleCount(events, "away"), Math.max(1, awayDefence))} tone="away" />
             </DonutRow>
-            <TeamTables left={[typeRows(events, "home", DEFENCE_TYPES, "Tackles Made"), { title: "Tackles Missed", rows: [["Missed", countText(events, "home", /miss/i)]] }, { title: "Turnovers Won", rows: [["Turnover", eventTypeCount(events, "home", "turnover")]] }]} right={[typeRows(events, "away", DEFENCE_TYPES, "Tackles Made"), { title: "Tackles Missed", rows: [["Missed", countText(events, "away", /miss/i)]] }, { title: "Turnovers Won", rows: [["Turnover", eventTypeCount(events, "away", "turnover")]] }]} />
+            <TeamTables left={[{ title: "Tackles Made", rows: [["Made", madeTackleCount(events, "home")]] }, { title: "Tackles Missed", rows: [["Missed", missedTackleCount(events, "home")]] }, { title: "Turnovers Won", rows: [["Turnover", eventTypeCount(events, "home", "turnover")]] }]} right={[{ title: "Tackles Made", rows: [["Made", madeTackleCount(events, "away")]] }, { title: "Tackles Missed", rows: [["Missed", missedTackleCount(events, "away")]] }, { title: "Turnovers Won", rows: [["Turnover", eventTypeCount(events, "away", "turnover")]] }]} />
           </DualTeamSection>
         </ReportPage>
 
@@ -411,12 +389,12 @@ export default function PrintableReportPage() {
             left={[
               typeRows(events, "home", ["kickoff"], "Kickoffs / Restarts"),
               typeRows(events, "home", ["turnover"], "Turnovers"),
-              { title: "Transition Actions", rows: sortedEntries(countBy(eventsFor(events, "home").filter((event) => EVENT_CATEGORY_BY_TYPE[event.event_type] === "transition"), (event) => event.outcome || event.event_type)).slice(0, 6) },
+              { title: "Transition Actions", rows: sortedEntries(countBy(eventsFor(events, "home").filter((event) => semanticCategory(event) === "transition"), semanticEventLabel)).slice(0, 6) },
             ]}
             right={[
               typeRows(events, "away", ["kickoff"], "Kickoffs / Restarts"),
               typeRows(events, "away", ["turnover"], "Turnovers"),
-              { title: "Transition Actions", rows: sortedEntries(countBy(eventsFor(events, "away").filter((event) => EVENT_CATEGORY_BY_TYPE[event.event_type] === "transition"), (event) => event.outcome || event.event_type)).slice(0, 6) },
+              { title: "Transition Actions", rows: sortedEntries(countBy(eventsFor(events, "away").filter((event) => semanticCategory(event) === "transition"), semanticEventLabel)).slice(0, 6) },
             ]}
           />
           <TimelineTable events={keyMoments} homeName={homeName} awayName={awayName} title="Transition Timeline" />
@@ -441,9 +419,9 @@ export default function PrintableReportPage() {
               <DonutMetric label="Penalty Share" value={percent(awayDiscipline, homeDiscipline + awayDiscipline)} tone="away" />
               <DonutMetric label="Cards" value={eventTypeCount(events, "away", "card")} tone="away" variant="number" />
             </DonutRow>
-            <TeamTables left={[typeRows(events, "home", DISCIPLINE_TYPES, "Penalties / Cards"), topRows(events, "home", "Penalty Types")]} right={[typeRows(events, "away", DISCIPLINE_TYPES, "Penalties / Cards"), topRows(events, "away", "Penalty Types")]} />
+            <TeamTables left={[typeRows(events, "home", DISCIPLINE_TYPES, "Penalties / Cards"), typeRows(events, "home", ["penalty"], "Penalty Types")]} right={[typeRows(events, "away", DISCIPLINE_TYPES, "Penalties / Cards"), typeRows(events, "away", ["penalty"], "Penalty Types")]} />
           </DualTeamSection>
-          <TimelineTable events={events.filter((event) => DISCIPLINE_TYPES.includes(event.event_type)).slice(0, 18)} homeName={homeName} awayName={awayName} title="Discipline Timeline" />
+          <TimelineTable events={events.filter((event) => DISCIPLINE_TYPES.includes(semanticEventType(event))).slice(0, 18)} homeName={homeName} awayName={awayName} title="Discipline Timeline" />
         </ReportPage>
 
         <ReportPage>

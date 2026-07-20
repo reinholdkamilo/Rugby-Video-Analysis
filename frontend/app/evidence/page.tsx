@@ -2,7 +2,8 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
-import { EvidenceItem, EvidenceType, Match, Team, TimelineEvent, VideoAsset, api } from "@/lib/api";
+import { EvidenceItem, EvidenceType, Match, Team, TimelineEvent, VideoAsset, api, clipUrl } from "@/lib/api";
+import { sourceVideoUrl } from "@/lib/coding-api";
 
 const EVIDENCE_TYPES: { value: EvidenceType; label: string }[] = [
   { value: "video", label: "Video" },
@@ -35,7 +36,7 @@ const RUGBY_ELEMENTS = [
   "scoreboard",
 ];
 
-const inputClass = "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none focus:border-emerald-500";
+const inputClass = "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none focus:border-emerald-500 [color-scheme:light]";
 
 function formatTime(seconds: number | null) {
   if (seconds === null) return "";
@@ -201,6 +202,55 @@ export default function EvidenceLibraryPage() {
     }
   }
 
+  function itemMediaUrl(item: EvidenceItem, linkedEvent?: TimelineEvent) {
+    if (linkedEvent?.clip) return clipUrl(linkedEvent.clip);
+    if (item.source_uri && /^https?:\/\//i.test(item.source_uri)) return item.source_uri;
+    if (item.video_asset_id) return sourceVideoUrl(item.video_asset_id);
+    return null;
+  }
+
+  async function saveEvidenceTiming(item: EvidenceItem, linkedEvent: TimelineEvent | undefined, event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const start = Number(form.get("start_seconds") || 0);
+    const end = Number(form.get("end_seconds") || 0);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+      setNotice("Set a valid evidence clip start and end time.");
+      return;
+    }
+    setBusy(true);
+    try {
+      if (linkedEvent) {
+        const updatedEvent = await api.timeline.update(linkedEvent.id, {
+          start_seconds: Number(start.toFixed(2)),
+          end_seconds: Number(end.toFixed(2)),
+          clip_requested: true,
+        });
+        const clip = await api.timeline.regenerateClip(linkedEvent.id);
+        setEvents((current) => current.map((timelineEvent) => (
+          timelineEvent.id === updatedEvent.id ? { ...updatedEvent, clip } : timelineEvent
+        )));
+        const updatedItem = await api.evidence.update(item.id, {
+          timestamp_seconds: Number(start.toFixed(2)),
+          trust_notes: "Evidence clip timing reviewed by analyst.",
+        });
+        setItems((current) => current.map((currentItem) => currentItem.id === updatedItem.id ? updatedItem : currentItem));
+        setNotice("Evidence clip timing saved and clip regenerated.");
+      } else {
+        const updatedItem = await api.evidence.update(item.id, {
+          timestamp_seconds: Number(start.toFixed(2)),
+          trust_notes: "Evidence timestamp reviewed by analyst.",
+        });
+        setItems((current) => current.map((currentItem) => currentItem.id === updatedItem.id ? updatedItem : currentItem));
+        setNotice("Evidence timestamp saved.");
+      }
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Unable to save evidence timing.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <main className="min-h-screen bg-slate-100 text-slate-950">
       <header className="bg-slate-950 text-white">
@@ -309,6 +359,9 @@ export default function EvidenceLibraryPage() {
             <div className="space-y-3">
               {filteredItems.map((item) => {
                 const linkedEvent = events.find((timelineEvent) => timelineEvent.id === item.timeline_event_id);
+                const mediaUrl = itemMediaUrl(item, linkedEvent);
+                const startSeconds = linkedEvent?.start_seconds ?? item.timestamp_seconds ?? 0;
+                const endSeconds = linkedEvent?.end_seconds ?? (startSeconds + 15);
                 return (
                   <article key={item.id} className="rounded-lg border border-slate-200 p-4">
                     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -326,6 +379,24 @@ export default function EvidenceLibraryPage() {
                     </div>
                     {linkedEvent ? <p className="mt-3 text-sm text-slate-600">Linked event: {eventLabel(linkedEvent)}</p> : null}
                     {item.source_uri ? <p className="mt-2 break-all text-sm text-slate-600">Source: {item.source_uri}</p> : null}
+                    {mediaUrl ? (
+                      <video key={`${item.id}-${linkedEvent?.clip?.id ?? "source"}`} controls preload="metadata" src={mediaUrl} className="mt-3 aspect-video w-full rounded-lg border border-slate-200 bg-black" />
+                    ) : (
+                      <div className="mt-3 rounded-lg border border-dashed border-slate-300 p-4 text-sm text-slate-500">No playable media is linked yet.</div>
+                    )}
+                    <form onSubmit={(event) => void saveEvidenceTiming(item, linkedEvent, event)} className="mt-3 grid gap-2 rounded-lg bg-slate-50 p-3 md:grid-cols-[1fr_1fr_auto]">
+                      <label className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">
+                        Start seconds
+                        <input name="start_seconds" type="number" min="0" step="0.1" defaultValue={startSeconds.toFixed(1)} className={`${inputClass} mt-1`} />
+                      </label>
+                      <label className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">
+                        End seconds
+                        <input name="end_seconds" type="number" min="0" step="0.1" defaultValue={endSeconds.toFixed(1)} className={`${inputClass} mt-1`} />
+                      </label>
+                      <button type="submit" disabled={busy} className="self-end rounded-lg bg-slate-950 px-3 py-2 text-sm font-bold text-white disabled:opacity-50">
+                        Save timing
+                      </button>
+                    </form>
                     {item.notes ? <p className="mt-2 text-sm text-slate-600">{item.notes}</p> : null}
                     {item.trust_notes ? <p className="mt-2 text-sm text-amber-700">Trust note: {item.trust_notes}</p> : null}
                     <div className="mt-4 flex flex-wrap gap-2">

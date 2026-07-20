@@ -5,11 +5,7 @@ import { FormEvent, MouseEvent as ReactMouseEvent, useCallback, useEffect, useMe
 
 import { EventTeam, EventType, Match, Team, TimelineEvent, VideoAsset } from "@/lib/api";
 import { codingApi, sourceVideoUrl } from "@/lib/coding-api";
-
-const EVENT_TYPES: EventType[] = [
-  "kickoff", "scrum", "lineout", "carry", "tackle", "ruck", "maul", "pass",
-  "kick", "turnover", "penalty", "try", "conversion", "card", "stoppage", "custom",
-];
+import { EVENT_TYPES, inferEventTypeFromLabel } from "@/lib/rugby-events";
 
 type VideoCommand =
   | "play_pause"
@@ -95,7 +91,6 @@ type ShortcutBinding = {
 };
 
 const SHORTCUT_STORAGE_KEY = "rugby-video-analysis:coding-shortcuts:v1";
-const EVENT_LIBRARY_RESET_STORAGE_KEY = "rugby-video-analysis:coding-event-library-reset:v1";
 const REVIEW_STORAGE_KEY = "rugby-video-analysis:coding-review:v1";
 const VIDEO_LAYOUT_STORAGE_KEY = "rugby-video-analysis:coding-video-layout:v1";
 const CODING_LAYOUT_STORAGE_KEY = "rugby-video-analysis:coding-layout:v1";
@@ -294,6 +289,16 @@ function displayEventLabel(binding: ShortcutBinding) {
   return binding.label.replace(/^Home\s+/i, "").replace(/^Away\s+/i, "");
 }
 
+function cleanShortcutTeam(team?: ShortcutBinding["team"]): ShortcutBinding["team"] {
+  return team === "away" ? "away" : "home";
+}
+
+function cleanEventType(value?: unknown, label?: string | null): EventType {
+  return EVENT_TYPES.includes(value as EventType) && value !== "custom"
+    ? value as EventType
+    : inferEventTypeFromLabel(label, "custom");
+}
+
 function zoneValue(binding?: Pick<ShortcutBinding, "label" | "fieldZone" | "zoneLength"> | null) {
   if (!binding) return "";
   const label = binding.fieldZone || binding.label;
@@ -336,16 +341,9 @@ function homePairIdForAway(binding: ShortcutBinding) {
 function loadShortcutBindings() {
   if (typeof window === "undefined") return DEFAULT_SHORTCUTS;
   const saved = window.localStorage.getItem(SHORTCUT_STORAGE_KEY);
-  if (!saved) {
-    window.localStorage.setItem(EVENT_LIBRARY_RESET_STORAGE_KEY, "2026-07-18");
-    return DEFAULT_SHORTCUTS;
-  }
+  if (!saved) return DEFAULT_SHORTCUTS;
   try {
-    const eventLibraryAlreadyReset = window.localStorage.getItem(EVENT_LIBRARY_RESET_STORAGE_KEY) === "2026-07-18";
-    const parsed = (JSON.parse(saved) as Partial<ShortcutBinding>[]).filter((item) => (
-      eventLibraryAlreadyReset || item.group !== "event"
-    ));
-    if (!eventLibraryAlreadyReset) window.localStorage.setItem(EVENT_LIBRARY_RESET_STORAGE_KEY, "2026-07-18");
+    const parsed = JSON.parse(saved) as Partial<ShortcutBinding>[];
     const defaults = DEFAULT_SHORTCUTS.map((binding) => {
       const savedBinding = parsed.find((item) => item.id === binding.id);
       const savedLabel = savedBinding?.label ? displayEventLabel({ label: String(savedBinding.label) } as ShortcutBinding) : binding.label;
@@ -356,39 +354,37 @@ function loadShortcutBindings() {
         label: savedLabel,
         group: binding.group,
         custom: binding.custom,
-        shortcut: binding.team === "away" ? "Unassigned" : savedBinding?.shortcut || binding.shortcut,
+        shortcut: savedBinding?.shortcut || binding.shortcut,
         team: (savedBinding?.team as ShortcutBinding["team"]) || binding.team,
       };
     });
     const mirroredDefaults = defaults.map((binding) => {
       if (!(binding.group === "event" && binding.team === "away")) return binding;
       const homeBinding = defaults.find((item) => item.id === homePairIdForAway(binding));
-      return homeBinding ? { ...homeBinding, id: binding.id, team: "away" as const, shortcut: "Unassigned" } : binding;
+      return homeBinding ? { ...homeBinding, ...binding, id: binding.id, team: "away" as const } : binding;
     });
     const custom = parsed
-      .filter((item) => item.custom && item.id && item.label && item.shortcut)
+      .filter((item) => item.custom && item.id && item.label)
       .map((item) => ({
         id: String(item.id),
         label: String(item.label),
         group: item.group === "zone" ? "zone" as const : "event" as const,
-        shortcut: String(item.shortcut),
-        eventType: "custom" as EventType,
+        shortcut: String(item.shortcut || "Unassigned"),
+        eventType: cleanEventType(item.eventType, String(item.outcome || item.label)),
         duration: Number(item.duration || 8),
         category: (item.category as EventCategory) || "attack",
         outcome: item.outcome ? String(item.outcome) : String(item.label),
-        team: (item.team as ShortcutBinding["team"]) || "selected",
+        team: item.group === "zone" ? undefined : cleanShortcutTeam(item.team as ShortcutBinding["team"]),
         fieldZone: item.fieldZone ? String(item.fieldZone) : undefined,
         notes: item.notes ? String(item.notes) : undefined,
         zoneLength: item.zoneLength ? String(item.zoneLength) : undefined,
         custom: true,
       }));
-    const customWithoutAwayEvents = custom.filter((item) => !(item.group === "event" && item.team === "away"));
-    const mirroredCustomAway = customWithoutAwayEvents
+    const mirroredCustomAway = custom
       .filter((item) => item.group === "event" && item.team === "home")
+      .filter((item) => !custom.some((savedItem) => savedItem.id === awayPairIdForHome(item)))
       .map(mirrorHomeBindingToAway);
-    return [...mirroredDefaults, ...customWithoutAwayEvents, ...mirroredCustomAway].map((binding) => (
-      binding.group === "event" && binding.team === "away" ? { ...binding, shortcut: "Unassigned" } : binding
-    ));
+    return [...mirroredDefaults, ...custom, ...mirroredCustomAway];
   } catch {
     return DEFAULT_SHORTCUTS;
   }
@@ -769,21 +765,15 @@ export default function CodingWorkspace() {
     const eventToUndo = lastCodedEvent.event;
     setUndoingEventId(eventToUndo.id);
     try {
-      await codingApi.deleteEvent(eventToUndo.id);
-      setEvents((current) => current.filter((event) => event.id !== eventToUndo.id));
-      setReviewMeta((current) => {
-        const next = { ...current };
-        delete next[eventToUndo.id];
-        return next;
-      });
-      setSelectedEventId((current) => current === eventToUndo.id ? null : current);
-      setLastCodedEvent(null);
+      await deleteTimelineEvents([eventToUndo], `${lastCodedEvent.teamLabel} ${lastCodedEvent.label}`, false);
       setNotice(`Undid ${lastCodedEvent.teamLabel} ${lastCodedEvent.label} at ${formatTime(eventToUndo.start_seconds)}.`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Unable to undo the last coded event");
     } finally {
       setUndoingEventId(null);
     }
+  // deleteTimelineEvents is a local function declaration; including it causes a new callback each render.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastCodedEvent, undoingEventId]);
 
   const runVideoCommand = useCallback((command: VideoCommand) => {
@@ -1064,16 +1054,17 @@ export default function CodingWorkspace() {
       return;
     }
     const id = `custom_${Date.now()}`;
-    const team = String(form.get("team") || "selected") as ShortcutBinding["team"];
+    const team = cleanShortcutTeam(String(form.get("team") || "home") as ShortcutBinding["team"]);
+    const outcome = String(form.get("outcome") || label).trim() || label;
     const binding: ShortcutBinding = {
       id,
       label,
       group: "event",
       shortcut: String(form.get("shortcut") || "").trim() || "Unassigned",
-      eventType: String(form.get("event_type") || "custom") as EventType,
-      duration: Number(form.get("duration") || 8),
+      eventType: cleanEventType(form.get("event_type"), outcome || label),
+      duration: Number(form.get("duration") || QUICK_CODE_CAPTURE_SECONDS),
       category: String(form.get("category") || "attack") as EventCategory,
-      outcome: String(form.get("outcome") || label).trim() || label,
+      outcome,
       team,
       fieldZone: String(form.get("field_zone") || "").trim() || undefined,
       notes: String(form.get("notes") || "").trim() || undefined,
@@ -1115,17 +1106,20 @@ export default function CodingWorkspace() {
     setShortcuts((current) => {
       const original = current.find((binding) => binding.id === bindingId);
       const pairedAwayId = original?.group === "event" && original.team === "home" ? awayPairIdForHome(original) : null;
+      const mirroredUpdates = { ...updates };
+      delete mirroredUpdates.shortcut;
+      delete mirroredUpdates.team;
       return current.map((binding) => {
         if (binding.id === bindingId) {
-          return { ...binding, ...updates, outcome: updates.label ?? binding.outcome ?? binding.label };
+          const next = { ...binding, ...updates };
+          return { ...next, outcome: updates.label ?? updates.outcome ?? binding.outcome ?? binding.label };
         }
         if (pairedAwayId && binding.id === pairedAwayId) {
           return {
             ...binding,
-            ...updates,
+            ...mirroredUpdates,
             id: binding.id,
             team: "away",
-            shortcut: "Unassigned",
             outcome: updates.label ?? updates.outcome ?? binding.outcome ?? binding.label,
           };
         }
@@ -1161,14 +1155,23 @@ export default function CodingWorkspace() {
     setNotice(`${filteredEvents.length} filtered events marked confirmed.`);
   }
 
-  async function deleteTimelineEvents(eventsToDelete: TimelineEvent[], label: string) {
-    if (!eventsToDelete.length) return;
-    const confirmed = window.confirm(`Delete ${label}? This removes the coding event${eventsToDelete.length === 1 ? "" : "s"} from the timeline and reports.`);
-    if (!confirmed) return;
+  function eventsWithLinkedChildren(eventsToDelete: TimelineEvent[]) {
     const eventIds = new Set(eventsToDelete.map((event) => event.id));
+    return events.filter((event) => (
+      eventIds.has(event.id) ||
+      (event.linked_event_id !== null && event.linked_event_id !== undefined && eventIds.has(event.linked_event_id) && event.event_source === "linked_logic" && event.trust_status !== "confirmed")
+    ));
+  }
+
+  async function deleteTimelineEvents(eventsToDelete: TimelineEvent[], label: string, requireConfirm = true) {
+    if (!eventsToDelete.length) return;
+    const expandedEvents = eventsWithLinkedChildren(eventsToDelete);
+    const confirmed = !requireConfirm || window.confirm(`Delete ${label}? This removes ${expandedEvents.length} coding event${expandedEvents.length === 1 ? "" : "s"} from the timeline and reports.`);
+    if (!confirmed) return;
+    const eventIds = new Set(expandedEvents.map((event) => event.id));
     setBusy(true);
     try {
-      await Promise.all(eventsToDelete.map((event) => codingApi.deleteEvent(event.id)));
+      await Promise.all(expandedEvents.map((event) => codingApi.deleteEvent(event.id)));
       setEvents((current) => current.filter((event) => !eventIds.has(event.id)));
       setReviewMeta((current) => {
         const next = { ...current };
@@ -1178,7 +1181,8 @@ export default function CodingWorkspace() {
         return next;
       });
       setSelectedEventId((current) => current && eventIds.has(current) ? null : current);
-      setNotice(`${eventsToDelete.length} timeline event${eventsToDelete.length === 1 ? "" : "s"} deleted.`);
+      setLastCodedEvent((current) => current && eventIds.has(current.event.id) ? null : current);
+      setNotice(`${expandedEvents.length} timeline event${expandedEvents.length === 1 ? "" : "s"} deleted.`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Unable to delete timeline events");
     } finally {
@@ -1532,13 +1536,11 @@ export default function CodingWorkspace() {
                 <select name="team" className={inputClass} defaultValue="home">
                   <option value="home">{homeTeam?.name ?? "Home"}</option>
                   <option value="away">{awayTeam?.name ?? "Away"}</option>
-                  <option value="neutral">Neutral</option>
-                  <option value="selected">Selected team</option>
                 </select>
                 <select name="category" className={inputClass} defaultValue="attack">{EVENT_LIBRARY_CATEGORIES.map((category) => <option key={category.value} value={category.value}>{category.label}</option>)}</select>
-                <select name="event_type" className={inputClass} defaultValue="custom">{EVENT_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}</select>
+                <select name="event_type" className={inputClass} defaultValue="carry">{EVENT_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}</select>
                 <input name="shortcut" placeholder="Key code e.g. Shift+Digit1" className={inputClass} />
-                <input name="duration" type="number" min="1" max="300" defaultValue="8" className={inputClass} />
+                <input name="duration" type="number" min="1" max="300" defaultValue={QUICK_CODE_CAPTURE_SECONDS} className={inputClass} />
                 <button type="submit" className="rounded-lg bg-emerald-400 px-4 py-2 font-bold text-slate-950">Create button</button>
                 <input name="outcome" placeholder="Outcome label" className={inputClass} />
                 <input name="field_zone" placeholder="Default zone" className={inputClass} />
@@ -1797,7 +1799,7 @@ export default function CodingWorkspace() {
               <h2 className="font-bold">Manual event at {formatTime(currentTime)}</h2>
               <p className="mt-1 text-xs text-slate-500">Use this when the rugby action needs a one-off detail that is not mapped yet.</p>
             </div>
-            <select name="event_type" className={inputClass} defaultValue="custom" data-design-id="coding-manual-event-type" data-design-label="Manual event type field">{EVENT_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}</select>
+            <select name="event_type" className={inputClass} defaultValue="carry" data-design-id="coding-manual-event-type" data-design-label="Manual event type field">{EVENT_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}</select>
             <select name="team" className={inputClass} defaultValue="home" data-design-id="coding-manual-team" data-design-label="Manual team field">
               <option value="home">{homeTeam?.name ?? "Home"}</option>
               <option value="away">{awayTeam?.name ?? "Away"}</option>
@@ -1832,17 +1834,16 @@ export default function CodingWorkspace() {
               </div>
             </div>
 
-            <form onSubmit={submitLibraryEvent} className="mb-4 grid gap-3 rounded-lg border border-slate-800 bg-slate-950 p-3 md:grid-cols-2 xl:grid-cols-7" data-design-id="coding-keyboard-add-event-form" data-design-label="Keyboard add event form" data-design-priority="300">
+            <form onSubmit={submitLibraryEvent} className="mb-4 grid gap-3 rounded-lg border border-slate-800 bg-slate-950 p-3 md:grid-cols-2 xl:grid-cols-8" data-design-id="coding-keyboard-add-event-form" data-design-label="Keyboard add event form" data-design-priority="300">
               <input name="label" placeholder="New event name" className={`${inputClass} xl:col-span-2`} data-design-id="coding-keyboard-add-label" data-design-label="Keyboard add event name field" />
               <select name="category" className={inputClass} defaultValue="attack" data-design-id="coding-keyboard-add-category" data-design-label="Keyboard add category field">{EVENT_LIBRARY_CATEGORIES.map((category) => <option key={category.value} value={category.value}>{category.label}</option>)}</select>
+              <select name="event_type" className={inputClass} defaultValue="carry" data-design-id="coding-keyboard-add-type" data-design-label="Keyboard add event type field">{EVENT_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}</select>
               <select name="team" className={inputClass} defaultValue="home" data-design-id="coding-keyboard-add-team" data-design-label="Keyboard add team field">
                 <option value="home">{homeTeam?.name ?? "Home"}</option>
                 <option value="away">{awayTeam?.name ?? "Away"}</option>
-                <option value="neutral">Neutral</option>
-                <option value="selected">Selected team</option>
               </select>
               <input name="shortcut" placeholder="Key code e.g. KeyA" className={inputClass} data-design-id="coding-keyboard-add-shortcut" data-design-label="Keyboard add shortcut field" />
-              <input name="duration" type="number" min="1" max="300" defaultValue="8" className={inputClass} data-design-id="coding-keyboard-add-duration" data-design-label="Keyboard add duration field" />
+              <input name="duration" type="number" min="1" max="300" defaultValue={QUICK_CODE_CAPTURE_SECONDS} className={inputClass} data-design-id="coding-keyboard-add-duration" data-design-label="Keyboard add duration field" />
               <button type="submit" className="rounded-lg bg-emerald-400 px-4 py-2 font-bold text-slate-950" data-design-id="coding-keyboard-add-button" data-design-label="Keyboard add event button">Add event</button>
               <input name="field_zone" placeholder="Default zone" className={inputClass} data-design-id="coding-keyboard-add-zone" data-design-label="Keyboard add zone field" />
               <textarea name="notes" placeholder="Default note" className={`${inputClass} md:col-span-2 xl:col-span-6`} data-design-id="coding-keyboard-add-notes" data-design-label="Keyboard add notes field" />
@@ -1872,11 +1873,9 @@ export default function CodingWorkspace() {
                         <div className="grid grid-cols-2 gap-2" data-design-id={`coding-keyboard-${designId(binding.id)}-fields`} data-design-label={`${binding.label} fields grid`}>
                           <select value={binding.eventType ?? "custom"} onChange={(event) => updateLibraryEvent(binding.id, { eventType: event.target.value as EventType })} className={inputClass} aria-label={`${binding.label} event type`} data-design-id={`coding-keyboard-${designId(binding.id)}-type`} data-design-label={`${binding.label} event type field`}>{EVENT_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}</select>
                           <select value={binding.category ?? "attack"} onChange={(event) => updateLibraryEvent(binding.id, { category: event.target.value as EventCategory })} className={inputClass} aria-label={`${binding.label} category`} data-design-id={`coding-keyboard-${designId(binding.id)}-category`} data-design-label={`${binding.label} category field`}>{EVENT_LIBRARY_CATEGORIES.map((category) => <option key={category.value} value={category.value}>{category.label}</option>)}</select>
-                          <select value={binding.team ?? "selected"} onChange={(event) => updateLibraryEvent(binding.id, { team: event.target.value as ShortcutBinding["team"] })} className={inputClass} aria-label={`${binding.label} team target`} data-design-id={`coding-keyboard-${designId(binding.id)}-team`} data-design-label={`${binding.label} team field`}>
-                            <option value="selected">Selected</option>
+                          <select value={binding.team === "away" ? "away" : "home"} onChange={(event) => updateLibraryEvent(binding.id, { team: event.target.value as ShortcutBinding["team"] })} className={inputClass} aria-label={`${binding.label} team target`} data-design-id={`coding-keyboard-${designId(binding.id)}-team`} data-design-label={`${binding.label} team field`}>
                             <option value="home">{homeTeam?.name ?? "Home"}</option>
                             <option value="away">{awayTeam?.name ?? "Away"}</option>
-                            <option value="neutral">Neutral</option>
                           </select>
                           <input type="number" min="1" max="300" value={binding.duration ?? 8} onChange={(event) => updateLibraryEvent(binding.id, { duration: Number(event.target.value || 8) })} className={inputClass} aria-label={`${binding.label} duration`} data-design-id={`coding-keyboard-${designId(binding.id)}-duration`} data-design-label={`${binding.label} duration field`} />
                           <input value={binding.outcome ?? ""} onChange={(event) => updateLibraryEvent(binding.id, { outcome: event.target.value })} placeholder="Outcome" className={`${inputClass} col-span-2`} aria-label={`${binding.label} outcome`} data-design-id={`coding-keyboard-${designId(binding.id)}-outcome`} data-design-label={`${binding.label} outcome field`} />
@@ -2005,10 +2004,13 @@ export default function CodingWorkspace() {
               {filteredEvents.slice(0, 20).map((item) => {
                 const review = reviewForEvent(item);
                 return (
-                  <button key={item.id} type="button" data-design-id={`coding-timeline-event-${item.id}`} data-design-label={`${eventLabel(item)} timeline card`} onClick={() => { setSelectedEventId(item.id); seekTo(item.start_seconds); }} className={`rounded-lg border bg-slate-950 p-3 text-left hover:border-emerald-400 ${selectedEventId === item.id ? "border-emerald-400" : "border-slate-800"}`}>
+                  <div key={item.id} role="button" tabIndex={0} data-design-id={`coding-timeline-event-${item.id}`} data-design-label={`${eventLabel(item)} timeline card`} onClick={() => { setSelectedEventId(item.id); seekTo(item.start_seconds); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { setSelectedEventId(item.id); seekTo(item.start_seconds); } }} className={`relative cursor-pointer rounded-lg border bg-slate-950 p-3 text-left hover:border-emerald-400 ${selectedEventId === item.id ? "border-emerald-400" : "border-slate-800"}`}>
+                    <button type="button" aria-label={`Delete ${eventLabel(item)}`} onClick={(event) => { event.stopPropagation(); void deleteTimelineEvents([item], `${eventLabel(item)} at ${formatTime(item.start_seconds)}`); }} disabled={busy} className="absolute right-2 top-2 rounded-full border border-rose-900 bg-slate-950 px-2 py-0.5 text-xs font-black text-rose-300 hover:border-rose-400 disabled:opacity-40">
+                      x
+                    </button>
                     <div className="flex items-center justify-between gap-3">
                       <span className="font-mono text-xs text-emerald-400">{formatTime(item.start_seconds)}</span>
-                      <span className="rounded bg-slate-800 px-2 py-1 text-[11px] capitalize">{item.team}</span>
+                      <span className="mr-8 rounded bg-slate-800 px-2 py-1 text-[11px] capitalize">{item.team}</span>
                     </div>
                     <p className="mt-2 truncate text-sm font-bold capitalize">{eventLabel(item)}</p>
                     <div className="mt-2 flex flex-wrap gap-1 text-[11px] font-bold uppercase tracking-[0.12em]">
@@ -2016,7 +2018,7 @@ export default function CodingWorkspace() {
                       <span className={`rounded px-2 py-1 ${review.status === "confirmed" ? "bg-emerald-950 text-emerald-300" : review.status === "flagged" ? "bg-amber-950 text-amber-300" : "bg-slate-900 text-slate-400"}`}>{review.status}</span>
                       {item.clip_requested && <span className="rounded bg-sky-950 px-2 py-1 text-sky-300">clip</span>}
                     </div>
-                  </button>
+                  </div>
                 );
               })}
               {!events.length && <div className="rounded-lg border border-dashed border-slate-700 p-8 text-center text-sm text-slate-500 md:col-span-2 xl:col-span-5">Play the video and use the quick-code matrix to build the timeline.</div>}

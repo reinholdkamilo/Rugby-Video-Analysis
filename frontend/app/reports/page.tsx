@@ -3,43 +3,13 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { EventTeam, EventType, Match, Team, TimelineEvent, VideoAsset, api } from "@/lib/api";
+import { CATEGORY_LABELS, EventCategory, countBySemanticLabel, semanticCategory, semanticEventLabel, semanticEventType } from "@/lib/rugby-events";
 
-type EventCategory = "core" | "attack" | "defence" | "set_piece" | "discipline" | "transition" | "kicking" | "possession";
 type ReviewStatus = "unreviewed" | "confirmed" | "flagged";
 type EventSource = "manual" | "auto" | "vision" | "imported";
 type ReviewMeta = { status: ReviewStatus; source: EventSource; confidence: number };
 
 const REVIEW_STORAGE_KEY = "rugby-video-analysis:coding-review:v1";
-
-const EVENT_CATEGORY_BY_TYPE: Record<EventType, EventCategory> = {
-  kickoff: "kicking",
-  scrum: "set_piece",
-  lineout: "set_piece",
-  carry: "attack",
-  tackle: "defence",
-  ruck: "possession",
-  maul: "set_piece",
-  pass: "attack",
-  kick: "kicking",
-  turnover: "transition",
-  penalty: "discipline",
-  try: "attack",
-  conversion: "kicking",
-  card: "discipline",
-  stoppage: "core",
-  custom: "core",
-};
-
-const CATEGORY_LABELS: Record<EventCategory, string> = {
-  core: "Core",
-  attack: "Attack",
-  defence: "Defence",
-  set_piece: "Set piece",
-  discipline: "Discipline",
-  transition: "Transition",
-  kicking: "Kicking",
-  possession: "Possession",
-};
 
 const REPORT_SECTIONS = [
   "Match overview",
@@ -54,7 +24,7 @@ const REPORT_SECTIONS = [
 
 type ReportSection = (typeof REPORT_SECTIONS)[number];
 
-const inputClass = "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none focus:border-emerald-500";
+const inputClass = "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none focus:border-emerald-500 [color-scheme:light]";
 
 function formatTime(seconds: number) {
   const value = Math.max(0, seconds || 0);
@@ -167,7 +137,7 @@ export default function ReportsPage() {
   const reportEvents = useMemo(() => {
     return events.filter((event) => {
       const review = reviewMeta[event.id];
-      const category = EVENT_CATEGORY_BY_TYPE[event.event_type];
+      const category = semanticCategory(event);
       if (reviewedOnly && review?.status !== "confirmed") return false;
       if (clipQueueOnly && !event.clip_requested) return false;
       if (!selectedCategories.includes(category)) return false;
@@ -176,20 +146,20 @@ export default function ReportsPage() {
   }, [clipQueueOnly, events, reviewedOnly, reviewMeta, selectedCategories]);
 
   const teamCounts = useMemo(() => countBy(reportEvents, (event) => event.team), [reportEvents]);
-  const categoryCounts = useMemo(() => countBy(reportEvents, (event) => EVENT_CATEGORY_BY_TYPE[event.event_type]), [reportEvents]);
-  const eventTypeCounts = useMemo(() => countBy(reportEvents, (event) => event.outcome || event.event_type), [reportEvents]);
+  const categoryCounts = useMemo(() => countBy(reportEvents, semanticCategory), [reportEvents]);
+  const eventTypeCounts = useMemo(() => countBySemanticLabel(reportEvents), [reportEvents]);
   const zoneCounts = useMemo(() => countBy(reportEvents.filter((event) => event.field_zone), (event) => event.field_zone ?? "Unknown"), [reportEvents]);
   const clipEvents = useMemo(() => reportEvents.filter((event) => event.clip_requested), [reportEvents]);
   const keyMoments = useMemo(() => {
     const priority = new Set<EventType>(["try", "penalty", "card", "turnover", "kick", "lineout", "scrum"]);
     return reportEvents
-      .filter((event) => priority.has(event.event_type) || event.clip_requested || event.notes || event.phase_number)
+      .filter((event) => priority.has(semanticEventType(event) as EventType) || event.clip_requested || event.notes || event.phase_number)
       .sort((a, b) => a.start_seconds - b.start_seconds)
       .slice(0, 18);
   }, [reportEvents]);
 
-  const setPieceEvents = reportEvents.filter((event) => ["scrum", "lineout", "maul"].includes(event.event_type));
-  const disciplineEvents = reportEvents.filter((event) => ["penalty", "card"].includes(event.event_type));
+  const setPieceEvents = reportEvents.filter((event) => ["scrum", "lineout", "maul"].includes(semanticEventType(event)));
+  const disciplineEvents = reportEvents.filter((event) => ["penalty", "card"].includes(semanticEventType(event)));
   const reviewedCount = reportEvents.filter((event) => reviewMeta[event.id]?.status === "confirmed").length;
   const reportReadiness = reportEvents.length ? Math.round((reviewedCount / reportEvents.length) * 100) : 0;
 
@@ -236,8 +206,8 @@ export default function ReportsPage() {
                 <option value="">All selected match video</option>
                 {videos.map((video) => <option key={video.id} value={video.id}>{video.original_filename}</option>)}
               </select>
-              <label className="flex items-center gap-3 rounded-lg border border-slate-200 p-3 text-sm"><input type="checkbox" checked={reviewedOnly} onChange={(event) => setReviewedOnly(event.target.checked)} /> Reviewed events only</label>
-              <label className="flex items-center gap-3 rounded-lg border border-slate-200 p-3 text-sm"><input type="checkbox" checked={clipQueueOnly} onChange={(event) => setClipQueueOnly(event.target.checked)} /> Clip queue only</label>
+              <label className="flex items-center gap-3 rounded-lg border border-slate-200 p-3 text-sm text-slate-800"><input type="checkbox" checked={reviewedOnly} onChange={(event) => setReviewedOnly(event.target.checked)} className="h-4 w-4 accent-emerald-600" /> Reviewed events only</label>
+              <label className="flex items-center gap-3 rounded-lg border border-slate-200 p-3 text-sm text-slate-800"><input type="checkbox" checked={clipQueueOnly} onChange={(event) => setClipQueueOnly(event.target.checked)} className="h-4 w-4 accent-emerald-600" /> Clip queue only</label>
             </div>
             <p className="mt-4 text-sm text-slate-500">{loading ? "Loading report data..." : notice}</p>
             <Link href={printReportHref} className="mt-4 block rounded-lg bg-slate-950 px-4 py-3 text-center text-sm font-bold text-white">
@@ -249,9 +219,9 @@ export default function ReportsPage() {
             <h2 className="font-bold">Include categories</h2>
             <div className="mt-3 grid gap-2">
               {(Object.keys(CATEGORY_LABELS) as EventCategory[]).map((category) => (
-                <label key={category} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 p-3 text-sm">
+                <label key={category} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 p-3 text-sm text-slate-800">
                   <span>{CATEGORY_LABELS[category]}</span>
-                  <input type="checkbox" checked={selectedCategories.includes(category)} onChange={() => toggleCategory(category)} />
+                  <input type="checkbox" checked={selectedCategories.includes(category)} onChange={() => toggleCategory(category)} className="h-4 w-4 accent-emerald-600" />
                 </label>
               ))}
             </div>
@@ -261,9 +231,9 @@ export default function ReportsPage() {
             <h2 className="font-bold">Report sections</h2>
             <div className="mt-3 grid gap-2">
               {REPORT_SECTIONS.map((section) => (
-                <label key={section} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 p-3 text-sm">
+                <label key={section} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 p-3 text-sm text-slate-800">
                   <span>{section}</span>
-                  <input type="checkbox" checked={selectedSections.includes(section)} onChange={() => toggleSection(section)} />
+                  <input type="checkbox" checked={selectedSections.includes(section)} onChange={() => toggleSection(section)} className="h-4 w-4 accent-emerald-600" />
                 </label>
               ))}
             </div>
@@ -324,14 +294,14 @@ export default function ReportsPage() {
             {sectionEnabled("Set piece") && (
               <section>
                 <h3 className="text-xl font-bold">Set Piece</h3>
-                <ReportTable title="Scrum, lineout and maul events" rows={sortedEntries(countBy(setPieceEvents, (event) => event.outcome || event.event_type))} empty="No set-piece events in the current report filter." />
+                <ReportTable title="Scrum, lineout and maul events" rows={sortedEntries(countBy(setPieceEvents, semanticEventLabel))} empty="No set-piece events in the current report filter." />
               </section>
             )}
 
             {sectionEnabled("Discipline") && (
               <section>
                 <h3 className="text-xl font-bold">Discipline</h3>
-                <ReportTable title="Penalties and cards" rows={sortedEntries(countBy(disciplineEvents, (event) => event.outcome || event.event_type))} empty="No discipline events in the current report filter." />
+                <ReportTable title="Penalties and cards" rows={sortedEntries(countBy(disciplineEvents, semanticEventLabel))} empty="No discipline events in the current report filter." />
               </section>
             )}
 

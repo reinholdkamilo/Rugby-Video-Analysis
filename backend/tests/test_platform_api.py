@@ -353,6 +353,74 @@ def test_manual_tackle_creates_confirmed_evidence_and_linked_opposition_carry() 
     assert any(item["timeline_event_id"] == linked[0]["id"] and item["status"] == "linked_unconfirmed" for item in evidence)
 
 
+def test_manual_carry_creates_linked_opposition_tackle() -> None:
+    unique = uuid4().hex[:8]
+    with TestClient(app) as client:
+        organisation_id = client.post(
+            "/api/organisations", json={"name": f"Carry Logic {unique}"}
+        ).json()["id"]
+        home_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"Home {unique}"},
+        ).json()["id"]
+        away_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"Away {unique}"},
+        ).json()["id"]
+        match_id = client.post(
+            "/api/matches",
+            json={
+                "organisation_id": organisation_id,
+                "home_team_id": home_id,
+                "away_team_id": away_id,
+                "match_date": "2026-07-12",
+            },
+        ).json()["id"]
+        video = client.post(
+            f"/api/matches/{match_id}/videos",
+            files={
+                "file": (
+                    "carry-linked-source.mp4",
+                    b"not a real video",
+                    "video/mp4",
+                )
+            },
+        ).json()
+        carry = client.post(
+            "/api/timeline-events",
+            json={
+                "match_id": match_id,
+                "video_asset_id": video["id"],
+                "event_type": "carry",
+                "team": "home",
+                "start_seconds": 64,
+                "end_seconds": 79,
+                "outcome": "carry",
+                "field_zone": "middle third",
+                "clip_requested": False,
+            },
+        ).json()
+        timeline = client.get(
+            f"/api/timeline-events?match_id={match_id}&video_asset_id={video['id']}"
+        ).json()
+        linked = [event for event in timeline if event.get("linked_event_id") == carry["id"]]
+        evidence = client.get(f"/api/evidence-items?match_id={match_id}").json()
+
+    assert carry["trust_status"] == "confirmed"
+    assert len(linked) == 1
+    assert linked[0]["event_type"] == "tackle"
+    assert linked[0]["team"] == "away"
+    assert linked[0]["outcome"] == "tackle made"
+    assert linked[0]["trust_status"] == "linked_unconfirmed"
+    assert any(
+        item["timeline_event_id"] == carry["id"] and item["status"] == "confirmed" for item in evidence
+    )
+    assert any(
+        item["timeline_event_id"] == linked[0]["id"] and item["status"] == "linked_unconfirmed"
+        for item in evidence
+    )
+
+
 def test_report_metrics_scores_only_true_scoring_outcomes() -> None:
     unique = uuid4().hex[:8]
     with TestClient(app) as client:

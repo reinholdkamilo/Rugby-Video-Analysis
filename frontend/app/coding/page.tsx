@@ -734,7 +734,12 @@ export default function CodingWorkspace() {
         field_zone: extras?.fieldZone || zoneValue(activeZone) || null,
         clip_requested: false,
       });
-      setEvents((current) => [...current, created].sort((a, b) => a.start_seconds - b.start_seconds));
+      try {
+        const refreshedEvents = await codingApi.events(selectedMatchId, selectedVideoId);
+        setEvents(refreshedEvents);
+      } catch {
+        setEvents((current) => [...current, created].sort((a, b) => a.start_seconds - b.start_seconds));
+      }
       setSelectedEventId(created.id);
       const zoneText = created.field_zone ? ` in ${created.field_zone}` : "";
       const label = extras?.label || extras?.outcome || type;

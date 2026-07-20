@@ -105,6 +105,18 @@ def linked_event_candidates(event: TimelineEvent) -> list[LinkedEventCandidate]:
                 reason=f"{event.team.value} tackle implies {opponent.value} carried the ball.",
             )
         )
+    elif event.event_type == EventType.carry:
+        tackle_outcome = "tackle made"
+        if any(token in outcome for token in ["line break", "linebreak", "missed tackle", "tackle miss"]):
+            tackle_outcome = "tackle missed"
+        candidates.append(
+            LinkedEventCandidate(
+                event_type=EventType.tackle,
+                team=opponent,
+                outcome=tackle_outcome,
+                reason=f"{event.team.value} carry implies {opponent.value} made a tackle attempt.",
+            )
+        )
     elif event.event_type == EventType.lineout and any(token in outcome for token in ["won", "win", "clean"]):
         candidates.append(
             LinkedEventCandidate(

@@ -482,6 +482,37 @@ def test_delete_organisation_cascades_workspace_and_catalogue() -> None:
             "/api/teams",
             json={"organisation_id": organisation_id, "name": f"Team {unique}"},
         ).json()["id"]
+        opponent_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"Opponent {unique}"},
+        ).json()["id"]
+        match_id = client.post(
+            "/api/matches",
+            json={
+                "organisation_id": organisation_id,
+                "home_team_id": team_id,
+                "away_team_id": opponent_id,
+                "match_date": "2026-07-12",
+            },
+        ).json()["id"]
+        video = client.post(
+            f"/api/matches/{match_id}/videos",
+            files={"file": ("cascade-source.mp4", b"not a real video", "video/mp4")},
+        ).json()
+        event = client.post(
+            "/api/timeline-events",
+            json={
+                "match_id": match_id,
+                "video_asset_id": video["id"],
+                "event_type": "carry",
+                "team": "home",
+                "start_seconds": 10,
+                "end_seconds": 25,
+                "outcome": "carry",
+                "clip_requested": False,
+            },
+        )
+        assert event.status_code == 201
         season_id = client.post(
             "/api/catalog/seasons",
             json={"organisation_id": organisation_id, "name": f"Season {unique}", "is_active": True},

@@ -205,7 +205,7 @@ export default function EvidenceLibraryPage() {
   function itemMediaUrl(item: EvidenceItem, linkedEvent?: TimelineEvent) {
     if (linkedEvent?.clip) return clipUrl(linkedEvent.clip);
     if (item.source_uri && /^https?:\/\//i.test(item.source_uri)) return item.source_uri;
-    if (item.video_asset_id) return sourceVideoUrl(item.video_asset_id);
+    if (item.evidence_type === "video" && item.video_asset_id) return sourceVideoUrl(item.video_asset_id);
     return null;
   }
 

@@ -732,7 +732,7 @@ export default function CodingWorkspace() {
         notes: extras?.notes || null,
         phase_number: extras?.phaseNumber ?? null,
         field_zone: extras?.fieldZone || zoneValue(activeZone) || null,
-        clip_requested: false,
+        clip_requested: true,
       });
       try {
         const refreshedEvents = await codingApi.events(selectedMatchId, selectedVideoId);

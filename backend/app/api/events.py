@@ -187,8 +187,21 @@ def regenerate_event_clip(event_id: int, db: Session = Depends(get_db)) -> Event
     if event.clip is None:
         event.clip = EventClip(file_path=clip_path, duration_seconds=duration)
     else:
+        previous_clip_path = event.clip.file_path
         event.clip.file_path = clip_path
         event.clip.duration_seconds = duration
+        if previous_clip_path != clip_path:
+            delete_media_reference(previous_clip_path)
+    db.flush()
+    db.execute(
+        update(EvidenceItem)
+        .where(EvidenceItem.timeline_event_id == event.id)
+        .values(
+            source_uri=clip_path,
+            timestamp_seconds=event.start_seconds,
+            trust_notes="Evidence clip regenerated from linked timeline timing.",
+        )
+    )
     db.commit()
     db.refresh(event.clip)
     return event.clip

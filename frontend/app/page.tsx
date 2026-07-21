@@ -8,6 +8,19 @@ const fieldClass = "workspace-field";
 const buttonClass = "button button--primary";
 type UploadProgress = { percent: number; message: string };
 
+async function waitForBackendWake() {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= 6; attempt += 1) {
+    try {
+      return await api.health();
+    } catch (error) {
+      lastError = error;
+      if (attempt < 6) await new Promise((resolve) => setTimeout(resolve, attempt * 3000));
+    }
+  }
+  throw lastError;
+}
+
 export default function Home() {
   const [connected, setConnected] = useState(false);
   const [organisations, setOrganisations] = useState<Organisation[]>([]);
@@ -21,7 +34,8 @@ export default function Home() {
 
   const loadData = useCallback(async () => {
     try {
-      await api.health();
+      setNotice("Connecting to backend. Free Render services can take a moment to wake...");
+      await waitForBackendWake();
       const [organisationData, teamData, matchData, jobData] = await Promise.all([
         api.organisations.list(), api.teams.list(), api.matches.list(), api.jobs.list(),
       ]);

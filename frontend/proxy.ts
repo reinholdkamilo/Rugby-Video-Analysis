@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 const REALM = "Rugby Video Analysis Private Workspace";
+const SESSION_COOKIE = "rva_private_session";
 
 function hostedPrivateMode() {
   const configured = process.env.APP_PRIVATE_MODE?.toLowerCase();
@@ -33,16 +34,41 @@ function credentialsFromHeader(header: string | null) {
   }
 }
 
-export function proxy(request: NextRequest) {
+async function sha256(value: string) {
+  const bytes = new TextEncoder().encode(value);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function sessionToken(username: string, password: string) {
+  return sha256(`${username}:${password}:${process.env.APP_ACCESS_PASSWORD ?? ""}`);
+}
+
+export async function proxy(request: NextRequest) {
   if (!hostedPrivateMode()) return NextResponse.next();
 
   const expectedPassword = process.env.APP_ACCESS_PASSWORD;
   if (!expectedPassword) return unauthorized();
 
   const expectedUsername = process.env.APP_ACCESS_USERNAME || "coach";
+  const expectedToken = await sessionToken(expectedUsername, expectedPassword);
+  if (request.cookies.get(SESSION_COOKIE)?.value === expectedToken) {
+    return NextResponse.next();
+  }
+
   const credentials = credentialsFromHeader(request.headers.get("authorization"));
   if (credentials?.username === expectedUsername && credentials.password === expectedPassword) {
-    return NextResponse.next();
+    const response = NextResponse.next();
+    response.cookies.set(SESSION_COOKIE, expectedToken, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "lax",
+      path: "/",
+      maxAge: 60 * 60 * 12,
+    });
+    return response;
   }
 
   return unauthorized();

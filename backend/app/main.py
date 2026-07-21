@@ -130,12 +130,7 @@ PUBLIC_PATHS = {"/", "/health", "/api/system/ready"}
 
 def _hosted_private_mode() -> bool:
     configured = os.getenv("APP_PRIVATE_MODE", "").lower()
-    if configured:
-        return configured in {"1", "true", "yes", "on"}
-    environment = os.getenv("ENVIRONMENT", os.getenv("APP_ENV", "")).lower()
-    if environment in {"production", "staging"}:
-        return True
-    return bool(os.getenv("RENDER") or os.getenv("RENDER_SERVICE_ID") or os.getenv("RENDER_EXTERNAL_URL"))
+    return configured in {"1", "true", "yes", "on"}
 
 
 def _private_api_response() -> JSONResponse:

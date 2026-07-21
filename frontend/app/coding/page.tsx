@@ -95,6 +95,8 @@ const REVIEW_STORAGE_KEY = "rugby-video-analysis:coding-review:v1";
 const VIDEO_LAYOUT_STORAGE_KEY = "rugby-video-analysis:coding-video-layout:v1";
 const CODING_LAYOUT_STORAGE_KEY = "rugby-video-analysis:coding-layout:v1";
 const HUD_LAYOUT_STORAGE_KEY = "rugby-video-analysis:coding-hud-layout:v1";
+const SELECTED_MATCH_STORAGE_KEY = "rugby-video-analysis:coding-selected-match:v1";
+const SELECTED_VIDEO_STORAGE_KEY = "rugby-video-analysis:coding-selected-video:v1";
 const QUICK_CODE_CAPTURE_SECONDS = 15;
 
 const DEFAULT_QUICK_COLUMN_ORDER: QuickColumnId[] = ["home", "away"];
@@ -529,6 +531,12 @@ function loadReviewMeta() {
   }
 }
 
+function loadStoredNumber(key: string) {
+  if (typeof window === "undefined") return null;
+  const value = Number(window.localStorage.getItem(key));
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
 function defaultReviewMeta(event?: TimelineEvent | null): ReviewMeta {
   return {
     status: "unreviewed",
@@ -611,11 +619,51 @@ export default function CodingWorkspace() {
 
   const loadWorkspace = useCallback(async () => {
     try {
-      const [matchData, teamData] = await Promise.all([codingApi.matches(), codingApi.teams()]);
+      const [matchData, teamData, videoIndex] = await Promise.all([
+        codingApi.matches(),
+        codingApi.teams(),
+        codingApi.allVideos(),
+      ]);
       setMatches(matchData);
       setTeams(teamData);
-      setSelectedMatchId((current) => current ?? matchData[0]?.id ?? null);
-      setNotice(matchData.length ? "Select a match and source video to begin coding." : "Create and upload a match before coding.");
+      if (!matchData.length) {
+        setSelectedMatchId(null);
+        setSelectedVideoId(null);
+        setNotice("Create and upload a match before coding.");
+        return;
+      }
+
+      const savedMatchId = loadStoredNumber(SELECTED_MATCH_STORAGE_KEY);
+      const savedVideoId = loadStoredNumber(SELECTED_VIDEO_STORAGE_KEY);
+      const savedMatch = matchData.find((match) => match.id === savedMatchId);
+      const savedMatchVideos = savedMatch ? videoIndex.filter((video) => video.match_id === savedMatch.id) : [];
+      if (savedMatch && savedMatchVideos.length) {
+        setSelectedMatchId(savedMatch.id);
+        setVideos(savedMatchVideos);
+        const nextVideoId = savedMatchVideos.some((video) => video.id === savedVideoId)
+          ? savedVideoId
+          : savedMatchVideos[0]?.id ?? null;
+        setSelectedVideoId(nextVideoId);
+        setEvents(nextVideoId ? await codingApi.events(savedMatch.id, nextVideoId) : []);
+        setNotice("Coding workspace ready.");
+        return;
+      }
+
+      const matchWithVideo = matchData.find((match) => videoIndex.some((video) => video.match_id === match.id));
+      if (matchWithVideo) {
+        const matchVideos = videoIndex.filter((video) => video.match_id === matchWithVideo.id);
+        const nextVideoId = matchVideos[0]?.id ?? null;
+        setSelectedMatchId(matchWithVideo.id);
+        setVideos(matchVideos);
+        setSelectedVideoId(nextVideoId);
+        setEvents(nextVideoId ? await codingApi.events(matchWithVideo.id, nextVideoId) : []);
+        setNotice("Coding workspace ready. A match with source video was selected automatically.");
+        return;
+      }
+
+      setSelectedMatchId(matchData[0]?.id ?? null);
+      setSelectedVideoId(null);
+      setNotice("No uploaded source videos found. Upload video before coding events.");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Unable to load workspace");
     }
@@ -634,7 +682,8 @@ export default function CodingWorkspace() {
       try {
         const videoData = await codingApi.videos(selectedMatchId);
         setVideos(videoData);
-        const nextVideoId = videoData[0]?.id ?? null;
+        const savedVideoId = loadStoredNumber(SELECTED_VIDEO_STORAGE_KEY);
+        const nextVideoId = videoData.some((video) => video.id === savedVideoId) ? savedVideoId : videoData[0]?.id ?? null;
         setSelectedVideoId(nextVideoId);
         setEvents(nextVideoId ? await codingApi.events(selectedMatchId, nextVideoId) : []);
         setNotice(nextVideoId ? "Coding workspace ready." : "This match has no uploaded footage yet.");
@@ -643,6 +692,18 @@ export default function CodingWorkspace() {
       }
     })();
   }, [selectedMatchId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (selectedMatchId) window.localStorage.setItem(SELECTED_MATCH_STORAGE_KEY, String(selectedMatchId));
+    else window.localStorage.removeItem(SELECTED_MATCH_STORAGE_KEY);
+  }, [selectedMatchId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (selectedVideoId) window.localStorage.setItem(SELECTED_VIDEO_STORAGE_KEY, String(selectedVideoId));
+    else window.localStorage.removeItem(SELECTED_VIDEO_STORAGE_KEY);
+  }, [selectedVideoId]);
 
   useEffect(() => {
     if (!selectedMatchId || !selectedVideoId) return;
@@ -797,8 +858,15 @@ export default function CodingWorkspace() {
     ? "rounded-lg border border-slate-800 bg-slate-900 p-2"
     : "rounded-lg border border-slate-800 bg-slate-900 p-3";
 
-  const createEvent = useCallback(async (type: EventType, duration = 8, extras?: { notes?: string; outcome?: string; phaseNumber?: number | null; fieldZone?: string; label?: string; team?: EventTeam | "selected"; centeredWindow?: boolean }) => {
-    if (!selectedMatchId || !selectedVideoId) return;
+  const createEvent = useCallback(async (type: EventType, duration = QUICK_CODE_CAPTURE_SECONDS, extras?: { notes?: string; outcome?: string; phaseNumber?: number | null; fieldZone?: string; label?: string; team?: EventTeam | "selected"; centeredWindow?: boolean }) => {
+    if (!selectedMatchId) {
+      setNotice("Select a match before coding events.");
+      return null;
+    }
+    if (!selectedVideoId) {
+      setNotice("Select or upload a source video before coding events. Events need a video timeline to attach to.");
+      return null;
+    }
     const playhead = Math.max(0, videoRef.current?.currentTime ?? currentTime);
     const safeDuration = Math.max(0.5, duration);
     const start = extras?.centeredWindow ? Math.max(0, playhead - safeDuration / 2) : playhead;
@@ -832,15 +900,20 @@ export default function CodingWorkspace() {
       const codedTeamLabel = teamLabel(team);
       setLastCodedEvent({ event: created, label, teamLabel: codedTeamLabel });
       setNotice(`${label} saved from ${formatTime(start)} to ${formatTime(created.end_seconds)} for ${codedTeamLabel}${zoneText}. Reports update from saved timeline events.`);
+      return created;
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Unable to create event");
+      return null;
     } finally {
       setBusy(false);
     }
   }, [activeZone, currentTime, selectedMatchId, selectedTeam, selectedVideoId, teamLabel]);
 
   const createEventFromBinding = useCallback((binding: ShortcutBinding) => {
-    if (!binding.eventType) return;
+    if (!binding.eventType) {
+      setNotice("This coding button has no rugby event type assigned. Shift-click it to edit the event type.");
+      return;
+    }
     void createEvent(binding.eventType, binding.duration || QUICK_CODE_CAPTURE_SECONDS, {
       outcome: binding.outcome || (binding.custom ? binding.label : undefined),
       notes: binding.notes,
@@ -1306,14 +1379,14 @@ export default function CodingWorkspace() {
   async function submitCustomEvent(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    await createEvent(String(form.get("event_type")) as EventType, Number(form.get("duration") || 8), {
+    const created = await createEvent(String(form.get("event_type")) as EventType, Number(form.get("duration") || QUICK_CODE_CAPTURE_SECONDS), {
       outcome: String(form.get("outcome") || "").trim(),
       notes: String(form.get("notes") || "").trim(),
       phaseNumber: form.get("phase_number") ? Number(form.get("phase_number")) : null,
       fieldZone: String(form.get("field_zone") || "").trim(),
       team: String(form.get("team") || "selected") as EventTeam | "selected",
     });
-    event.currentTarget.reset();
+    if (created) event.currentTarget.reset();
   }
 
   async function submitEventEdit(event: FormEvent<HTMLFormElement>) {
@@ -1920,7 +1993,7 @@ export default function CodingWorkspace() {
             <input name="outcome" placeholder="Outcome" className={inputClass} data-design-id="coding-manual-outcome" data-design-label="Manual outcome field" />
             <input name="field_zone" placeholder="Field zone" className={inputClass} data-design-id="coding-manual-zone" data-design-label="Manual field zone field" />
             <input name="phase_number" type="number" min="1" placeholder="Phase" className={inputClass} data-design-id="coding-manual-phase" data-design-label="Manual phase field" />
-            <input name="duration" type="number" min="1" max="300" defaultValue="8" className={inputClass} data-design-id="coding-manual-duration" data-design-label="Manual duration field" />
+            <input name="duration" type="number" min="1" max="300" defaultValue={QUICK_CODE_CAPTURE_SECONDS} className={inputClass} data-design-id="coding-manual-duration" data-design-label="Manual duration field" />
             <textarea name="notes" placeholder="Analyst notes" className={`${inputClass} md:col-span-2`} data-design-id="coding-manual-notes" data-design-label="Manual notes field" />
             <button type="submit" disabled={busy || !selectedVideoId} className="rounded-lg bg-emerald-400 px-4 py-2 font-bold text-slate-950 disabled:opacity-40" data-design-id="coding-manual-add-button" data-design-label="Manual add event button">Add event</button>
             </form>

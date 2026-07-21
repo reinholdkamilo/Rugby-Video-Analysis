@@ -12,6 +12,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const codingApi = {
   matches: () => request<Match[]>("/api/matches"),
   teams: () => request<Team[]>("/api/teams"),
+  allVideos: () => request<VideoAsset[]>("/api/videos"),
   videos: (matchId: number) => request<VideoAsset[]>(`/api/matches/${matchId}/videos`),
   events: (matchId: number, videoAssetId?: number) => {
     const query = new URLSearchParams({ match_id: String(matchId) });

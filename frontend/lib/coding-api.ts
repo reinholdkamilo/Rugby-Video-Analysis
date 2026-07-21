@@ -9,15 +9,28 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
+async function withBackendWakeRetry<T>(operation: () => Promise<T>, attempts = 4): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, attempt * 2500));
+    }
+  }
+  throw lastError;
+}
+
 export const codingApi = {
-  matches: () => request<Match[]>("/api/matches"),
-  teams: () => request<Team[]>("/api/teams"),
-  allVideos: () => request<VideoAsset[]>("/api/videos"),
-  videos: (matchId: number) => request<VideoAsset[]>(`/api/matches/${matchId}/videos`),
+  matches: () => withBackendWakeRetry(() => request<Match[]>("/api/matches")),
+  teams: () => withBackendWakeRetry(() => request<Team[]>("/api/teams")),
+  allVideos: () => withBackendWakeRetry(() => request<VideoAsset[]>("/api/videos")),
+  videos: (matchId: number) => withBackendWakeRetry(() => request<VideoAsset[]>(`/api/matches/${matchId}/videos`)),
   events: (matchId: number, videoAssetId?: number) => {
     const query = new URLSearchParams({ match_id: String(matchId) });
     if (videoAssetId) query.set("video_asset_id", String(videoAssetId));
-    return request<TimelineEvent[]>(`/api/timeline-events?${query}`);
+    return withBackendWakeRetry(() => request<TimelineEvent[]>(`/api/timeline-events?${query}`));
   },
   createEvent: (payload: {
     match_id: number;

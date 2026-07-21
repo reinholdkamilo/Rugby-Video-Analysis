@@ -47,6 +47,7 @@ function forwardedHeaders(request: NextRequest) {
 function responseHeaders(response: Response) {
   const headers = new Headers(response.headers);
   headers.delete("content-encoding");
+  headers.delete("content-length");
   headers.delete("transfer-encoding");
   return headers;
 }

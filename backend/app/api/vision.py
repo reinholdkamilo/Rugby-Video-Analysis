@@ -64,11 +64,17 @@ def run_vision(payload: VisionRunRequest, db: Session = Depends(get_db)) -> list
         )
         for observation in analysed:
             frame_name = observation.frame_path.rsplit("/", maxsplit=1)[-1]
+            local_frame_path = observation.frame_path
             observation.frame_path = persist_generated_file(
                 observation.frame_path,
                 f"vision_frames/video-{video.id}/{frame_name}",
                 "image/jpeg",
             )
+            if observation.frame_path != local_frame_path:
+                try:
+                    os.unlink(local_frame_path)
+                except OSError:
+                    pass
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Uploaded video file is unavailable.") from exc
     except RuntimeError as exc:

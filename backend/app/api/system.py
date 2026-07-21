@@ -10,6 +10,7 @@ from sqlalchemy import text
 
 from app.database import engine
 from app.object_storage import storage_status
+from app.runtime_limits import runtime_diagnostics
 
 router = APIRouter(prefix="/api/system", tags=["system"])
 
@@ -73,6 +74,7 @@ def build_system_status() -> dict[str, object]:
         "environment": os.getenv("APP_ENV", "development"),
         "python": platform.python_version(),
         "checks": checks,
+        "runtime": runtime_diagnostics(),
     }
 
 

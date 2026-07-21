@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.database import SessionLocal
 from app.models import AnalysisJob, AnalysisStatus, VideoAsset, VideoProcessingResult
 from app.object_storage import create_presigned_get_url, is_object_uri, persist_generated_file
+from app.runtime_limits import max_processing_video_bytes, runtime_diagnostics
 from app.video_processing import create_thumbnail, probe_video
 
 logger = logging.getLogger(__name__)
@@ -42,13 +43,36 @@ def process_job(db: Session, job: AnalysisJob) -> None:
     if video is None:
         raise RuntimeError("The uploaded video record could not be found.")
 
+    processing_limit = max_processing_video_bytes()
+    if processing_limit and video.size_bytes > processing_limit:
+        raise RuntimeError(
+            "Video is too large for this hosted web service memory budget. "
+            "Use direct R2 upload with a dedicated worker or upgrade the Render backend plan."
+        )
+
     try:
         source = _processing_source(video.storage_path)
     except FileNotFoundError as exc:
         raise RuntimeError("The uploaded video file is missing from storage.") from exc
 
     _update_job(db, job, 30, "Reading video metadata with FFmpeg.")
+    logger.info(
+        "analysis_job_start job_id=%s video_id=%s video_size_bytes=%s diagnostics=%s",
+        job.id,
+        video.id,
+        video.size_bytes,
+        runtime_diagnostics(),
+    )
     metadata = probe_video(source)
+    logger.info(
+        "analysis_job_metadata job_id=%s video_id=%s duration_seconds=%s width=%s height=%s frame_rate=%s",
+        job.id,
+        video.id,
+        metadata.duration_seconds,
+        metadata.width,
+        metadata.height,
+        metadata.frame_rate,
+    )
 
     _update_job(db, job, 65, "Generating match thumbnail.")
     thumbnail_path = THUMBNAIL_DIR / f"video-{video.id}.jpg"
@@ -58,6 +82,8 @@ def process_job(db: Session, job: AnalysisJob) -> None:
         f"thumbnails/video-{video.id}.jpg",
         "image/jpeg",
     )
+    if stored_thumbnail_path != str(thumbnail_path):
+        thumbnail_path.unlink(missing_ok=True)
 
     _update_job(db, job, 85, "Saving processing results.")
     existing = db.scalar(
@@ -89,6 +115,7 @@ def process_job(db: Session, job: AnalysisJob) -> None:
     job.progress_percent = 100
     job.message = "Video preparation complete. Metadata and thumbnail are ready."
     db.commit()
+    logger.info("analysis_job_end job_id=%s video_id=%s diagnostics=%s", job.id, video.id, runtime_diagnostics())
 
 
 def process_next_job() -> bool:

@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
@@ -27,6 +28,7 @@ from app.video_processing import probe_video
 
 router = APIRouter(prefix="/api/automatic-suggestions", tags=["automatic suggestions"])
 DETECTION_CACHE_DIR = Path("cache/automatic-detection")
+logger = logging.getLogger(__name__)
 
 
 class DetectionRequest(BaseModel):
@@ -156,6 +158,15 @@ def _create_suggestions(
         job.message = "Creating reviewable event suggestions."
         db.commit()
 
+    candidates = build_candidates(duration, scene_times)
+    logger.info(
+        "automatic_suggestions video_id=%s duration_seconds=%s scene_count=%s candidate_count=%s",
+        video.id,
+        round(duration, 3),
+        len(scene_times),
+        len(candidates),
+    )
+
     records = [
         AutomaticEventSuggestion(
             match_id=video.match_id,
@@ -168,7 +179,7 @@ def _create_suggestions(
             label=candidate.label,
             reason=candidate.reason,
         )
-        for candidate in build_candidates(duration, scene_times)
+        for candidate in candidates
     ]
     db.add_all(records)
     db.commit()

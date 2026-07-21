@@ -18,9 +18,17 @@ services:
       - key: DATABASE_URL
         sync: false
       - key: ENABLE_EMBEDDED_WORKER
-        value: "true"
+        value: "false"
       - key: WORKER_POLL_INTERVAL_SECONDS
         value: "5"
+      - key: MAX_CONCURRENT_HEAVY_JOBS
+        value: "1"
+      - key: FFMPEG_THREADS
+        value: "1"
+      - key: HOSTED_MAX_LOCAL_UPLOAD_BYTES
+        value: "262144000"
+      - key: HOSTED_MAX_PROCESSING_VIDEO_BYTES
+        value: "786432000"
       - key: MAX_UPLOAD_BYTES
         value: "5368709120"
       - key: MAX_CHUNK_BYTES

@@ -7,6 +7,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from app.runtime_limits import ffmpeg_thread_count, heavy_operation
+
 VISION_DIR = Path(os.getenv("VISION_FRAME_DIR", "vision_frames"))
 VISION_PROBE_TIMEOUT_SECONDS = int(os.getenv("VISION_PROBE_TIMEOUT_SECONDS", "20"))
 VISION_FRAME_TIMEOUT_SECONDS = int(os.getenv("VISION_FRAME_TIMEOUT_SECONDS", "20"))
@@ -75,6 +77,9 @@ def _extract_frame_with_ffmpeg(video_path: str, timestamp: float, output_path: P
         "-hide_banner",
         "-loglevel",
         "error",
+        "-nostdin",
+        "-threads",
+        ffmpeg_thread_count(),
         "-ss",
         f"{timestamp:.3f}",
         "-i",
@@ -130,63 +135,71 @@ def analyse_video_frames(
     previous_gray: np.ndarray | None = None
     failed_frames = 0
 
-    for index, raw_timestamp in enumerate(timestamps):
-        timestamp = float(raw_timestamp)
-        frame_name = f"frame-{index:05d}-{timestamp:.1f}.jpg"
-        frame_path = output_dir / frame_name
-        frame: np.ndarray | None = None
+    try:
+        with heavy_operation(
+            "vision_analysis",
+            video_asset_id=video_asset_id,
+            duration_seconds=round(duration, 3),
+            frame_count=len(timestamps),
+            interval_seconds=interval_seconds,
+        ):
+            for index, raw_timestamp in enumerate(timestamps):
+                timestamp = float(raw_timestamp)
+                frame_name = f"frame-{index:05d}-{timestamp:.1f}.jpg"
+                frame_path = output_dir / frame_name
+                frame: np.ndarray | None = None
 
-        if capture_available and capture is not None:
-            capture.set(cv2.CAP_PROP_POS_MSEC, timestamp * 1000.0)
-            ok, decoded = capture.read()
-            if ok and decoded is not None:
-                frame = decoded
+                if capture_available and capture is not None:
+                    capture.set(cv2.CAP_PROP_POS_MSEC, timestamp * 1000.0)
+                    ok, decoded = capture.read()
+                    if ok and decoded is not None:
+                        frame = decoded
 
-        if frame is None:
-            frame = _extract_frame_with_ffmpeg(video_path, timestamp, frame_path)
+                if frame is None:
+                    frame = _extract_frame_with_ffmpeg(video_path, timestamp, frame_path)
 
-        if frame is None:
-            failed_frames += 1
-            continue
+                if frame is None:
+                    failed_frames += 1
+                    continue
 
-        height, width = frame.shape[:2]
-        if width > 1280:
-            scale = 1280 / width
-            frame = cv2.resize(frame, (1280, max(1, int(height * scale))))
+                height, width = frame.shape[:2]
+                if width > VISION_ANALYSIS_WIDTH:
+                    scale = VISION_ANALYSIS_WIDTH / width
+                    frame = cv2.resize(frame, (VISION_ANALYSIS_WIDTH, max(1, int(height * scale))))
 
-        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-        green_mask = cv2.inRange(hsv, np.array([28, 35, 25]), np.array([95, 255, 255]))
-        green_ratio = float(np.count_nonzero(green_mask)) / float(green_mask.size or 1)
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        brightness = float(gray.mean()) / 255.0
-        motion = 0.0
-        if previous_gray is not None:
-            resized_previous = cv2.resize(previous_gray, (gray.shape[1], gray.shape[0]))
-            motion = float(cv2.absdiff(gray, resized_previous).mean()) / 255.0
-        previous_gray = gray
-        scoreboard_region, scoreboard_confidence = _scoreboard_candidate(frame)
+                hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+                green_mask = cv2.inRange(hsv, np.array([28, 35, 25]), np.array([95, 255, 255]))
+                green_ratio = float(np.count_nonzero(green_mask)) / float(green_mask.size or 1)
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                brightness = float(gray.mean()) / 255.0
+                motion = 0.0
+                if previous_gray is not None:
+                    resized_previous = cv2.resize(previous_gray, (gray.shape[1], gray.shape[0]))
+                    motion = float(cv2.absdiff(gray, resized_previous).mean()) / 255.0
+                previous_gray = gray
+                scoreboard_region, scoreboard_confidence = _scoreboard_candidate(frame)
 
-        if not frame_path.is_file():
-            saved = cv2.imwrite(str(frame_path), frame, [int(cv2.IMWRITE_JPEG_QUALITY), 86])
-            if not saved:
-                failed_frames += 1
-                continue
+                if not frame_path.is_file():
+                    saved = cv2.imwrite(str(frame_path), frame, [int(cv2.IMWRITE_JPEG_QUALITY), 82])
+                    if not saved:
+                        failed_frames += 1
+                        continue
 
-        observations.append(
-            FrameObservation(
-                timestamp_seconds=round(timestamp, 3),
-                frame_path=str(frame_path),
-                field_green_ratio=round(green_ratio, 4),
-                field_visible=green_ratio >= 0.22,
-                scoreboard_region=scoreboard_region,
-                scoreboard_confidence=round(scoreboard_confidence, 4),
-                brightness=round(brightness, 4),
-                motion_score=round(motion, 4),
-            )
-        )
-
-    if capture is not None:
-        capture.release()
+                observations.append(
+                    FrameObservation(
+                        timestamp_seconds=round(timestamp, 3),
+                        frame_path=str(frame_path),
+                        field_green_ratio=round(green_ratio, 4),
+                        field_visible=green_ratio >= 0.22,
+                        scoreboard_region=scoreboard_region,
+                        scoreboard_confidence=round(scoreboard_confidence, 4),
+                        brightness=round(brightness, 4),
+                        motion_score=round(motion, 4),
+                    )
+                )
+    finally:
+        if capture is not None:
+            capture.release()
     if not observations:
         raise RuntimeError(
             f"No frames could be decoded from the uploaded video. {failed_frames} frame extractions failed."

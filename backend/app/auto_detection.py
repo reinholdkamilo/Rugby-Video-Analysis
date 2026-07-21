@@ -4,6 +4,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from app.runtime_limits import ffmpeg_thread_count, heavy_operation
 from app.models import EventType
 
 PTS_TIME_PATTERN = re.compile(r"pts_time:([0-9]+(?:\.[0-9]+)?)")
@@ -48,7 +49,11 @@ def build_scene_detection_command(
     command = [
         "ffmpeg",
         "-hide_banner",
+        "-loglevel",
+        "error",
         "-nostdin",
+        "-threads",
+        ffmpeg_thread_count(),
     ]
     if max_scan_seconds > 0:
         command.extend(["-t", str(max_scan_seconds)])
@@ -78,13 +83,14 @@ def detect_scene_changes(
 
     command = build_scene_detection_command(source, threshold)
     try:
-        completed = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=timeout_seconds,
-            check=False,
-        )
+        with heavy_operation("automatic_detection", source=video_path, timeout_seconds=timeout_seconds):
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=timeout_seconds,
+                check=False,
+            )
     except subprocess.TimeoutExpired as exc:
         raise TimeoutError from exc
     if completed.returncode != 0:

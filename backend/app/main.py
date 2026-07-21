@@ -26,6 +26,7 @@ from app.api.uploads import router as uploads_router
 from app.api.vision import router as vision_router
 from app.api.workspace import router as workspace_router
 from app.database import Base, engine
+from app.runtime_limits import embedded_worker_enabled
 from app.worker import start_embedded_worker
 
 logger = logging.getLogger("rugby-video-analysis")
@@ -97,8 +98,10 @@ def _ensure_database_schema() -> None:
 async def lifespan(_: FastAPI):
     _ensure_database_schema()
     worker = None
-    if os.getenv("ENABLE_EMBEDDED_WORKER", "true").lower() in {"1", "true", "yes"}:
+    if embedded_worker_enabled():
         worker = start_embedded_worker()
+    else:
+        logger.info("Embedded video worker disabled for this runtime.")
     yield
     if worker is not None:
         thread, stop_event = worker

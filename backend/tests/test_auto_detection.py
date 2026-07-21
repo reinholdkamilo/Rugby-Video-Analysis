@@ -25,8 +25,11 @@ def test_scene_detection_command_samples_and_scales_video() -> None:
         max_scan_seconds=120,
     )
 
-    assert command[:7] == ["ffmpeg", "-hide_banner", "-nostdin", "-t", "120", "-i", "match.mp4"]
+    assert command[:2] == ["ffmpeg", "-hide_banner"]
+    assert "-nostdin" in command
+    assert command[command.index("-threads") + 1] == "1"
     assert command[command.index("-t") + 1] == "120"
+    assert command[command.index("-i") + 1] == "match.mp4"
     assert command[command.index("-vf") + 1] == "fps=1,scale=480:-2,select='gt(scene,0.35)',showinfo"
 
 
@@ -41,7 +44,10 @@ def test_scene_detection_command_accepts_remote_source() -> None:
         max_scan_seconds=0,
     )
 
-    assert command[:5] == ["ffmpeg", "-hide_banner", "-nostdin", "-i", source]
+    assert command[:2] == ["ffmpeg", "-hide_banner"]
+    assert "-nostdin" in command
+    assert command[command.index("-threads") + 1] == "1"
+    assert command[command.index("-i") + 1] == source
     assert "-t" not in command
 
 

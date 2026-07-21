@@ -3,6 +3,7 @@ import subprocess
 from pathlib import Path
 
 from app.object_storage import create_presigned_get_url, is_object_uri, materialize, persist_generated_file
+from app.runtime_limits import ffmpeg_thread_count, heavy_operation
 
 CLIP_DIR = Path(os.getenv("CLIP_DIR", "clips"))
 CLIP_SOURCE_CACHE_DIR = Path(os.getenv("OBJECT_CACHE_DIR", "cache/object_storage")) / "clip_sources"
@@ -25,6 +26,12 @@ def generate_event_clip(source_path: str, event_id: int, start_seconds: float, e
     output_path = CLIP_DIR / f"event-{event_id}.mp4"
     command = [
         "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-nostdin",
+        "-threads",
+        ffmpeg_thread_count(),
         "-y",
         "-ss",
         f"{start_seconds:.3f}",
@@ -51,7 +58,13 @@ def generate_event_clip(source_path: str, event_id: int, start_seconds: float, e
         str(output_path),
     ]
     try:
-        result = subprocess.run(command, capture_output=True, text=True, check=False, timeout=CLIP_TIMEOUT_SECONDS)
+        with heavy_operation(
+            "clip_generation",
+            event_id=event_id,
+            duration_seconds=round(duration, 3),
+            source=source_path,
+        ):
+            result = subprocess.run(command, capture_output=True, text=True, check=False, timeout=CLIP_TIMEOUT_SECONDS)
     except subprocess.TimeoutExpired as exc:
         raise RuntimeError("FFmpeg timed out while generating the event clip.") from exc
     if result.returncode != 0:
@@ -61,4 +74,6 @@ def generate_event_clip(source_path: str, event_id: int, start_seconds: float, e
         f"clips/event-{event_id}.mp4",
         "video/mp4",
     )
+    if stored_path != str(output_path):
+        output_path.unlink(missing_ok=True)
     return stored_path, duration

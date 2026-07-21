@@ -1,16 +1,6 @@
-const configuredApiUrl = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "");
+export const apiUrl = "/backend";
 
-export const apiUrl =
-  !configuredApiUrl ||
-  configuredApiUrl === "http://localhost:8000" ||
-  configuredApiUrl.includes(".app.github.dev")
-    ? "/backend"
-    : configuredApiUrl;
-
-const directUploadApiUrl = (
-  process.env.NEXT_PUBLIC_UPLOAD_API_URL ||
-  apiUrl
-).replace(/\/$/, "");
+const directUploadApiUrl = apiUrl;
 
 export type Organisation = { id: number; name: string; created_at: string };
 export type Team = { id: number; organisation_id: number; name: string; age_group: string | null; created_at: string };

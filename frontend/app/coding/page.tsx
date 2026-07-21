@@ -212,8 +212,87 @@ function formatTime(seconds: number) {
   return `${String(minutes).padStart(2, "0")}:${String(remaining).padStart(2, "0")}`;
 }
 
+const FRIENDLY_KEY_CODES: Record<string, string> = {
+  " ": "Space",
+  space: "Space",
+  left: "ArrowLeft",
+  right: "ArrowRight",
+  up: "ArrowUp",
+  down: "ArrowDown",
+  arrowleft: "ArrowLeft",
+  arrowright: "ArrowRight",
+  arrowup: "ArrowUp",
+  arrowdown: "ArrowDown",
+  "`": "Backquote",
+  backquote: "Backquote",
+  "-": "Minus",
+  minus: "Minus",
+  "=": "Equal",
+  equal: "Equal",
+  "[": "BracketLeft",
+  bracketleft: "BracketLeft",
+  "]": "BracketRight",
+  bracketright: "BracketRight",
+  "\\": "Backslash",
+  backslash: "Backslash",
+  ";": "Semicolon",
+  semicolon: "Semicolon",
+  "'": "Quote",
+  quote: "Quote",
+  ",": "Comma",
+  comma: "Comma",
+  ".": "Period",
+  period: "Period",
+  "/": "Slash",
+  slash: "Slash",
+  delete: "Delete",
+  backspace: "Backspace",
+  enter: "Enter",
+  escape: "Escape",
+  esc: "Escape",
+  tab: "Tab",
+};
+
+const MODIFIER_ALIASES: Record<string, string> = {
+  alt: "Alt",
+  option: "Alt",
+  ctrl: "Ctrl",
+  control: "Ctrl",
+  shift: "Shift",
+  meta: "Meta",
+  cmd: "Meta",
+  command: "Meta",
+};
+
+function normaliseShortcutKeyPart(rawPart: string) {
+  const part = rawPart.trim();
+  if (!part) return "";
+  const lower = part.toLowerCase();
+  if (FRIENDLY_KEY_CODES[lower]) return FRIENDLY_KEY_CODES[lower];
+  if (/^key[a-z]$/i.test(part)) return `Key${part.slice(-1).toUpperCase()}`;
+  if (/^digit[0-9]$/i.test(part)) return `Digit${part.slice(-1)}`;
+  if (/^[a-z]$/i.test(part)) return `Key${part.toUpperCase()}`;
+  if (/^[0-9]$/.test(part)) return `Digit${part}`;
+  if (/^f([1-9]|1[0-2])$/i.test(part)) return part.toUpperCase();
+  return part;
+}
+
 function normaliseShortcut(shortcut: string) {
-  return shortcut.split("+").filter(Boolean).join("+");
+  const trimmed = shortcut.trim();
+  if (!trimmed || trimmed.toLowerCase() === "unassigned") return "Unassigned";
+  const modifiers: string[] = [];
+  let key = "";
+  for (const rawPart of trimmed.split("+")) {
+    const part = rawPart.trim();
+    const modifier = MODIFIER_ALIASES[part.toLowerCase()];
+    if (modifier) {
+      if (!modifiers.includes(modifier)) modifiers.push(modifier);
+      continue;
+    }
+    key = normaliseShortcutKeyPart(part);
+  }
+  const orderedModifiers = ["Ctrl", "Alt", "Shift", "Meta"].filter((modifier) => modifiers.includes(modifier));
+  return [...orderedModifiers, key].filter(Boolean).join("+") || "Unassigned";
 }
 
 function isModifierOnlyKey(code: string) {
@@ -231,7 +310,7 @@ function shortcutFromKeyboardEvent(event: KeyboardEvent | React.KeyboardEvent) {
 }
 
 function shortcutLabel(shortcut: string) {
-  return shortcut
+  return normaliseShortcut(shortcut)
     .replace("Alt", "Option")
     .replace("Meta", "Command")
     .replace("Ctrl", "Control")
@@ -245,6 +324,9 @@ function shortcutLabel(shortcut: string) {
     .replace("Backquote", "`")
     .replace("Minus", "-")
     .replace("Equal", "=")
+    .replace("Semicolon", ";")
+    .replace("Quote", "'")
+    .replace("Slash", "/")
     .replace("Comma", ",")
     .replace("Period", ".")
     .replace("Space", "Space");
@@ -354,7 +436,7 @@ function loadShortcutBindings() {
         label: savedLabel,
         group: binding.group,
         custom: binding.custom,
-        shortcut: savedBinding?.shortcut || binding.shortcut,
+        shortcut: normaliseShortcut(savedBinding?.shortcut || binding.shortcut),
         team: (savedBinding?.team as ShortcutBinding["team"]) || binding.team,
       };
     });
@@ -369,7 +451,7 @@ function loadShortcutBindings() {
         id: String(item.id),
         label: String(item.label),
         group: item.group === "zone" ? "zone" as const : "event" as const,
-        shortcut: String(item.shortcut || "Unassigned"),
+        shortcut: normaliseShortcut(String(item.shortcut || "Unassigned")),
         eventType: cleanEventType(item.eventType, String(item.outcome || item.label)),
         duration: Number(item.duration || 8),
         category: (item.category as EventCategory) || "attack",
@@ -503,7 +585,7 @@ export default function CodingWorkspace() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     window.localStorage.setItem(SHORTCUT_STORAGE_KEY, JSON.stringify(shortcuts.map(({ id, shortcut, custom, label, group, duration, category, eventType, outcome, team, fieldZone, notes, variant, zoneLength }) => (
-      { id, shortcut, custom, label, group, duration, category, eventType, outcome, team, fieldZone, notes, variant, zoneLength }
+      { id, shortcut: normaliseShortcut(shortcut), custom, label, group, duration, category, eventType, outcome, team, fieldZone, notes, variant, zoneLength }
     ))));
   }, [shortcuts]);
 
@@ -637,11 +719,15 @@ export default function CodingWorkspace() {
 
   const shortcutConflict = useMemo(() => {
     const counts = shortcuts.reduce<Record<string, number>>((items, shortcut) => {
-      if (!shortcut.shortcut || shortcut.shortcut === "Unassigned") return items;
-      items[shortcut.shortcut] = (items[shortcut.shortcut] ?? 0) + 1;
+      const normalisedShortcut = normaliseShortcut(shortcut.shortcut);
+      if (!normalisedShortcut || normalisedShortcut === "Unassigned") return items;
+      items[normalisedShortcut] = (items[normalisedShortcut] ?? 0) + 1;
       return items;
     }, {});
-    return (shortcut: string) => Boolean(shortcut && shortcut !== "Unassigned" && counts[shortcut] > 1);
+    return (shortcut: string) => {
+      const normalisedShortcut = normaliseShortcut(shortcut);
+      return Boolean(normalisedShortcut && normalisedShortcut !== "Unassigned" && counts[normalisedShortcut] > 1);
+    };
   }, [shortcuts]);
 
   const quickMatrixColumns = useMemo(() => {
@@ -755,7 +841,7 @@ export default function CodingWorkspace() {
 
   const createEventFromBinding = useCallback((binding: ShortcutBinding) => {
     if (!binding.eventType) return;
-    void createEvent(binding.eventType, QUICK_CODE_CAPTURE_SECONDS, {
+    void createEvent(binding.eventType, binding.duration || QUICK_CODE_CAPTURE_SECONDS, {
       outcome: binding.outcome || (binding.custom ? binding.label : undefined),
       notes: binding.notes,
       fieldZone: binding.fieldZone,
@@ -827,7 +913,7 @@ export default function CodingWorkspace() {
         return;
       }
       const shortcut = shortcutFromKeyboardEvent(event);
-      const binding = shortcuts.find((item) => item.shortcut === shortcut);
+      const binding = shortcuts.find((item) => normaliseShortcut(item.shortcut) === shortcut);
       if (!binding) return;
       event.preventDefault();
       if (binding.group === "event" && binding.eventType) {
@@ -844,10 +930,11 @@ export default function CodingWorkspace() {
   }, [createEventFromBinding, editingShortcutId, lastCodedEvent, runVideoCommand, shortcuts, undoLastCodedEvent]);
 
   const updateShortcut = useCallback((bindingId: string, shortcut: string) => {
-    const duplicate = shortcuts.some((binding) => binding.id !== bindingId && binding.shortcut === shortcut);
-    setShortcuts((current) => current.map((binding) => binding.id === bindingId ? { ...binding, shortcut } : binding));
+    const normalisedShortcut = normaliseShortcut(shortcut);
+    const duplicate = shortcuts.some((binding) => binding.id !== bindingId && normaliseShortcut(binding.shortcut) === normalisedShortcut);
+    setShortcuts((current) => current.map((binding) => binding.id === bindingId ? { ...binding, shortcut: normalisedShortcut } : binding));
     setEditingShortcutId(null);
-    setNotice(duplicate ? `${shortcutLabel(shortcut)} is mapped to more than one action.` : "Keyboard shortcut updated.");
+    setNotice(duplicate ? `${shortcutLabel(normalisedShortcut)} is mapped to more than one action.` : "Keyboard shortcut updated.");
   }, [shortcuts]);
 
   useEffect(() => {
@@ -1065,7 +1152,7 @@ export default function CodingWorkspace() {
       id,
       label,
       group: "event",
-      shortcut: String(form.get("shortcut") || "").trim() || "Unassigned",
+      shortcut: normaliseShortcut(String(form.get("shortcut") || "").trim() || "Unassigned"),
       eventType: cleanEventType(form.get("event_type"), outcome || label),
       duration: Number(form.get("duration") || QUICK_CODE_CAPTURE_SECONDS),
       category: String(form.get("category") || "attack") as EventCategory,
@@ -1095,7 +1182,7 @@ export default function CodingWorkspace() {
       id: `custom_zone_${Date.now()}`,
       label,
       group: "zone",
-      shortcut: String(form.get("shortcut") || "").trim() || "Unassigned",
+      shortcut: normaliseShortcut(String(form.get("shortcut") || "").trim() || "Unassigned"),
       fieldZone,
       zoneLength: String(form.get("zone_length") || "").trim() || undefined,
       notes: String(form.get("notes") || "").trim() || undefined,

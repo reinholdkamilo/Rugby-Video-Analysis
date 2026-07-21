@@ -1378,7 +1378,8 @@ export default function CodingWorkspace() {
 
   async function submitCustomEvent(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     const created = await createEvent(String(form.get("event_type")) as EventType, Number(form.get("duration") || QUICK_CODE_CAPTURE_SECONDS), {
       outcome: String(form.get("outcome") || "").trim(),
       notes: String(form.get("notes") || "").trim(),
@@ -1386,7 +1387,7 @@ export default function CodingWorkspace() {
       fieldZone: String(form.get("field_zone") || "").trim(),
       team: String(form.get("team") || "selected") as EventTeam | "selected",
     });
-    if (created) event.currentTarget.reset();
+    if (created) formElement.reset();
   }
 
   async function submitEventEdit(event: FormEvent<HTMLFormElement>) {

@@ -389,6 +389,12 @@ function zoneValue(binding?: Pick<ShortcutBinding, "label" | "fieldZone" | "zone
   return binding.zoneLength ? `${label} - ${binding.zoneLength}` : label;
 }
 
+function mergeTimelineEvents(current: TimelineEvent[], incoming: TimelineEvent[]) {
+  const byId = new Map(current.map((event) => [event.id, event]));
+  for (const event of incoming) byId.set(event.id, event);
+  return [...byId.values()].sort((a, b) => a.start_seconds - b.start_seconds || a.id - b.id);
+}
+
 function categoryLabel(category?: EventCategory) {
   return (category === "core" ? "general" : category ?? "event").replace("_", " ");
 }
@@ -888,11 +894,16 @@ export default function CodingWorkspace() {
         field_zone: extras?.fieldZone || zoneValue(activeZone) || null,
         clip_requested: true,
       });
+      setEvents((current) => mergeTimelineEvents(current, [created]));
       try {
         const refreshedEvents = await codingApi.events(selectedMatchId, selectedVideoId);
-        setEvents(refreshedEvents);
+        setEvents((current) => (
+          refreshedEvents.some((event) => event.id === created.id)
+            ? refreshedEvents
+            : mergeTimelineEvents(current, [created])
+        ));
       } catch {
-        setEvents((current) => [...current, created].sort((a, b) => a.start_seconds - b.start_seconds));
+        setEvents((current) => mergeTimelineEvents(current, [created]));
       }
       setSelectedEventId(created.id);
       const zoneText = created.field_zone ? ` in ${created.field_zone}` : "";
@@ -1997,6 +2008,7 @@ export default function CodingWorkspace() {
             <input name="duration" type="number" min="1" max="300" defaultValue={QUICK_CODE_CAPTURE_SECONDS} className={inputClass} data-design-id="coding-manual-duration" data-design-label="Manual duration field" />
             <textarea name="notes" placeholder="Analyst notes" className={`${inputClass} md:col-span-2`} data-design-id="coding-manual-notes" data-design-label="Manual notes field" />
             <button type="submit" disabled={busy || !selectedVideoId} className="rounded-lg bg-emerald-400 px-4 py-2 font-bold text-slate-950 disabled:opacity-40" data-design-id="coding-manual-add-button" data-design-label="Manual add event button">Add event</button>
+            {!selectedVideoId ? <p className="text-xs font-bold text-amber-300">Select a source video before manual codes can be saved.</p> : null}
             </form>
           </div>
 

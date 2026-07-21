@@ -20,6 +20,17 @@ def test_hosted_private_mode_blocks_api_without_password(monkeypatch) -> None:
     assert response.headers["www-authenticate"].startswith("Basic")
 
 
+def test_hosted_runtime_is_public_without_explicit_private_mode(monkeypatch) -> None:
+    monkeypatch.delenv("APP_PRIVATE_MODE", raising=False)
+    monkeypatch.delenv("APP_ACCESS_PASSWORD", raising=False)
+    monkeypatch.setenv("RENDER", "true")
+    monkeypatch.setenv("APP_ENV", "staging")
+    with TestClient(app) as client:
+        response = client.get("/api/organisations")
+
+    assert response.status_code == 200
+
+
 def test_hosted_private_mode_allows_health_without_password(monkeypatch) -> None:
     monkeypatch.setenv("APP_PRIVATE_MODE", "true")
     monkeypatch.delenv("APP_ACCESS_PASSWORD", raising=False)

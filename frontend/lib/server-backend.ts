@@ -12,16 +12,18 @@ function isPrivateBackendTarget(url: string) {
   );
 }
 
-export function backendBaseUrl() {
+export function backendBaseUrls() {
   const configuredBackendUrl = process.env.BACKEND_INTERNAL_URL?.replace(/\/$/, "");
-  return (
-    process.env.VERCEL && (!configuredBackendUrl || isPrivateBackendTarget(configuredBackendUrl))
-      ? PUBLIC_BACKEND_URL
-      : configuredBackendUrl ?? "http://127.0.0.1:8000"
-  ).replace(/\/$/, "");
+  if (process.env.VERCEL) {
+    if (!configuredBackendUrl || isPrivateBackendTarget(configuredBackendUrl)) return [PUBLIC_BACKEND_URL];
+    return [configuredBackendUrl, PUBLIC_BACKEND_URL].filter((url, index, urls) => urls.indexOf(url) === index);
+  }
+  return [configuredBackendUrl ?? "http://127.0.0.1:8000"];
 }
 
 export function backendAuthHeader() {
+  const privateMode = process.env.APP_PRIVATE_MODE?.toLowerCase();
+  if (!privateMode || !["1", "true", "yes", "on"].includes(privateMode)) return null;
   const password = process.env.APP_ACCESS_PASSWORD;
   if (!password) return null;
   const username = process.env.APP_ACCESS_USERNAME || "coach";
@@ -49,34 +51,57 @@ function responseHeaders(response: Response) {
   return headers;
 }
 
+function shouldStreamResponse(request: NextRequest, backendPath: string) {
+  return request.headers.has("range") || backendPath.startsWith("/media/");
+}
+
 export async function proxyBackendRequest(
   request: NextRequest,
   backendPath: string,
   options: { timeoutMs?: number } = {},
 ) {
   const url = new URL(request.url);
-  const target = `${backendBaseUrl()}${backendPath}${url.search}`;
   const method = request.method.toUpperCase();
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 60_000);
+  const body = method === "GET" || method === "HEAD" ? undefined : await request.arrayBuffer();
+  const backendOrigins = backendBaseUrls();
+  const errors: string[] = [];
 
-  try {
-    const response = await fetch(target, {
-      method,
-      headers: forwardedHeaders(request),
-      body: method === "GET" || method === "HEAD" ? undefined : await request.arrayBuffer(),
-      cache: "no-store",
-      signal: controller.signal,
-    });
+  for (const backendOrigin of backendOrigins) {
+    const target = `${backendOrigin}${backendPath}${url.search}`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 60_000);
 
-    return new NextResponse(response.body, {
-      status: response.status,
-      headers: responseHeaders(response),
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown backend proxy failure";
-    return NextResponse.json({ detail: `Backend proxy failed: ${message}` }, { status: 502 });
-  } finally {
-    clearTimeout(timeout);
+    try {
+      const response = await fetch(target, {
+        method,
+        headers: forwardedHeaders(request),
+        body,
+        cache: "no-store",
+        signal: controller.signal,
+      });
+
+      const headers = responseHeaders(response);
+      headers.set("x-rugby-backend-origin", backendOrigin);
+      const responseBody = shouldStreamResponse(request, backendPath)
+        ? response.body
+        : await response.arrayBuffer();
+      return new NextResponse(responseBody, {
+        status: response.status,
+        headers,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown backend proxy failure";
+      errors.push(`${backendOrigin}: ${message}`);
+    } finally {
+      clearTimeout(timeout);
+    }
   }
+
+  return NextResponse.json(
+    {
+      detail: `Backend proxy failed: ${errors.join("; ")}`,
+      attempted_origins: backendOrigins,
+    },
+    { status: 502 },
+  );
 }

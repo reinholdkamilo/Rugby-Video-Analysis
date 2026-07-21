@@ -82,6 +82,12 @@ export async function proxyBackendRequest(
 
       const headers = responseHeaders(response);
       headers.set("x-rugby-backend-origin", backendOrigin);
+      if (backendPath === "/health" && response.ok) {
+        return NextResponse.json(
+          { status: "healthy", service: "backend", proxy: "reachable" },
+          { status: response.status, headers },
+        );
+      }
       const responseBody = shouldStreamResponse(request, backendPath)
         ? response.body
         : await response.arrayBuffer();

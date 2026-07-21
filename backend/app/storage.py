@@ -4,13 +4,15 @@ from uuid import uuid4
 
 from fastapi import UploadFile
 
+from app.runtime_limits import max_local_upload_bytes
+
 ALLOWED_VIDEO_TYPES = {
     "video/mp4",
     "video/quicktime",
     "video/x-msvideo",
     "video/x-matroska",
 }
-MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(5 * 1024 * 1024 * 1024)))
+MAX_UPLOAD_BYTES = max_local_upload_bytes()
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "uploads"))
 
 

@@ -3,6 +3,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from app.runtime_limits import ffmpeg_thread_count, heavy_operation
+
 
 @dataclass(frozen=True)
 class VideoMetadata:
@@ -38,18 +40,19 @@ def _parse_frame_rate(value: str | None) -> float:
 
 
 def probe_video(video_path: str) -> VideoMetadata:
-    result = _run(
-        [
-            "ffprobe",
-            "-v",
-            "error",
-            "-print_format",
-            "json",
-            "-show_format",
-            "-show_streams",
-            video_path,
-        ]
-    )
+    with heavy_operation("ffprobe", source=video_path):
+        result = _run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-print_format",
+                "json",
+                "-show_format",
+                "-show_streams",
+                video_path,
+            ]
+        )
     payload = json.loads(result.stdout)
     streams = payload.get("streams", [])
     video_stream = next((stream for stream in streams if stream.get("codec_type") == "video"), None)
@@ -72,21 +75,28 @@ def create_thumbnail(video_path: str, output_path: str, duration_seconds: float)
     destination = Path(output_path)
     destination.parent.mkdir(parents=True, exist_ok=True)
     seek_seconds = max(0.0, min(duration_seconds * 0.1, 30.0))
-    _run(
-        [
-            "ffmpeg",
-            "-y",
-            "-ss",
-            f"{seek_seconds:.3f}",
-            "-i",
-            video_path,
-            "-frames:v",
-            "1",
-            "-vf",
-            "scale=960:-2",
-            "-q:v",
-            "3",
-            str(destination),
-        ]
-    )
+    with heavy_operation("thumbnail", source=video_path, seek_seconds=round(seek_seconds, 3)):
+        _run(
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-nostdin",
+                "-threads",
+                ffmpeg_thread_count(),
+                "-y",
+                "-ss",
+                f"{seek_seconds:.3f}",
+                "-i",
+                video_path,
+                "-frames:v",
+                "1",
+                "-vf",
+                "scale=960:-2",
+                "-q:v",
+                "3",
+                str(destination),
+            ]
+        )
     return str(destination)

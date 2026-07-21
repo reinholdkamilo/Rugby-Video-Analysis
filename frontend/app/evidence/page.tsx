@@ -2,7 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
-import { EvidenceItem, EvidenceType, Match, Team, TimelineEvent, VideoAsset, api, clipUrl } from "@/lib/api";
+import { EvidenceItem, EvidenceType, Match, Team, TimelineEvent, VideoAsset, api, clipUrl, evidenceClipUrl } from "@/lib/api";
 import { sourceVideoUrl } from "@/lib/coding-api";
 
 const EVIDENCE_TYPES: { value: EvidenceType; label: string }[] = [
@@ -202,8 +202,72 @@ export default function EvidenceLibraryPage() {
     }
   }
 
+  async function deleteAllEvidence() {
+    if (!selectedMatchId) return;
+    const confirmed = window.confirm("Delete all evidence items for this match? This also clears generated evidence clips, but keeps the match, source video and timeline events.");
+    if (!confirmed) return;
+    setBusy(true);
+    try {
+      const result = await api.evidence.deleteAll(selectedMatchId);
+      setItems([]);
+      setEvents((current) => current.map((timelineEvent) => ({ ...timelineEvent, clip: null })));
+      setNotice(`Deleted ${result.evidence_items_deleted} evidence item${result.evidence_items_deleted === 1 ? "" : "s"} and ${result.clips_deleted} clip${result.clips_deleted === 1 ? "" : "s"}.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Unable to delete evidence items.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function updateEvidenceStatus(item: EvidenceItem, status: string) {
+    setBusy(true);
+    try {
+      const updated = await api.evidence.update(item.id, {
+        status,
+        approved_for_training: status === "confirmed" ? true : item.approved_for_training,
+        trust_notes: status === "rejected" ? "Evidence marked incorrect by analyst." : item.trust_notes,
+      });
+      setItems((current) => current.map((currentItem) => currentItem.id === updated.id ? updated : currentItem));
+      setNotice(`${item.label} marked ${status.replace("_", " ")}.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Unable to update evidence status.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function regenerateEvidenceClip(item: EvidenceItem, linkedEvent: TimelineEvent | undefined) {
+    if (!linkedEvent) {
+      setNotice("Link this evidence item to a timeline event before generating a clip.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const clip = await api.timeline.regenerateClip(linkedEvent.id);
+      setEvents((current) => current.map((timelineEvent) => (
+        timelineEvent.id === linkedEvent.id ? { ...timelineEvent, clip } : timelineEvent
+      )));
+      const updatedItem = await api.evidence.update(item.id, {
+        evidence_type: "clip",
+        source_uri: clip.file_path,
+        timestamp_seconds: linkedEvent.start_seconds,
+        trust_notes: "Evidence clip regenerated from linked timeline timing.",
+      });
+      setItems((current) => current.map((currentItem) => currentItem.id === updatedItem.id ? updatedItem : currentItem));
+      setNotice("Evidence clip regenerated.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Unable to regenerate evidence clip.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function itemMediaUrl(item: EvidenceItem, linkedEvent?: TimelineEvent) {
-    if (linkedEvent?.clip) return clipUrl(linkedEvent.clip);
+    if (item.evidence_type === "clip") {
+      if (linkedEvent?.clip) return clipUrl(linkedEvent.clip);
+      if (item.source_uri) return evidenceClipUrl(item.source_uri);
+      return null;
+    }
     if (item.source_uri && /^https?:\/\//i.test(item.source_uri)) return item.source_uri;
     if (item.evidence_type === "video" && item.video_asset_id) return sourceVideoUrl(item.video_asset_id);
     return null;
@@ -334,9 +398,14 @@ export default function EvidenceLibraryPage() {
                 <h2 className="text-lg font-bold">Evidence items</h2>
                 <p className="mt-1 text-sm text-slate-500">{selectedVideo ? selectedVideo.original_filename : "All match evidence"}</p>
               </div>
-              <button type="button" onClick={() => selectedMatchId && void loadMatchEvidence(selectedMatchId)} disabled={busy || !selectedMatchId} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-bold disabled:opacity-50">
-                Refresh
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={() => selectedMatchId && void loadMatchEvidence(selectedMatchId)} disabled={busy || !selectedMatchId} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-bold disabled:opacity-50">
+                  Refresh
+                </button>
+                <button type="button" onClick={() => void deleteAllEvidence()} disabled={busy || !selectedMatchId || !items.length} className="rounded-lg border border-rose-300 px-3 py-2 text-sm font-bold text-rose-700 disabled:opacity-50">
+                  Delete all
+                </button>
+              </div>
             </div>
             <div className="mb-4 grid gap-3 md:grid-cols-2">
               <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className={inputClass}>
@@ -381,6 +450,11 @@ export default function EvidenceLibraryPage() {
                     {item.source_uri ? <p className="mt-2 break-all text-sm text-slate-600">Source: {item.source_uri}</p> : null}
                     {mediaUrl ? (
                       <video key={`${item.id}-${linkedEvent?.clip?.id ?? "source"}`} controls preload="metadata" src={mediaUrl} className="mt-3 aspect-video w-full rounded-lg border border-slate-200 bg-black" />
+                    ) : item.evidence_type === "clip" ? (
+                      <div className="mt-3 rounded-lg border border-dashed border-amber-300 bg-amber-50 p-4 text-sm text-amber-800">
+                        This evidence item does not have a generated event clip yet.
+                        {linkedEvent ? " Regenerate it from the linked event timing." : " Link it to a timeline event to generate a clip."}
+                      </div>
                     ) : (
                       <div className="mt-3 rounded-lg border border-dashed border-slate-300 p-4 text-sm text-slate-500">No playable media is linked yet.</div>
                     )}
@@ -400,6 +474,20 @@ export default function EvidenceLibraryPage() {
                     {item.notes ? <p className="mt-2 text-sm text-slate-600">{item.notes}</p> : null}
                     {item.trust_notes ? <p className="mt-2 text-sm text-amber-700">Trust note: {item.trust_notes}</p> : null}
                     <div className="mt-4 flex flex-wrap gap-2">
+                      <button type="button" onClick={() => void updateEvidenceStatus(item, "confirmed")} disabled={busy} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-bold text-slate-700 disabled:opacity-50">
+                        Confirm
+                      </button>
+                      <button type="button" onClick={() => void updateEvidenceStatus(item, "unconfirmed")} disabled={busy} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-bold text-slate-700 disabled:opacity-50">
+                        Needs review
+                      </button>
+                      <button type="button" onClick={() => void updateEvidenceStatus(item, "rejected")} disabled={busy} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-bold text-slate-700 disabled:opacity-50">
+                        Incorrect
+                      </button>
+                      {item.evidence_type === "clip" ? (
+                        <button type="button" onClick={() => void regenerateEvidenceClip(item, linkedEvent)} disabled={busy || !linkedEvent} className="rounded-lg border border-sky-300 px-3 py-2 text-sm font-bold text-sky-700 disabled:opacity-50">
+                          Regenerate clip
+                        </button>
+                      ) : null}
                       <button type="button" onClick={() => void toggleTrainingApproval(item)} disabled={busy} className="rounded-lg border border-emerald-600 px-3 py-2 text-sm font-bold text-emerald-700 disabled:opacity-50">
                         {item.approved_for_training ? "Remove approval" : "Approve for training"}
                       </button>

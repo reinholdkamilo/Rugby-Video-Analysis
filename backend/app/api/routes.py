@@ -358,6 +358,36 @@ def delete_stored_evidence_clips(
     return {"clips_deleted": len(clips), "evidence_items_updated": evidence_result.rowcount or 0}
 
 
+@router.delete("/evidence-items")
+def delete_evidence_items(
+    match_id: int = Query(...),
+    confirm: bool = Query(default=False),
+    db: Session = Depends(get_db),
+) -> dict[str, int]:
+    if not confirm:
+        raise HTTPException(status_code=422, detail="Pass confirm=true to delete match evidence.")
+    if db.get(Match, match_id) is None:
+        raise HTTPException(status_code=404, detail="Match not found.")
+
+    items = list(db.scalars(select(EvidenceItem).where(EvidenceItem.match_id == match_id)))
+    event_ids = {
+        item.timeline_event_id
+        for item in items
+        if item.evidence_type == EvidenceType.clip and item.timeline_event_id is not None
+    }
+    clip_paths = list(db.scalars(select(EventClip.file_path).where(EventClip.event_id.in_(event_ids)))) if event_ids else []
+
+    if event_ids:
+        db.execute(delete(EventClip).where(EventClip.event_id.in_(event_ids)))
+    db.execute(delete(EvidenceItem).where(EvidenceItem.match_id == match_id))
+    db.commit()
+
+    for clip_path in clip_paths:
+        _delete_media_reference(clip_path)
+
+    return {"evidence_items_deleted": len(items), "clips_deleted": len(clip_paths)}
+
+
 @router.patch("/evidence-items/{item_id}", response_model=EvidenceItemRead)
 def update_evidence_item(
     item_id: int,
@@ -383,8 +413,23 @@ def delete_evidence_item(item_id: int, db: Session = Depends(get_db)) -> None:
     item = db.get(EvidenceItem, item_id)
     if item is None:
         raise HTTPException(status_code=404, detail="Evidence item not found.")
+    clip_path = None
+    if item.evidence_type == EvidenceType.clip and item.timeline_event_id is not None:
+        other_clip_evidence = db.scalar(
+            select(EvidenceItem.id)
+            .where(EvidenceItem.id != item.id)
+            .where(EvidenceItem.timeline_event_id == item.timeline_event_id)
+            .where(EvidenceItem.evidence_type == EvidenceType.clip)
+        )
+        if other_clip_evidence is None:
+            clip = db.scalar(select(EventClip).where(EventClip.event_id == item.timeline_event_id))
+            if clip is not None:
+                clip_path = clip.file_path
+                db.delete(clip)
     db.delete(item)
     db.commit()
+    if clip_path:
+        _delete_media_reference(clip_path)
 
 
 @router.post("/analysis-jobs", response_model=AnalysisJobRead, status_code=status.HTTP_201_CREATED)

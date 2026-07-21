@@ -421,6 +421,67 @@ def test_delete_stored_evidence_clips_clears_clip_media_without_deleting_events(
     )
 
 
+def test_delete_match_evidence_removes_items_and_clip_media_without_deleting_events(monkeypatch) -> None:
+    unique = uuid4().hex[:8]
+    deleted_paths: list[str] = []
+    monkeypatch.setattr("app.api.routes._delete_media_reference", deleted_paths.append)
+    with TestClient(app) as client:
+        organisation_id = client.post(
+            "/api/organisations", json={"name": f"Delete Evidence {unique}"}
+        ).json()["id"]
+        home_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"Home {unique}"},
+        ).json()["id"]
+        away_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"Away {unique}"},
+        ).json()["id"]
+        match_id = client.post(
+            "/api/matches",
+            json={
+                "organisation_id": organisation_id,
+                "home_team_id": home_id,
+                "away_team_id": away_id,
+                "match_date": "2026-07-12",
+            },
+        ).json()["id"]
+        video = client.post(
+            f"/api/matches/{match_id}/videos",
+            files={"file": ("delete-evidence-source.mp4", b"not a real video", "video/mp4")},
+        ).json()
+        event = client.post(
+            "/api/timeline-events",
+            json={
+                "match_id": match_id,
+                "video_asset_id": video["id"],
+                "event_type": "carry",
+                "team": "home",
+                "start_seconds": 15,
+                "end_seconds": 30,
+                "outcome": "carry",
+                "clip_requested": False,
+            },
+        ).json()
+        with SessionLocal() as db:
+            db.add(EventClip(event_id=event["id"], file_path="clips/evidence-delete.mp4", duration_seconds=15))
+            db.commit()
+
+        missing_confirm = client.delete(f"/api/evidence-items?match_id={match_id}")
+        deleted = client.delete(f"/api/evidence-items?match_id={match_id}&confirm=true")
+        remaining_evidence = client.get(f"/api/evidence-items?match_id={match_id}").json()
+        refreshed_event = client.get(f"/api/timeline-events/{event['id']}").json()
+
+    assert missing_confirm.status_code == 422
+    assert deleted.status_code == 200
+    assert deleted.json()["evidence_items_deleted"] >= 1
+    assert deleted.json()["clips_deleted"] == 1
+    assert remaining_evidence == []
+    assert refreshed_event["id"] == event["id"]
+    assert refreshed_event["clip"] is None
+    assert deleted_paths == ["clips/evidence-delete.mp4"]
+
+
 def test_manual_tackle_creates_confirmed_evidence_and_linked_opposition_carry() -> None:
     unique = uuid4().hex[:8]
     with TestClient(app) as client:

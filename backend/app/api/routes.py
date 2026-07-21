@@ -275,6 +275,18 @@ def list_match_videos(match_id: int, db: Session = Depends(get_db)) -> list[Vide
     return list(db.scalars(statement))
 
 
+@router.get("/videos", response_model=list[VideoAssetRead])
+def list_videos(
+    match_id: int | None = None,
+    limit: int = Query(500, ge=1, le=1000),
+    db: Session = Depends(get_db),
+) -> list[VideoAsset]:
+    statement = select(VideoAsset).order_by(VideoAsset.created_at.desc(), VideoAsset.id.desc()).limit(limit)
+    if match_id is not None:
+        statement = statement.where(VideoAsset.match_id == match_id)
+    return list(db.scalars(statement))
+
+
 @router.get("/videos/{video_asset_id}/processing-result", response_model=VideoProcessingResultRead)
 def get_video_processing_result(
     video_asset_id: int,

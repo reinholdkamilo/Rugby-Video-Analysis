@@ -202,7 +202,7 @@ export default function ReportsPage() {
       </header>
 
       <section className="mx-auto grid max-w-[1600px] gap-5 px-6 py-6 lg:grid-cols-[360px_1fr] print:block print:px-0 print:py-0">
-        <aside className="space-y-4 print:hidden">
+        <aside className="space-y-4 print:hidden" data-design-id="reports-setup-block" data-design-label="Report setup block">
           <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
             <h2 className="font-bold">Report setup</h2>
             <div className="mt-4 grid gap-3">
@@ -259,7 +259,7 @@ export default function ReportsPage() {
           </div>
         </aside>
 
-        <article className="rounded-xl border border-slate-200 bg-white shadow-sm print:rounded-none print:border-0 print:shadow-none">
+        <article className="rounded-xl border border-slate-200 bg-white shadow-sm print:rounded-none print:border-0 print:shadow-none" data-design-id="reports-preview-block" data-design-label="Report preview block">
           <section className="border-b border-slate-200 bg-slate-950 p-8 text-white print:bg-white print:text-slate-950">
             <p className="text-xs font-bold uppercase tracking-[0.24em] text-emerald-400">{reportRulePack.displayName} Video Analysis</p>
             <h2 className="mt-3 text-4xl font-bold">{selectedMatch ? `${homeName} vs ${awayName}` : "Match Report Preview"}</h2>

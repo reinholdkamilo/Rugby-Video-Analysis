@@ -2,7 +2,7 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.models import AnalysisStatus, EvidenceType
+from app.models import AnalysisStatus, EvidenceType, SportType
 
 
 class ORMModel(BaseModel):
@@ -38,6 +38,7 @@ class MatchCreate(BaseModel):
     home_team_id: int
     away_team_id: int
     match_date: date
+    sport_type: SportType = SportType.rugby_union
     competition: str | None = Field(default=None, max_length=150)
     venue: str | None = Field(default=None, max_length=200)
 
@@ -48,6 +49,7 @@ class MatchRead(ORMModel):
     home_team_id: int
     away_team_id: int
     match_date: date
+    sport_type: SportType
     competition: str | None
     venue: str | None
     created_at: datetime
@@ -56,6 +58,7 @@ class MatchRead(ORMModel):
 class VideoAssetRead(ORMModel):
     id: int
     match_id: int
+    sport_type: SportType
     original_filename: str
     content_type: str | None
     size_bytes: int
@@ -100,6 +103,7 @@ class AnalysisJobRead(ORMModel):
 
 class EvidenceItemCreate(BaseModel):
     match_id: int
+    sport_type: SportType | None = None
     video_asset_id: int | None = None
     timeline_event_id: int | None = None
     evidence_type: EvidenceType = EvidenceType.note
@@ -116,6 +120,7 @@ class EvidenceItemCreate(BaseModel):
 
 
 class EvidenceItemUpdate(BaseModel):
+    sport_type: SportType | None = None
     video_asset_id: int | None = None
     timeline_event_id: int | None = None
     evidence_type: EvidenceType | None = None
@@ -134,6 +139,7 @@ class EvidenceItemUpdate(BaseModel):
 class EvidenceItemRead(ORMModel):
     id: int
     match_id: int
+    sport_type: SportType
     video_asset_id: int | None
     timeline_event_id: int | None
     evidence_type: EvidenceType

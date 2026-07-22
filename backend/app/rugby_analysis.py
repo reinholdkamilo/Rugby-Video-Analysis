@@ -177,11 +177,13 @@ def event_evidence_label(event: TimelineEvent) -> str:
     return f"{event.team.value.title()} {label}"
 
 
-def evidence_for_event(event: TimelineEvent, *, status: str | None = None, source: str | None = None) -> EvidenceItem:
+def evidence_for_event(event: TimelineEvent, *, status: str | None = None, source: str | None = None, sport_type: str | None = None) -> EvidenceItem:
     event_status = status or getattr(event, "trust_status", TRUST_CONFIRMED)
     event_source = source or getattr(event, "event_source", EVIDENCE_SOURCE_MANUAL)
+    match_sport = event.match.sport_type if getattr(event, "match", None) is not None else None
     return EvidenceItem(
         match_id=event.match_id,
+        sport_type=sport_type or match_sport or "rugby_union",
         video_asset_id=event.video_asset_id,
         timeline_event_id=event.id,
         evidence_type=EvidenceType.clip,
@@ -201,6 +203,7 @@ def evidence_for_event(event: TimelineEvent, *, status: str | None = None, sourc
 def evidence_for_video(video: VideoAsset) -> EvidenceItem:
     return EvidenceItem(
         match_id=video.match_id,
+        sport_type=video.sport_type,
         video_asset_id=video.id,
         evidence_type=EvidenceType.video,
         label=f"Uploaded video: {video.original_filename}",

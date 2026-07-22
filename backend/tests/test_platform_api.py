@@ -48,6 +48,7 @@ def test_create_match_and_analysis_job() -> None:
             },
         )
         assert match.status_code == 201
+        assert match.json()["sport_type"] == "rugby_union"
 
         job = client.post(
             "/api/analysis-jobs", json={"match_id": match.json()["id"]}
@@ -63,6 +64,130 @@ def test_create_match_and_analysis_job() -> None:
         assert updated.status_code == 200
         assert updated.json()["status"] == "processing"
         assert updated.json()["progress_percent"] == 25
+
+
+def test_match_sport_controls_video_evidence_inference_and_metrics() -> None:
+    unique = uuid4().hex[:8]
+    with TestClient(app) as client:
+        organisation_id = client.post(
+            "/api/organisations", json={"name": f"League Multi Sport {unique}"}
+        ).json()["id"]
+        home_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"League Home {unique}"},
+        ).json()["id"]
+        away_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"League Away {unique}"},
+        ).json()["id"]
+        match = client.post(
+            "/api/matches",
+            json={
+                "organisation_id": organisation_id,
+                "home_team_id": home_id,
+                "away_team_id": away_id,
+                "match_date": "2026-07-12",
+                "sport_type": "rugby_league",
+            },
+        )
+        assert match.status_code == 201
+        match_id = match.json()["id"]
+        assert match.json()["sport_type"] == "rugby_league"
+
+        video = client.post(
+            f"/api/matches/{match_id}/videos",
+            files={"file": ("league-source.mp4", b"not a real video", "video/mp4")},
+        ).json()
+        assert video["sport_type"] == "rugby_league"
+
+        event = client.post(
+            "/api/timeline-events",
+            json={
+                "match_id": match_id,
+                "video_asset_id": video["id"],
+                "event_type": "try",
+                "team": "home",
+                "start_seconds": 10,
+                "end_seconds": 25,
+                "outcome": "try",
+                "clip_requested": False,
+            },
+        )
+        assert event.status_code == 201
+        evidence = client.get(f"/api/evidence-items?match_id={match_id}").json()
+        assert any(item["sport_type"] == "rugby_league" and item["timeline_event_id"] == event.json()["id"] for item in evidence)
+
+        inference = client.post(
+            "/api/timeline-events/infer",
+            json={"match_id": match_id, "video_asset_id": video["id"]},
+        )
+        metrics = client.get(f"/api/reports/matches/{match_id}/metrics?video_asset_id={video['id']}").json()
+
+    assert inference.status_code == 200
+    assert inference.json()["sport_type"] == "rugby_league"
+    assert inference.json()["inference_rule_set_id"] == "rugby_league_inference_stub_v1"
+    assert inference.json()["created_count"] == 0
+    assert metrics["sport_type"] == "rugby_league"
+    assert metrics["report_template_id"] == "rugby_league_report_v1"
+    assert metrics["home_score"] == 4
+    assert metrics["home"]["tries"] == 1
+
+
+def test_afl_report_metrics_use_afl_scoring_and_template() -> None:
+    unique = uuid4().hex[:8]
+    with TestClient(app) as client:
+        organisation_id = client.post(
+            "/api/organisations", json={"name": f"AFL Multi Sport {unique}"}
+        ).json()["id"]
+        home_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"AFL Home {unique}"},
+        ).json()["id"]
+        away_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"AFL Away {unique}"},
+        ).json()["id"]
+        match_id = client.post(
+            "/api/matches",
+            json={
+                "organisation_id": organisation_id,
+                "home_team_id": home_id,
+                "away_team_id": away_id,
+                "match_date": "2026-07-12",
+                "sport_type": "afl",
+            },
+        ).json()["id"]
+        video = client.post(
+            f"/api/matches/{match_id}/videos",
+            files={"file": ("afl-source.mp4", b"not a real video", "video/mp4")},
+        ).json()
+        for index, payload in enumerate(
+            [
+                {"event_type": "try", "team": "home", "outcome": "goal"},
+                {"event_type": "custom", "team": "home", "outcome": "behind"},
+                {"event_type": "kick", "team": "away", "outcome": "inside 50"},
+            ]
+        ):
+            response = client.post(
+                "/api/timeline-events",
+                json={
+                    "match_id": match_id,
+                    "video_asset_id": video["id"],
+                    "start_seconds": 10 + index * 20,
+                    "end_seconds": 25 + index * 20,
+                    "clip_requested": False,
+                    **payload,
+                },
+            )
+            assert response.status_code == 201
+        metrics = client.get(f"/api/reports/matches/{match_id}/metrics?video_asset_id={video['id']}").json()
+
+    assert metrics["sport_type"] == "afl"
+    assert metrics["report_template_id"] == "afl_report_v1"
+    assert metrics["home_score"] == 7
+    assert metrics["home"]["goals"] == 1
+    assert metrics["home"]["behinds"] == 1
+    assert metrics["away"]["inside_50s"] == 1
 
 
 def test_large_temporary_upload_session_is_rejected() -> None:

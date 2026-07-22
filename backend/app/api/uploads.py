@@ -182,8 +182,13 @@ def complete_upload(upload_id: str, db: Session = Depends(get_db)) -> UploadSess
         except Exception as exc:
             raise HTTPException(status_code=502, detail=f"Unable to persist video to object storage: {str(exc)[:300]}") from exc
 
+    match = db.get(Match, metadata["match_id"])
+    if match is None:
+        raise HTTPException(status_code=404, detail="Match not found.")
+
     video = VideoAsset(
         match_id=metadata["match_id"],
+        sport_type=match.sport_type,
         original_filename=metadata["filename"],
         stored_filename=stored_filename,
         content_type=metadata.get("content_type"),

@@ -64,6 +64,9 @@ def _ensure_database_schema() -> None:
         if engine.dialect.name == "postgresql":
             connection.execute(text("ALTER TABLE video_assets ALTER COLUMN size_bytes TYPE BIGINT"))
             connection.execute(text("ALTER TABLE multipart_upload_sessions ALTER COLUMN size_bytes TYPE BIGINT"))
+            connection.execute(text("ALTER TABLE matches ADD COLUMN IF NOT EXISTS sport_type VARCHAR(40) DEFAULT 'rugby_union'"))
+            connection.execute(text("ALTER TABLE video_assets ADD COLUMN IF NOT EXISTS sport_type VARCHAR(40) DEFAULT 'rugby_union'"))
+            connection.execute(text("ALTER TABLE evidence_items ADD COLUMN IF NOT EXISTS sport_type VARCHAR(40) DEFAULT 'rugby_union'"))
             connection.execute(text("ALTER TABLE timeline_events ADD COLUMN IF NOT EXISTS event_source VARCHAR(40) DEFAULT 'manual'"))
             connection.execute(text("ALTER TABLE timeline_events ADD COLUMN IF NOT EXISTS trust_status VARCHAR(40) DEFAULT 'confirmed'"))
             connection.execute(text("ALTER TABLE timeline_events ADD COLUMN IF NOT EXISTS linked_event_id INTEGER REFERENCES timeline_events(id) ON DELETE SET NULL"))
@@ -76,10 +79,16 @@ def _ensure_database_schema() -> None:
             connection.execute(text("ALTER TABLE evidence_items ADD COLUMN IF NOT EXISTS trust_notes TEXT"))
         elif engine.dialect.name == "sqlite":
             existing: dict[str, set[str]] = {}
-            for table_name in ("timeline_events", "evidence_items"):
+            for table_name in ("matches", "video_assets", "timeline_events", "evidence_items"):
                 rows = connection.execute(text(f"PRAGMA table_info({table_name})")).mappings()
                 existing[table_name] = {str(row["name"]) for row in rows}
             sqlite_columns = {
+                "matches": {
+                    "sport_type": "VARCHAR(40) DEFAULT 'rugby_union'",
+                },
+                "video_assets": {
+                    "sport_type": "VARCHAR(40) DEFAULT 'rugby_union'",
+                },
                 "timeline_events": {
                     "event_source": "VARCHAR(40) DEFAULT 'manual'",
                     "trust_status": "VARCHAR(40) DEFAULT 'confirmed'",
@@ -90,6 +99,7 @@ def _ensure_database_schema() -> None:
                     "created_from_event_ids": "TEXT",
                 },
                 "evidence_items": {
+                    "sport_type": "VARCHAR(40) DEFAULT 'rugby_union'",
                     "status": "VARCHAR(40) DEFAULT 'unconfirmed'",
                     "source": "VARCHAR(40) DEFAULT 'manual'",
                     "trust_notes": "TEXT",

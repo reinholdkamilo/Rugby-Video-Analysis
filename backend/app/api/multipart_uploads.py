@@ -107,7 +107,8 @@ def _get_upload_session(db: Session, object_key: str, upload_id: str) -> Multipa
 def create_upload(payload: MultipartCreate, db: Session = Depends(get_db)) -> MultipartCreateRead:
     if not is_object_storage_enabled():
         raise HTTPException(status_code=503, detail="Persistent object storage is not configured.")
-    if db.get(Match, payload.match_id) is None:
+    match = db.get(Match, payload.match_id)
+    if match is None:
         raise HTTPException(status_code=404, detail="Match not found.")
     extension = Path(payload.filename).suffix.lower()
     if extension not in ALLOWED_EXTENSIONS:
@@ -179,7 +180,8 @@ def part_url(object_key: str, upload_id: str, part_number: int, db: Session = De
 
 @router.post("/complete", status_code=status.HTTP_201_CREATED)
 def complete_upload(payload: MultipartComplete, db: Session = Depends(get_db)) -> dict[str, int | str]:
-    if db.get(Match, payload.match_id) is None:
+    match = db.get(Match, payload.match_id)
+    if match is None:
         raise HTTPException(status_code=404, detail="Match not found.")
     session = _get_upload_session(db, payload.object_key, payload.upload_id)
     if session.match_id != payload.match_id:
@@ -207,6 +209,7 @@ def complete_upload(payload: MultipartComplete, db: Session = Depends(get_db)) -
     )
     video = VideoAsset(
         match_id=payload.match_id,
+        sport_type=match.sport_type,
         original_filename=Path(payload.filename).name,
         stored_filename=Path(payload.object_key).name,
         content_type=payload.content_type,

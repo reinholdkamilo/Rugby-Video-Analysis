@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { EventTeam, EventType, Match, Team, TimelineEvent, VideoAsset, api } from "@/lib/api";
-import { CATEGORY_LABELS, EventCategory, countBySemanticLabel, semanticCategory, semanticEventLabel, semanticEventType } from "@/lib/rugby-events";
+import { CATEGORY_LABELS, EventCategory, countBySemanticLabel, semanticCategory, semanticEventLabel, semanticEventType, sportRulePack } from "@/lib/rugby-events";
 
 type ReviewStatus = "unreviewed" | "confirmed" | "flagged";
 type EventSource = "manual" | "auto" | "vision" | "imported";
@@ -77,7 +77,7 @@ export default function ReportsPage() {
   const [reviewedOnly, setReviewedOnly] = useState(false);
   const [clipQueueOnly, setClipQueueOnly] = useState(false);
   const [includeInferred, setIncludeInferred] = useState(true);
-  const [selectedCategories, setSelectedCategories] = useState<EventCategory[]>(["attack", "defence", "set_piece", "discipline", "transition", "kicking", "possession", "core"]);
+  const [selectedCategories, setSelectedCategories] = useState<EventCategory[]>(Object.keys(CATEGORY_LABELS) as EventCategory[]);
   const [selectedSections, setSelectedSections] = useState<ReportSection[]>([...REPORT_SECTIONS]);
   const [notice, setNotice] = useState("Select a match to build a report.");
   const [loading, setLoading] = useState(true);
@@ -86,6 +86,7 @@ export default function ReportsPage() {
 
   const selectedMatch = useMemo(() => matches.find((match) => match.id === selectedMatchId) ?? null, [matches, selectedMatchId]);
   const selectedVideo = useMemo(() => videos.find((video) => video.id === selectedVideoId) ?? null, [videos, selectedVideoId]);
+  const reportRulePack = sportRulePack(selectedMatch?.sport_type);
   const homeName = selectedMatch ? teamName(selectedMatch.home_team_id) : "Home";
   const awayName = selectedMatch ? teamName(selectedMatch.away_team_id) : "Away";
 
@@ -207,7 +208,7 @@ export default function ReportsPage() {
             <div className="mt-4 grid gap-3">
               <select value={selectedMatchId ?? ""} onChange={(event) => setSelectedMatchId(event.target.value ? Number(event.target.value) : null)} className={inputClass} style={{ color: "#13221f" }}>
                 <option value="">Select match</option>
-                {matches.map((match) => <option key={match.id} value={match.id}>{teamName(match.home_team_id)} vs {teamName(match.away_team_id)} - {match.match_date}</option>)}
+                {matches.map((match) => <option key={match.id} value={match.id}>{teamName(match.home_team_id)} vs {teamName(match.away_team_id)} - {sportRulePack(match.sport_type).displayName} - {match.match_date}</option>)}
               </select>
               <select value={selectedVideoId ?? ""} onChange={(event) => setSelectedVideoId(event.target.value ? Number(event.target.value) : null)} className={inputClass} style={{ color: "#13221f" }}>
                 <option value="">All selected match video</option>
@@ -227,6 +228,7 @@ export default function ReportsPage() {
               </label>
             </div>
             <p className="mt-4 text-sm text-slate-500">{loading ? "Loading report data..." : notice}</p>
+            <p className="mt-2 text-xs font-bold uppercase tracking-[0.14em] text-slate-500">{reportRulePack.displayName} · {reportRulePack.reportTemplateId}</p>
             <Link href={printReportHref} className="mt-4 block rounded-lg bg-slate-950 px-4 py-3 text-center text-sm font-bold text-white">
               Open clean print export
             </Link>
@@ -259,12 +261,13 @@ export default function ReportsPage() {
 
         <article className="rounded-xl border border-slate-200 bg-white shadow-sm print:rounded-none print:border-0 print:shadow-none">
           <section className="border-b border-slate-200 bg-slate-950 p-8 text-white print:bg-white print:text-slate-950">
-            <p className="text-xs font-bold uppercase tracking-[0.24em] text-emerald-400">Rugby Video Analysis</p>
+            <p className="text-xs font-bold uppercase tracking-[0.24em] text-emerald-400">{reportRulePack.displayName} Video Analysis</p>
             <h2 className="mt-3 text-4xl font-bold">{selectedMatch ? `${homeName} vs ${awayName}` : "Match Report Preview"}</h2>
             <div className="mt-6 grid gap-3 text-sm md:grid-cols-4">
               <div><p className="text-slate-400 print:text-slate-500">Date</p><p className="font-bold">{selectedMatch?.match_date ?? "Not selected"}</p></div>
               <div><p className="text-slate-400 print:text-slate-500">Competition</p><p className="font-bold">{selectedMatch?.competition ?? "Not set"}</p></div>
               <div><p className="text-slate-400 print:text-slate-500">Venue</p><p className="font-bold">{selectedMatch?.venue ?? "Not set"}</p></div>
+              <div><p className="text-slate-400 print:text-slate-500">Template</p><p className="truncate font-bold">{reportRulePack.reportTemplateId}</p></div>
               <div><p className="text-slate-400 print:text-slate-500">Video</p><p className="truncate font-bold">{selectedVideo?.original_filename ?? "Not selected"}</p></div>
             </div>
           </section>

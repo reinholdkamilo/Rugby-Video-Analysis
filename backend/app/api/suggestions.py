@@ -24,6 +24,7 @@ from app.models import (
 from app.object_storage import create_presigned_get_url, is_object_uri, materialize
 from app.rugby_analysis import EVENT_SOURCE_AUTO, EVIDENCE_SOURCE_AUTO, TRUST_CONFIRMED, TRUST_UNCONFIRMED, evidence_for_event
 from app.schemas import AnalysisJobRead
+from app.sports import sport_rule_pack
 from app.video_processing import probe_video
 
 router = APIRouter(prefix="/api/automatic-suggestions", tags=["automatic suggestions"])
@@ -52,6 +53,7 @@ class SuggestionRead(BaseModel):
     reason: str
     status: SuggestionStatus
     timeline_event_id: int | None
+    sport_type: str = "rugby_union"
 
 
 class SuggestionUpdate(BaseModel):
@@ -158,10 +160,12 @@ def _create_suggestions(
         job.message = "Creating reviewable event suggestions."
         db.commit()
 
-    candidates = build_candidates(duration, scene_times)
+    rule_pack = sport_rule_pack(video.sport_type)
+    candidates = build_candidates(duration, scene_times, video.sport_type)
     logger.info(
-        "automatic_suggestions video_id=%s duration_seconds=%s scene_count=%s candidate_count=%s",
+        "automatic_suggestions video_id=%s sport_type=%s duration_seconds=%s scene_count=%s candidate_count=%s",
         video.id,
+        video.sport_type.value,
         round(duration, 3),
         len(scene_times),
         len(candidates),
@@ -177,7 +181,7 @@ def _create_suggestions(
             end_seconds=candidate.end_seconds,
             confidence=candidate.confidence,
             label=candidate.label,
-            reason=candidate.reason,
+            reason=f"{candidate.reason} Rule pack: {rule_pack.taxonomy_id}.",
         )
         for candidate in candidates
     ]
@@ -328,7 +332,7 @@ def accept_suggestion(suggestion_id: int, db: Session = Depends(get_db)) -> Auto
             detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
             event.notes = f"{event.notes}\nClip generation failed: {detail}"
 
-    db.add(evidence_for_event(event, status=TRUST_UNCONFIRMED, source=EVIDENCE_SOURCE_AUTO))
+    db.add(evidence_for_event(event, status=TRUST_UNCONFIRMED, source=EVIDENCE_SOURCE_AUTO, sport_type=(video.sport_type.value if video else "rugby_union")))
     suggestion.status = SuggestionStatus.accepted
     suggestion.timeline_event_id = event.id
     db.commit()

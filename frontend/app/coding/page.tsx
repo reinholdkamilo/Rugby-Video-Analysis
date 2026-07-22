@@ -89,11 +89,18 @@ type ShortcutBinding = {
   zoneLength?: string;
 };
 
-const SHORTCUT_STORAGE_KEY = "rugby-video-analysis:coding-shortcuts:v1";
+const CODING_UI_CONFIG_VERSION = "taxonomy-v1-clean";
+const CODING_UI_CONFIG_VERSION_KEY = "rugby-video-analysis:coding-ui-config-version";
+const LEGACY_CODING_UI_STORAGE_KEYS = [
+  "rugby-video-analysis:coding-shortcuts:v1",
+  "rugby-video-analysis:coding-layout:v1",
+  "rugby-video-analysis:coding-hud-layout:v1",
+];
+const SHORTCUT_STORAGE_KEY = "rugby-video-analysis:coding-shortcuts:v2";
 const REVIEW_STORAGE_KEY = "rugby-video-analysis:coding-review:v1";
 const VIDEO_LAYOUT_STORAGE_KEY = "rugby-video-analysis:coding-video-layout:v1";
-const CODING_LAYOUT_STORAGE_KEY = "rugby-video-analysis:coding-layout:v1";
-const HUD_LAYOUT_STORAGE_KEY = "rugby-video-analysis:coding-hud-layout:v1";
+const CODING_LAYOUT_STORAGE_KEY = "rugby-video-analysis:coding-layout:v2";
+const HUD_LAYOUT_STORAGE_KEY = "rugby-video-analysis:coding-hud-layout:v2";
 const SELECTED_MATCH_STORAGE_KEY = "rugby-video-analysis:coding-selected-match:v1";
 const SELECTED_VIDEO_STORAGE_KEY = "rugby-video-analysis:coding-selected-video:v1";
 const QUICK_CODE_CAPTURE_SECONDS = 15;
@@ -404,6 +411,19 @@ function loadCodingLayout(): CodingLayout {
   }
 }
 
+function resetLegacyCodingUiConfiguration() {
+  if (typeof window === "undefined") return false;
+  if (window.localStorage.getItem(CODING_UI_CONFIG_VERSION_KEY) === CODING_UI_CONFIG_VERSION) return false;
+  for (const key of LEGACY_CODING_UI_STORAGE_KEYS) {
+    window.localStorage.removeItem(key);
+  }
+  window.localStorage.removeItem(SHORTCUT_STORAGE_KEY);
+  window.localStorage.removeItem(CODING_LAYOUT_STORAGE_KEY);
+  window.localStorage.removeItem(HUD_LAYOUT_STORAGE_KEY);
+  window.localStorage.setItem(CODING_UI_CONFIG_VERSION_KEY, CODING_UI_CONFIG_VERSION);
+  return true;
+}
+
 function displayEventLabel(binding: ShortcutBinding) {
   return binding.label.replace(/^Home\s+/i, "").replace(/^Away\s+/i, "");
 }
@@ -632,11 +652,15 @@ export default function CodingWorkspace() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
+    const resetApplied = resetLegacyCodingUiConfiguration();
     setShortcuts(loadShortcutBindings());
     setReviewMeta(loadReviewMeta());
     setVideoLayout(loadVideoLayoutMode());
     setCodingLayout(loadCodingLayout());
     setHudLayouts(loadHudLayouts());
+    if (resetApplied) {
+      setNotice("Old coding button configuration replaced with clean Rugby Taxonomy v1 buttons.");
+    }
   }, []);
 
   useEffect(() => {
@@ -1081,7 +1105,7 @@ export default function CodingWorkspace() {
     setEditingShortcutId(null);
     setActiveZoneId(null);
     setQuickEditBindingId(null);
-    setNotice("Keyboard shortcuts and zone keys reset. Rugby event buttons are empty so you can build them from scratch.");
+    setNotice("Keyboard shortcuts reset to clean Rugby Taxonomy v1 buttons. Event buttons are unassigned by default.");
   }
 
   function unassignAllEventButtons() {
@@ -1109,7 +1133,7 @@ export default function CodingWorkspace() {
     setQuickEditBindingId(null);
     setDraggingShortcutId(null);
     setDraggingHudButton(null);
-    setNotice("All rugby event buttons deleted. Add Home events to rebuild; Away copies will be created unassigned.");
+    setNotice("All rugby event buttons deleted. Use reset shortcuts to restore the clean Rugby Taxonomy v1 button set.");
   }
 
   function updateCodingLayout(updates: Partial<CodingLayout>) {

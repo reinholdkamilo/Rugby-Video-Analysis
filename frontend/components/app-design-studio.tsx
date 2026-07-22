@@ -21,9 +21,10 @@ type ThemeSettings = {
 type ElementDesign = {
   id: string;
   label: string;
+  contentId?: string;
   groupId?: string;
   custom?: boolean;
-  kind?: "block" | "button" | "text" | "row" | "column";
+  kind?: "block" | "button" | "text" | "row" | "column" | "notes" | "divider" | "label" | "spacer";
   hidden?: boolean;
   deleted?: boolean;
   locked?: boolean;
@@ -85,25 +86,35 @@ const DEFAULT_SETTINGS: DesignSettings = {
   pages: {},
 };
 
-const CODING_BLOCK_LIBRARY: Array<{ id: string; label: string; kind: NonNullable<ElementDesign["kind"]> }> = [
-  { id: "coding-match-video-selector-block", label: "Match and Video Selector", kind: "block" },
+const CODING_STATEFUL_BLOCKS: Array<{ id: string; label: string; kind: NonNullable<ElementDesign["kind"]> }> = [
+  { id: "coding-match-video-selector-block", label: "Match/Video Selector", kind: "block" },
   { id: "coding-notice-block", label: "Status Notice", kind: "block" },
   { id: "coding-zone-status-block", label: "Active Zone Status", kind: "block" },
-  { id: "coding-workspace-layout-block", label: "Workspace Layout", kind: "block" },
-  { id: "coding-playback-block", label: "Playback Block", kind: "block" },
+  { id: "coding-workspace-layout-block", label: "Workspace Layout Controls", kind: "block" },
+  { id: "coding-playback-block", label: "Playback Area", kind: "block" },
   { id: "coding-video-shell-block", label: "Video Player", kind: "block" },
-  { id: "coding-floating-home-key-overlay", label: "Home Transparent Overlay", kind: "block" },
-  { id: "coding-floating-away-key-overlay", label: "Away Transparent Overlay", kind: "block" },
-  { id: "coding-last-code-toast", label: "Recently Coded Event Toast", kind: "block" },
+  { id: "coding-video-controls-block", label: "Video Controls", kind: "block" },
   { id: "coding-quick-matrix-block", label: "Quick Coding Matrix", kind: "block" },
-  { id: "coding-lower-workspace-grid", label: "Recent and Manual Grid", kind: "row" },
+  { id: "coding-quick-home-column", label: "Home Quick Codes", kind: "block" },
+  { id: "coding-quick-away-column", label: "Away Quick Codes", kind: "block" },
+  { id: "coding-lower-workspace-grid", label: "Lower Workspace", kind: "row" },
   { id: "coding-recent-codes-block", label: "Recent Codes", kind: "block" },
   { id: "coding-manual-event-block", label: "Manual Event Form", kind: "block" },
-  { id: "coding-keyboard-mapping-block", label: "Keyboard Mapping", kind: "block" },
-  { id: "coding-zone-mapping-block", label: "Zone Keyboard Mapping", kind: "block" },
-  { id: "coding-video-controls-block", label: "Video Controls", kind: "block" },
   { id: "coding-timeline-cleanup-block", label: "Timeline Cleanup", kind: "block" },
-  { id: "coding-timeline-selected-editor", label: "Selected Event Editor", kind: "block" },
+  { id: "coding-keyboard-mapping-block", label: "Keyboard Mapping", kind: "block" },
+  { id: "coding-zone-mapping-block", label: "Zone Mapping", kind: "block" },
+  { id: "coding-floating-home-key-overlay", label: "Home Transparent Overlay", kind: "block" },
+  { id: "coding-floating-away-key-overlay", label: "Away Transparent Overlay", kind: "block" },
+  { id: "coding-last-code-toast", label: "Last Coded Event Toast", kind: "block" },
+];
+
+const CUSTOM_CONTAINER_LIBRARY: Array<{ kind: NonNullable<ElementDesign["kind"]>; label: string; text: string }> = [
+  { kind: "block", label: "Blank Container", text: "" },
+  { kind: "text", label: "Blank Text Block", text: "Text block" },
+  { kind: "notes", label: "Notes Box", text: "Notes" },
+  { kind: "divider", label: "Divider/Spacer", text: "" },
+  { kind: "label", label: "Custom Label", text: "Label" },
+  { kind: "button", label: "Custom Button", text: "Button" },
 ];
 
 const editableSelector = [
@@ -159,6 +170,10 @@ function elementSelector(id: string) {
   return `[data-design-id="${CSS.escape(id)}"]`;
 }
 
+function designTargetSelector(isCodingBuilder: boolean) {
+  return isCodingBuilder ? "[data-coding-layout-container],[data-design-custom='true']" : "[data-design-id]";
+}
+
 function unionRect(rects: DOMRect[]) {
   if (!rects.length) return null;
   const left = Math.min(...rects.map((rect) => rect.left));
@@ -212,12 +227,12 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
 
-function closestDesignElement(target: EventTarget | null) {
+function closestDesignElement(target: EventTarget | null, isCodingBuilder = false) {
   if (!(target instanceof HTMLElement)) return null;
-  const closest = target.closest<HTMLElement>("[data-design-id]");
+  const closest = target.closest<HTMLElement>(designTargetSelector(isCodingBuilder));
   if (!closest) return null;
   const interactiveContainer = closest.closest<HTMLElement>("button[data-design-id],a[data-design-id]");
-  if (interactiveContainer) return interactiveContainer;
+  if (!isCodingBuilder && interactiveContainer) return interactiveContainer;
   return closest;
 }
 
@@ -238,7 +253,9 @@ function isDesignPanelInput(target: EventTarget | null) {
 export function AppDesignStudio() {
   const pathname = usePathname();
   const key = pageKey(pathname);
+  const isCodingBuilder = key === "coding";
   const dragRef = useRef<DragState | null>(null);
+  const customIdRef = useRef(0);
   const [settings, setSettings] = useState<DesignSettings>(DEFAULT_SETTINGS);
   const [ready, setReady] = useState(false);
   const [open, setOpen] = useState(false);
@@ -290,7 +307,33 @@ export function AppDesignStudio() {
     const saved = pageSettings(settings, key).elements;
     const active = open || saved.length > 0;
     document.body.classList.toggle("design-mode-active", open);
+    document.body.classList.toggle("coding-builder-active", open && isCodingBuilder);
     document.querySelectorAll<HTMLElement>("[data-design-id]").forEach((element) => {
+      if (isCodingBuilder && !element.matches(designTargetSelector(true))) {
+        element.classList.remove("design-editable", "design-selected", "design-grouped", "design-locked", "design-positioned", "design-layout-controlled", "design-hidden-section");
+        element.hidden = false;
+        element.style.order = "";
+        element.style.transform = "";
+        element.style.position = "";
+        element.style.zIndex = "";
+        element.style.width = "";
+        element.style.height = "";
+        element.style.minHeight = "";
+        element.style.gap = "";
+        element.style.padding = "";
+        element.style.margin = "";
+        element.style.background = "";
+        element.style.color = "";
+        element.style.borderColor = "";
+        element.style.opacity = "";
+        element.style.borderRadius = "";
+        element.style.fontSize = "";
+        element.style.fontWeight = "";
+        element.style.justifyContent = "";
+        element.style.alignItems = "";
+        element.contentEditable = "false";
+        return;
+      }
       const design = saved.find((item) => item.id === element.dataset.designId);
       element.classList.toggle("design-editable", open);
       element.classList.toggle("design-selected", open && activeSelectionIds.includes(element.dataset.designId ?? ""));
@@ -351,12 +394,12 @@ export function AppDesignStudio() {
       }
       element.contentEditable = open && (isTextEditableElement(element) || Boolean(design?.custom)) ? "true" : "false";
     });
-  }, [activeSelectionIds, key, open, settings]);
+  }, [activeSelectionIds, isCodingBuilder, key, open, settings]);
 
   const detectElements = useCallback((): ElementDesign[] => {
     const main = document.querySelector("main");
     if (!main) return [];
-    const candidates = Array.from(main.querySelectorAll<HTMLElement>(editableSelector));
+    const candidates = Array.from(main.querySelectorAll<HTMLElement>(isCodingBuilder ? designTargetSelector(true) : editableSelector));
     const seen = new Set<HTMLElement>();
     return candidates
       .filter((element) => {
@@ -364,21 +407,23 @@ export function AppDesignStudio() {
         seen.add(element);
         if (element.closest(".design-studio-panel")) return false;
         if (element.matches("video,source")) return false;
-        if (element.matches("input,select,textarea") && !element.dataset.designId) return false;
+        if (!isCodingBuilder && element.matches("input,select,textarea") && !element.dataset.designId) return false;
         return element.offsetParent !== null || element === main.firstElementChild;
       })
-      .slice(0, 360)
+      .slice(0, isCodingBuilder ? 80 : 360)
       .map((element, index) => {
         const currentId = element.dataset.designId || `${key}-${element.tagName.toLowerCase()}-${index + 1}`;
         element.dataset.designId = currentId;
+        const registryItem = isCodingBuilder ? CODING_STATEFUL_BLOCKS.find((block) => block.id === currentId) : undefined;
         return {
           id: currentId,
-          label: elementLabel(element, `${element.tagName.toLowerCase()} ${index + 1}`),
+          label: registryItem?.label ?? elementLabel(element, `${element.tagName.toLowerCase()} ${index + 1}`),
+          contentId: registryItem?.id ?? (element.dataset.designCustom ? currentId : undefined),
           hidden: false,
           order: elementPriority(element) ?? index + 1000,
         };
       });
-  }, [key]);
+  }, [isCodingBuilder, key]);
 
   useEffect(() => {
     setSettings(loadSettings());
@@ -411,7 +456,12 @@ export function AppDesignStudio() {
       const detected = detectElements();
       const saved = pageSettings(settings, key).elements;
       const custom = saved.filter((item) => item.custom && !item.deleted);
-      const retainedSaved = saved.filter((item) => !item.custom && !item.deleted && !detected.some((detectedItem) => detectedItem.id === item.id));
+      const retainedSaved = saved.filter((item) => (
+        !item.custom &&
+        !item.deleted &&
+        !detected.some((detectedItem) => detectedItem.id === item.id) &&
+        (!isCodingBuilder || CODING_STATEFUL_BLOCKS.some((block) => block.id === item.id))
+      ));
       const merged: ElementDesign[] = [
         ...detected.map((item) => saved.find((element) => element.id === item.id) ?? item),
         ...retainedSaved,
@@ -421,7 +471,7 @@ export function AppDesignStudio() {
     };
     const timer = window.setTimeout(sync, 100);
     return () => window.clearTimeout(timer);
-  }, [detectElements, key, pathname, ready, settings]);
+  }, [detectElements, isCodingBuilder, key, pathname, ready, settings]);
 
   useEffect(() => {
     applyElementDesigns();
@@ -431,7 +481,7 @@ export function AppDesignStudio() {
     if (!open) return;
     const onClick = (event: MouseEvent) => {
       if ((event.target as HTMLElement | null)?.closest(".design-studio-panel,.design-studio-toggle,.design-resize-handle,.design-drag-handle")) return;
-      const element = closestDesignElement(event.target);
+      const element = closestDesignElement(event.target, isCodingBuilder);
       if (!element) return;
       event.preventDefault();
       event.stopPropagation();
@@ -454,7 +504,7 @@ export function AppDesignStudio() {
       }
     };
     const onBlur = (event: FocusEvent) => {
-      const element = closestDesignElement(event.target);
+      const element = closestDesignElement(event.target, isCodingBuilder);
       const design = currentElements.find((item) => item.id === element?.dataset.designId);
       if (!element || (!isTextEditableElement(element) && !design?.custom)) return;
       updateElement(element.dataset.designId ?? "", { text: element.textContent?.trim() ?? "" });
@@ -465,7 +515,7 @@ export function AppDesignStudio() {
       document.removeEventListener("click", onClick, true);
       document.removeEventListener("blur", onBlur, true);
     };
-  }, [currentElements, open, selectedId, updateElement]);
+  }, [currentElements, isCodingBuilder, open, selectedId, updateElement]);
 
   useEffect(() => {
     const onMove = (event: MouseEvent) => {
@@ -562,19 +612,27 @@ export function AppDesignStudio() {
     setElements(reordered);
   }
 
+  function customDefaults(kind: NonNullable<ElementDesign["kind"]>): Partial<ElementDesign> {
+    const custom = CUSTOM_CONTAINER_LIBRARY.find((item) => item.kind === kind);
+    const shared = { background: "#ffffff", color: "#13221f", borderColor: "#dfe6e2", radius: 12 };
+    if (kind === "button") return { ...shared, label: custom?.label ?? "Custom Button", text: custom?.text ?? "Button", width: 180, height: 48, padding: 12, background: settings.theme.action, borderColor: settings.theme.action, fontWeight: 900 };
+    if (kind === "text" || kind === "label") return { ...shared, label: custom?.label ?? "Text Block", text: custom?.text ?? "Text block", width: 280, height: 80, padding: 8, fontSize: 18, fontWeight: 800 };
+    if (kind === "notes") return { ...shared, label: "Notes Box", text: "Notes", width: 360, height: 180, padding: 16, layout: "stack", gap: 10 };
+    if (kind === "divider" || kind === "spacer") return { ...shared, label: custom?.label ?? "Divider/Spacer", text: "", width: 420, height: 24, padding: 0, background: "#334155", borderColor: "#334155", radius: 999 };
+    if (kind === "row") return { ...shared, label: "New row", text: "New row", width: 640, height: 120, padding: 16, layout: "row", gap: 12 };
+    if (kind === "column") return { ...shared, label: "New column", text: "New column", width: 260, height: 360, padding: 16, layout: "stack", gap: 12 };
+    return { ...shared, label: custom?.label ?? "Blank Container", text: custom?.text ?? "", width: 320, height: 180, padding: 20, layout: "stack", gap: 12 };
+  }
+
   function addCustomElement(kind: NonNullable<ElementDesign["kind"]>) {
     const customCount = currentElements.filter((item) => item.custom).length;
-    const defaults: Record<NonNullable<ElementDesign["kind"]>, Partial<ElementDesign>> = {
-      block: { label: "New block", text: "New block", width: 320, height: 180, padding: 20, background: "#ffffff", color: "#13221f", borderColor: "#dfe6e2", radius: 14, layout: "stack", gap: 12 },
-      row: { label: "New row", text: "New row", width: 640, height: 120, padding: 16, background: "#ffffff", color: "#13221f", borderColor: "#dfe6e2", radius: 12, layout: "row", gap: 12 },
-      column: { label: "New column", text: "New column", width: 260, height: 360, padding: 16, background: "#ffffff", color: "#13221f", borderColor: "#dfe6e2", radius: 12, layout: "stack", gap: 12 },
-      button: { label: "New button", text: "New button", width: 160, height: 48, padding: 12, background: settings.theme.action, color: "#13221f", borderColor: settings.theme.action, radius: 10, fontWeight: 900 },
-      text: { label: "New text", text: "New text", width: 280, height: 80, padding: 8, background: "#ffffff", color: "#13221f", borderColor: "#dfe6e2", radius: 8, fontSize: 18, fontWeight: 700 },
-    };
-    const defaultDesign = defaults[kind];
+    const defaultDesign = customDefaults(kind);
+    customIdRef.current += 1;
+    const customIndex = customCount + customIdRef.current;
     const next: ElementDesign = {
-      id: `${key}-custom-${kind}-${Date.now()}`,
+      id: `${key}-custom-${kind}-${customIndex}`,
       label: defaultDesign.label ?? readableLabel(kind),
+      contentId: `custom-${kind}`,
       custom: true,
       kind,
       order: currentElements.length + 1,
@@ -654,15 +712,42 @@ export function AppDesignStudio() {
       const next: ElementDesign = {
         id: block.id,
         label: block.label,
+        contentId: block.id,
         kind: block.kind,
         hidden: false,
-        order: 100 + CODING_BLOCK_LIBRARY.findIndex((item) => item.id === block.id),
+        order: 100 + CODING_STATEFUL_BLOCKS.findIndex((item) => item.id === block.id),
       };
       return { ...current, pages: { ...current.pages, [key]: { elements: [...page.elements, next] } } };
     });
     setSelectedId(block.id);
     setSelectedIds([block.id]);
     setPanelTab("element");
+  }
+
+  function duplicateSelected() {
+    if (!selected?.custom) return;
+    customIdRef.current += 1;
+    const customIndex = currentElements.filter((item) => item.custom).length + customIdRef.current;
+    const next: ElementDesign = {
+      ...selected,
+      id: `${key}-custom-${selected.kind ?? "block"}-${customIndex}`,
+      label: `${selected.label} copy`,
+      x: snap((selected.x ?? 0) + 24, settings.theme.snapGrid),
+      y: snap((selected.y ?? 0) + 24, settings.theme.snapGrid),
+      order: currentElements.length + 1,
+    };
+    setSettings((current) => {
+      const page = pageSettings(current, key);
+      return { ...current, pages: { ...current.pages, [key]: { elements: [...page.elements, next] } } };
+    });
+    setElements((current) => [...current, next]);
+    setSelectedId(next.id);
+    setSelectedIds([next.id]);
+  }
+
+  function changeCustomContent(kind: NonNullable<ElementDesign["kind"]>) {
+    if (!selected?.custom) return;
+    updateCurrent({ ...customDefaults(kind), kind, contentId: `custom-${kind}` });
   }
 
   function resetAllDesign() {
@@ -756,6 +841,88 @@ export function AppDesignStudio() {
             <button type="button" onClick={() => setOpen(false)}>Close</button>
           </div>
 
+          {isCodingBuilder ? (
+            <>
+              <section>
+                <h3>Selected Container</h3>
+                {selected ? (
+                  <>
+                    <label>Name <input value={selected.label} disabled={activeSelectionIds.length > 1} onChange={(event) => updateCurrent({ label: event.target.value })} /></label>
+                    <label>Content <select value={selected.contentId ?? (selected.custom ? `custom-${selected.kind ?? "block"}` : selected.id)} disabled={!selected.custom} onChange={(event) => changeCustomContent(event.target.value.replace(/^custom-/, "") as NonNullable<ElementDesign["kind"]>)}>
+                      {selected.custom ? CUSTOM_CONTAINER_LIBRARY.map((item) => <option key={item.kind} value={`custom-${item.kind}`}>{item.label}</option>) : <option value={selected.contentId ?? selected.id}>{selected.label}</option>}
+                    </select></label>
+                    <div className="design-button-row">
+                      <button type="button" onClick={() => updateCurrent({ hidden: !selected.hidden })}>{selected.hidden ? "Show" : "Hide"}</button>
+                      <button type="button" onClick={() => updateCurrent({ locked: !selected.locked })}>{selected.locked ? "Unlock" : "Lock"}</button>
+                      <button type="button" onClick={duplicateSelected} disabled={!selected.custom}>Duplicate</button>
+                      <button type="button" className="design-danger" onClick={deleteSelected}>{selected.custom ? "Delete" : "Hide"}</button>
+                    </div>
+                    <div className="design-button-row">
+                      <button type="button" onClick={() => updateCurrent({ x: 0, y: 0 })}>Reset position</button>
+                      <button type="button" onClick={resetSelected}>Reset selected</button>
+                    </div>
+                    <p className="design-empty">Stateful rugby blocks are one instance only. Custom containers can be duplicated or deleted.</p>
+                  </>
+                ) : <p className="design-empty">Click a large Coding container on the page, or add/select one below.</p>}
+              </section>
+
+              <section>
+                <h3>Add Container</h3>
+                <div className="design-block-grid">
+                  {CUSTOM_CONTAINER_LIBRARY.map((item) => (
+                    <button key={item.kind} type="button" onClick={() => addCustomElement(item.kind)}>{item.label}</button>
+                  ))}
+                </div>
+              </section>
+
+              <section>
+                <h3>Stateful Blocks</h3>
+                <div className="design-section-list">
+                  {CODING_STATEFUL_BLOCKS.map((block) => {
+                    const existing = currentElements.find((item) => item.id === block.id);
+                    return (
+                      <button key={block.id} type="button" className={selectedId === block.id ? "is-active" : ""} onClick={() => selectOrRestoreBlock(block)}>
+                        {block.label}{existing?.hidden ? " · hidden" : " · select"}
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+
+              <section>
+                <h3>Layout</h3>
+                <label>Mode <select value={selected?.layout ?? "default"} onChange={(event) => updateCurrent({ layout: event.target.value as LayoutMode })}><option value="default">Default</option><option value="stack">Stack</option><option value="row">Row</option><option value="grid">Grid</option></select></label>
+                <label>Columns <input type="range" min="1" max="8" step="1" value={selected?.columns ?? 2} onChange={(event) => updateCurrent({ columns: Number(event.target.value) })} /></label>
+                <label>Rows <input type="range" min="1" max="8" step="1" value={selected?.rows ?? 1} onChange={(event) => updateCurrent({ rows: Number(event.target.value) })} /></label>
+                <label>Gap <input type="range" min="0" max="48" step="1" value={selected?.gap ?? 12} onChange={(event) => updateCurrent({ gap: Number(event.target.value) })} /></label>
+                <label>Padding <input type="range" min="0" max="64" step="1" value={selected?.padding ?? 16} onChange={(event) => updateCurrent({ padding: Number(event.target.value) })} /></label>
+                <label>Width <input type="number" min="0" value={selected?.width ?? ""} onChange={(event) => updateCurrent({ width: numericValue(event.target.value) })} /></label>
+                <label>Height <input type="number" min="0" value={selected?.height ?? ""} onChange={(event) => updateCurrent({ height: numericValue(event.target.value) })} /></label>
+                <label>X <input type="number" value={selected?.x ?? 0} onChange={(event) => updateCurrent({ x: numericValue(event.target.value) ?? 0 })} /></label>
+                <label>Y <input type="number" value={selected?.y ?? 0} onChange={(event) => updateCurrent({ y: numericValue(event.target.value) ?? 0 })} /></label>
+                <label>Layer <input type="number" min="0" max="200" value={selected?.zIndex ?? ""} onChange={(event) => updateCurrent({ zIndex: numericValue(event.target.value) })} /></label>
+              </section>
+
+              <section>
+                <h3>Style</h3>
+                {selected?.custom ? <label>Text <textarea value={selected?.text ?? ""} onChange={(event) => updateCurrent({ text: event.target.value })} /></label> : null}
+                <label>Background <input type="color" value={selected?.background ?? settings.theme.surface} onChange={(event) => updateCurrent({ background: event.target.value })} /></label>
+                <label>Text colour <input type="color" value={selected?.color ?? settings.theme.ink} onChange={(event) => updateCurrent({ color: event.target.value })} /></label>
+                <label>Border <input type="color" value={selected?.borderColor ?? "#dfe6e2"} onChange={(event) => updateCurrent({ borderColor: event.target.value })} /></label>
+                <label>Opacity <input type="range" min="0" max="1" step="0.05" value={selected?.opacity ?? 1} onInput={(event) => updateCurrent({ opacity: clamp(Number(event.currentTarget.value), 0, 1) })} onChange={(event) => updateCurrent({ opacity: clamp(Number(event.target.value), 0, 1) })} /></label>
+                <label>Radius <input type="range" min="0" max="40" step="1" value={selected?.radius ?? settings.theme.radius} onChange={(event) => updateCurrent({ radius: Number(event.target.value) })} /></label>
+              </section>
+
+              <section>
+                <h3>Page Safety</h3>
+                <div className="design-button-row">
+                  <button type="button" onClick={restoreHiddenBlocks}>Restore hidden</button>
+                  <button type="button" onClick={resetCurrentPage}>Reset Coding layout</button>
+                </div>
+              </section>
+            </>
+          ) : (
+            <>
           <div className="design-tabs">
             {(["element", "layout", "blocks", "text", "style", "page"] as const).map((tab) => (
               <button key={tab} type="button" onClick={() => setPanelTab(tab)} className={panelTab === tab ? "is-active" : ""}>{readableLabel(tab)}</button>
@@ -814,7 +981,7 @@ export function AppDesignStudio() {
                 <>
                   <h3>Coding Blocks</h3>
                   <div className="design-section-list">
-                    {CODING_BLOCK_LIBRARY.map((block) => {
+                    {CODING_STATEFUL_BLOCKS.map((block) => {
                       const existing = currentElements.find((item) => item.id === block.id);
                       return (
                         <button key={block.id} type="button" className={selectedId === block.id ? "is-active" : ""} onClick={() => selectOrRestoreBlock(block)}>
@@ -922,6 +1089,8 @@ export function AppDesignStudio() {
             <button type="button" onClick={resetCurrentPage}>Reset tab</button>
             <button type="button" className="design-reset-all" onClick={resetAllDesign}>Reset all</button>
           </div>
+            </>
+          )}
         </aside>
       ) : null}
 
@@ -929,11 +1098,12 @@ export function AppDesignStudio() {
         <div
           key={element.id}
           data-design-id={element.id}
+          data-design-custom="true"
           className={`design-custom-block design-custom-block--${element.kind ?? "block"}`}
           hidden={Boolean(element.hidden)}
           suppressContentEditableWarning
         >
-          {element.text || element.label}
+          {element.kind === "divider" || element.kind === "spacer" ? null : element.text || element.label}
         </div>
       ))}
     </>

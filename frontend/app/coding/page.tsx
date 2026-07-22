@@ -1520,6 +1520,7 @@ export default function CodingWorkspace() {
         className="absolute z-20 max-h-[80%] overflow-auto rounded-lg border border-white/20 bg-slate-950 p-3 text-white shadow-2xl backdrop-blur"
         data-design-id={`coding-floating-${panelId}-key-overlay`}
         data-design-label={`${panelId === "home" ? "Home" : "Away"} floating key overlay`}
+        data-coding-layout-container="true"
         style={{
           left: layout.x,
           top: layout.y,
@@ -1653,6 +1654,7 @@ export default function CodingWorkspace() {
           data-design-id="coding-match-video-selector-block"
           data-design-label="Match and video selector block"
           data-design-priority="5"
+          data-coding-layout-container="true"
         >
           <select className={inputClass} value={selectedMatchId ?? ""} onChange={(event) => setSelectedMatchId(event.target.value ? Number(event.target.value) : null)} data-design-id="coding-match-selector" data-design-label="Match selector">
             <option value="">Select match</option>
@@ -1666,8 +1668,8 @@ export default function CodingWorkspace() {
         </div>
 
         <div className="mb-5 grid gap-3 md:grid-cols-[1fr_auto]">
-          <div className="rounded-xl border border-slate-800 bg-slate-900 px-4 py-3 text-sm text-slate-300" data-design-id="coding-notice-block" data-design-label="Status notice block" data-design-priority="6">{notice}</div>
-          <div className="rounded-xl border border-emerald-900 bg-emerald-950/30 px-4 py-3 text-sm font-bold text-emerald-200" data-design-id="coding-zone-status-block" data-design-label="Active zone status block" data-design-priority="7">
+          <div className="rounded-xl border border-slate-800 bg-slate-900 px-4 py-3 text-sm text-slate-300" data-design-id="coding-notice-block" data-design-label="Status notice block" data-design-priority="6" data-coding-layout-container="true">{notice}</div>
+          <div className="rounded-xl border border-emerald-900 bg-emerald-950/30 px-4 py-3 text-sm font-bold text-emerald-200" data-design-id="coding-zone-status-block" data-design-label="Active zone status block" data-design-priority="7" data-coding-layout-container="true">
             {activeZone ? `Active zone: ${zoneValue(activeZone)}` : "Timeline events save immediately"}
           </div>
         </div>
@@ -1678,6 +1680,7 @@ export default function CodingWorkspace() {
             data-design-id="coding-workspace-layout-block"
             data-design-label="Workspace layout block"
             data-design-priority="10"
+            data-coding-layout-container="true"
           >
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -1718,7 +1721,7 @@ export default function CodingWorkspace() {
             </div>
           </section>
 
-          <div className="rounded-xl border border-slate-800 bg-slate-900 p-4" data-design-id="coding-playback-block" data-design-label="Playback block" data-design-priority="12">
+          <div className="rounded-xl border border-slate-800 bg-slate-900 p-4" data-design-id="coding-playback-block" data-design-label="Playback block" data-design-priority="12" data-coding-layout-container="true">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="font-bold">Playback</h2>
@@ -1738,7 +1741,7 @@ export default function CodingWorkspace() {
                 </div>
               </div>
             </div>
-            <div className={`${videoShellClass} relative overflow-hidden rounded-xl border border-slate-800 bg-black`} data-design-id="coding-video-shell-block" data-design-label="Video player shell" data-design-priority="13">
+            <div className={`${videoShellClass} relative overflow-hidden rounded-xl border border-slate-800 bg-black`} data-design-id="coding-video-shell-block" data-design-label="Video player shell" data-design-priority="13" data-coding-layout-container="true">
               {selectedVideo ? (
                 <video
                   key={selectedVideo.id}
@@ -1757,7 +1760,7 @@ export default function CodingWorkspace() {
               {renderHudPanel("away")}
 
               {lastCodedEvent ? (
-                <div className="absolute right-3 top-3 z-30 max-w-sm rounded-lg border border-emerald-300/40 bg-slate-950/85 p-3 text-white shadow-2xl backdrop-blur" data-design-id="coding-last-code-toast" data-design-label="Last coded event toast">
+                <div className="absolute right-3 top-3 z-30 max-w-sm rounded-lg border border-emerald-300/40 bg-slate-950/85 p-3 text-white shadow-2xl backdrop-blur" data-design-id="coding-last-code-toast" data-design-label="Last coded event toast" data-coding-layout-container="true">
                   <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-emerald-300">Code saved</p>
                   <p className="mt-1 text-sm font-black">{lastCodedEvent.teamLabel} {lastCodedEvent.label}</p>
                   <p className="mt-1 text-xs text-slate-300">
@@ -1780,6 +1783,7 @@ export default function CodingWorkspace() {
             data-design-id="coding-quick-matrix-block"
             data-design-label="Quick coding matrix block"
             data-design-priority="15"
+            data-coding-layout-container="true"
           >
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -1842,6 +1846,7 @@ export default function CodingWorkspace() {
                   data-design-id={`coding-quick-${designId(column.id)}-column`}
                   data-design-label={`${column.title} quick column`}
                   data-design-priority={150 + columnIndex}
+                  data-coding-layout-container="true"
                   onDragOver={(event) => event.preventDefault()}
                   onDrop={() => {
                     if (draggingColumnId) moveQuickColumn(column.id);
@@ -2013,12 +2018,13 @@ export default function CodingWorkspace() {
             </div>
           ) : null}
 
-          <div className="grid gap-4 xl:grid-cols-2" data-design-id="coding-lower-workspace-grid" data-design-label="Recent codes and manual event grid" data-design-priority="18">
+          <div className="grid gap-4 xl:grid-cols-2" data-design-id="coding-lower-workspace-grid" data-design-label="Recent codes and manual event grid" data-design-priority="18" data-coding-layout-container="true">
             <section
               className="rounded-xl border border-slate-800 bg-slate-900 p-4"
               data-design-id="coding-recent-codes-block"
               data-design-label="Recent codes block"
               data-design-priority="18"
+              data-coding-layout-container="true"
             >
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -2092,6 +2098,7 @@ export default function CodingWorkspace() {
               className="grid content-start gap-3 rounded-xl border border-slate-800 bg-slate-900 p-4 md:grid-cols-2"
               data-design-id="coding-manual-event-block"
               data-design-label="Manual event block"
+              data-coding-layout-container="true"
               data-design-priority="20"
             >
             <div className="md:col-span-2">
@@ -2121,6 +2128,7 @@ export default function CodingWorkspace() {
             data-design-id="coding-keyboard-mapping-block"
             data-design-label="Keyboard mapping block"
             data-design-priority="30"
+            data-coding-layout-container="true"
           >
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -2199,6 +2207,7 @@ export default function CodingWorkspace() {
               data-design-id="coding-zone-mapping-block"
               data-design-label="Zone keyboard mapping block"
               data-design-priority="35"
+              data-coding-layout-container="true"
             >
               <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                 <div>
@@ -2244,6 +2253,7 @@ export default function CodingWorkspace() {
               data-design-id="coding-video-controls-block"
               data-design-label="Video controls block"
               data-design-priority="40"
+              data-coding-layout-container="true"
             >
               <h3 className="mb-3 text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Video controls</h3>
               <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4" data-design-id="coding-video-controls-grid" data-design-label="Video controls grid" data-design-priority="410">
@@ -2264,6 +2274,7 @@ export default function CodingWorkspace() {
             data-design-id="coding-timeline-cleanup-block"
             data-design-label="Timeline cleanup block"
             data-design-priority="50"
+            data-coding-layout-container="true"
           >
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -2326,7 +2337,7 @@ export default function CodingWorkspace() {
             </div>
 
             {selectedEvent ? (
-              <form onSubmit={submitEventEdit} className="mt-4 grid gap-3 rounded-lg border border-slate-800 bg-slate-950 p-3 md:grid-cols-2 xl:grid-cols-8" data-design-id="coding-timeline-selected-editor" data-design-label="Selected timeline event editor" data-design-priority="530">
+              <form onSubmit={submitEventEdit} className="mt-4 grid gap-3 rounded-lg border border-slate-800 bg-slate-950 p-3 md:grid-cols-2 xl:grid-cols-8" data-design-id="coding-timeline-selected-editor" data-design-label="Selected timeline event editor" data-design-priority="530" data-coding-layout-container="true">
                 <div className="md:col-span-2 xl:col-span-8 flex flex-wrap items-center justify-between gap-3">
                   <h3 className="font-bold">Edit selected event #{selectedEvent.id}</h3>
                   <div className="flex gap-2">

@@ -5,7 +5,7 @@ import { FormEvent, MouseEvent as ReactMouseEvent, useCallback, useEffect, useMe
 
 import { EventTeam, EventType, Match, Team, TimelineEvent, VideoAsset } from "@/lib/api";
 import { codingApi, sourceVideoUrl } from "@/lib/coding-api";
-import { EVENT_TYPES, inferEventTypeFromLabel } from "@/lib/rugby-events";
+import { CATEGORY_LABELS, EVENT_TYPES, REPORT_DRIVEN_RUGBY_TAXONOMY, type EventCategory, inferEventTypeFromLabel } from "@/lib/rugby-events";
 
 type VideoCommand =
   | "play_pause"
@@ -26,7 +26,6 @@ type VideoCommand =
   | "speed_normal"
   | "speed_double";
 
-type EventCategory = "core" | "attack" | "defence" | "set_piece" | "discipline" | "transition" | "kicking" | "possession";
 type ReviewStatus = "unreviewed" | "confirmed" | "flagged";
 type EventSource = "manual" | "auto" | "vision" | "imported";
 type VideoLayoutMode = "standard" | "large" | "theatre";
@@ -35,7 +34,7 @@ type LayoutColumnCount = 2 | 3 | 4;
 type QuickColumnId = "home" | "away";
 type HudPanelId = QuickColumnId;
 type HudButtonColumns = 1 | 2 | 3 | 4;
-type QuickEventSectionId = "attack" | "defence" | "set_piece" | "ruck" | "transition" | "restart";
+type QuickEventSectionId = "attack" | "defence" | "set_piece" | "breakdown_ruck" | "kicking" | "discipline" | "scoring" | "transition_turnover" | "restart" | "error" | "zone_territory" | "other";
 type QuickAddPanel = "event" | "zone" | null;
 
 type HudLayout = {
@@ -135,23 +134,33 @@ const DEFAULT_HUD_LAYOUTS: HudLayouts = {
 };
 
 const EVENT_LIBRARY_CATEGORIES: { value: EventCategory; label: string }[] = [
-  { value: "attack", label: "Attack" },
-  { value: "defence", label: "Defence" },
-  { value: "set_piece", label: "Set piece" },
-  { value: "discipline", label: "Discipline" },
-  { value: "transition", label: "Transition" },
-  { value: "kicking", label: "Kicking" },
-  { value: "possession", label: "Possession" },
-  { value: "core", label: "General" },
+  { value: "attack", label: CATEGORY_LABELS.attack },
+  { value: "defence", label: CATEGORY_LABELS.defence },
+  { value: "set_piece", label: CATEGORY_LABELS.set_piece },
+  { value: "breakdown_ruck", label: CATEGORY_LABELS.breakdown_ruck },
+  { value: "kicking", label: CATEGORY_LABELS.kicking },
+  { value: "discipline", label: CATEGORY_LABELS.discipline },
+  { value: "scoring", label: CATEGORY_LABELS.scoring },
+  { value: "transition_turnover", label: CATEGORY_LABELS.transition_turnover },
+  { value: "restart", label: CATEGORY_LABELS.restart },
+  { value: "error", label: CATEGORY_LABELS.error },
+  { value: "zone_territory", label: CATEGORY_LABELS.zone_territory },
+  { value: "other", label: CATEGORY_LABELS.other },
 ];
 
 const QUICK_EVENT_SECTIONS: { id: QuickEventSectionId; title: string }[] = [
-  { id: "attack", title: "Attack" },
-  { id: "defence", title: "Defence" },
-  { id: "set_piece", title: "Set Piece" },
-  { id: "ruck", title: "Ruck" },
-  { id: "transition", title: "Transition" },
-  { id: "restart", title: "Restart" },
+  { id: "attack", title: CATEGORY_LABELS.attack },
+  { id: "defence", title: CATEGORY_LABELS.defence },
+  { id: "set_piece", title: CATEGORY_LABELS.set_piece },
+  { id: "breakdown_ruck", title: CATEGORY_LABELS.breakdown_ruck },
+  { id: "kicking", title: CATEGORY_LABELS.kicking },
+  { id: "discipline", title: CATEGORY_LABELS.discipline },
+  { id: "scoring", title: CATEGORY_LABELS.scoring },
+  { id: "transition_turnover", title: CATEGORY_LABELS.transition_turnover },
+  { id: "restart", title: CATEGORY_LABELS.restart },
+  { id: "error", title: CATEGORY_LABELS.error },
+  { id: "zone_territory", title: CATEGORY_LABELS.zone_territory },
+  { id: "other", title: CATEGORY_LABELS.other },
 ];
 
 const REVIEW_STATUSES: { value: ReviewStatus; label: string }[] = [
@@ -170,6 +179,32 @@ const EVENT_SOURCES: { value: EventSource; label: string }[] = [
 const ZONE_KEYS = ["KeyA", "KeyS", "KeyD", "KeyF", "KeyG", "KeyH", "KeyJ", "KeyK"];
 
 const DEFAULT_SHORTCUTS: ShortcutBinding[] = [
+  ...REPORT_DRIVEN_RUGBY_TAXONOMY.flatMap((item) => ([
+    {
+      id: `taxonomy_home_${item.id}`,
+      label: item.displayName,
+      group: "event" as const,
+      shortcut: "Unassigned",
+      team: "home" as const,
+      eventType: item.defaultEventType,
+      duration: QUICK_CODE_CAPTURE_SECONDS,
+      category: item.category,
+      outcome: item.defaultOutcome,
+      notes: `Report taxonomy v1: ${item.displayName}`,
+    },
+    {
+      id: `taxonomy_away_${item.id}`,
+      label: item.displayName,
+      group: "event" as const,
+      shortcut: "Unassigned",
+      team: "away" as const,
+      eventType: item.defaultEventType,
+      duration: QUICK_CODE_CAPTURE_SECONDS,
+      category: item.category,
+      outcome: item.defaultOutcome,
+      notes: `Report taxonomy v1: ${item.displayName}`,
+    },
+  ])),
   { id: "zone_own_22", label: "Own 22m", group: "zone", shortcut: ZONE_KEYS[0], fieldZone: "Own 22m", zoneLength: "Inside defensive 22m" },
   { id: "zone_own_half", label: "Own half", group: "zone", shortcut: ZONE_KEYS[1], fieldZone: "Own half", zoneLength: "Outside own 22m to halfway" },
   { id: "zone_outside_50m", label: "Outside 50m", group: "zone", shortcut: ZONE_KEYS[2], fieldZone: "Outside 50m", zoneLength: "Outside 50m/halfway line" },
@@ -401,11 +436,17 @@ function categoryLabel(category?: EventCategory) {
 
 function quickSectionForShortcut(binding: ShortcutBinding): QuickEventSectionId {
   const label = `${binding.label} ${binding.outcome ?? ""} ${binding.eventType ?? ""}`.toLowerCase();
+  if (binding.category && QUICK_EVENT_SECTIONS.some((section) => section.id === binding.category)) return binding.category as QuickEventSectionId;
   if (binding.eventType === "kickoff" || label.includes("restart") || label.includes("drop out") || label.includes("dropout") || label.includes("kickoff")) return "restart";
-  if (binding.eventType === "ruck" || label.includes("ruck") || label.includes("quick ball") || label.includes("slow ball")) return "ruck";
-  if (binding.category === "set_piece" || binding.eventType === "lineout" || binding.eventType === "scrum" || binding.eventType === "maul") return "set_piece";
-  if (binding.category === "transition" || binding.eventType === "turnover" || label.includes("turnover") || label.includes("counter") || label.includes("zone entry") || label.includes("exit")) return "transition";
-  if (binding.category === "defence" || binding.category === "discipline" || binding.eventType === "tackle" || binding.eventType === "penalty" || label.includes("jackal")) return "defence";
+  if (binding.eventType === "ruck" || label.includes("ruck") || label.includes("quick ball") || label.includes("slow ball")) return "breakdown_ruck";
+  if (binding.eventType === "kick" || binding.eventType === "conversion" || label.includes("exit")) return "kicking";
+  if (binding.eventType === "try" || label.includes("try") || label.includes("goal")) return "scoring";
+  if (binding.eventType === "custom" && (label.includes("knock") || label.includes("handling error"))) return "error";
+  if (binding.eventType === "custom" && label.includes("zone")) return "zone_territory";
+  if (binding.eventType === "lineout" || binding.eventType === "scrum" || binding.eventType === "maul") return "set_piece";
+  if (binding.eventType === "turnover" || label.includes("turnover") || label.includes("counter")) return "transition_turnover";
+  if (binding.eventType === "penalty" || binding.eventType === "card") return "discipline";
+  if (binding.eventType === "tackle" || label.includes("jackal")) return "defence";
   return "attack";
 }
 
@@ -419,11 +460,13 @@ function mirrorHomeBindingToAway(binding: ShortcutBinding): ShortcutBinding {
 }
 
 function awayPairIdForHome(binding: ShortcutBinding) {
+  if (binding.id.startsWith("taxonomy_home_")) return binding.id.replace(/^taxonomy_home_/, "taxonomy_away_");
   if (binding.id.startsWith("custom_")) return binding.id.endsWith("_away") ? binding.id : `${binding.id}_away`;
   return binding.id.replace(/^tag_home_/, "tag_away_");
 }
 
 function homePairIdForAway(binding: ShortcutBinding) {
+  if (binding.id.startsWith("taxonomy_away_")) return binding.id.replace(/^taxonomy_away_/, "taxonomy_home_");
   if (binding.id.startsWith("custom_") && binding.id.endsWith("_away")) return binding.id.replace(/_away$/, "");
   return binding.id.replace(/^tag_away_/, "tag_home_");
 }
@@ -834,12 +877,7 @@ export default function CodingWorkspace() {
   const customEventShortcuts = useMemo(() => eventShortcuts.filter((shortcut) => shortcut.custom || !["home", "away"].includes(String(shortcut.team))), [eventShortcuts]);
 
   const mappingTeams = useMemo(() => {
-    const createSections = () => [
-      { id: "attack", title: "Attack", items: [] as ShortcutBinding[] },
-      { id: "defence", title: "Defence", items: [] as ShortcutBinding[] },
-      { id: "set_piece", title: "Set piece", items: [] as ShortcutBinding[] },
-      { id: "custom", title: "Restart / transition / custom", items: [] as ShortcutBinding[] },
-    ];
+    const createSections = () => QUICK_EVENT_SECTIONS.map((section) => ({ ...section, items: [] as ShortcutBinding[] }));
     const teams = [
       { id: "home" as const, title: "Home", subtitle: homeTeam?.name ?? "Home", sections: createSections() },
       { id: "away" as const, title: "Away", subtitle: awayTeam?.name ?? "Away", sections: createSections() },
@@ -847,10 +885,8 @@ export default function CodingWorkspace() {
     for (const shortcut of eventShortcuts.filter((item) => item.team === "home" || item.team === "away")) {
       const team = teams.find((item) => item.id === shortcut.team);
       if (!team) continue;
-      if (shortcut.category === "attack" || shortcut.category === "kicking") team.sections[0].items.push(shortcut);
-      else if (shortcut.category === "defence" || shortcut.category === "discipline" || shortcut.category === "possession") team.sections[1].items.push(shortcut);
-      else if (shortcut.category === "set_piece") team.sections[2].items.push(shortcut);
-      else team.sections[3].items.push(shortcut);
+      const section = team.sections.find((item) => item.id === quickSectionForShortcut(shortcut)) ?? team.sections[team.sections.length - 1];
+      section.items.push(shortcut);
     }
     return teams;
   }, [awayTeam?.name, eventShortcuts, homeTeam?.name]);

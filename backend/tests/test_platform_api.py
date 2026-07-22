@@ -691,6 +691,67 @@ def test_report_metrics_scores_only_true_scoring_outcomes() -> None:
     assert [item["points"] for item in metrics["scoring_flow"]] == [5, 2, 2, 3]
 
 
+def test_report_metrics_normalise_taxonomy_outcomes() -> None:
+    unique = uuid4().hex[:8]
+    with TestClient(app) as client:
+        organisation_id = client.post(
+            "/api/organisations", json={"name": f"Taxonomy Report {unique}"}
+        ).json()["id"]
+        home_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"Home {unique}"},
+        ).json()["id"]
+        away_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"Away {unique}"},
+        ).json()["id"]
+        match_id = client.post(
+            "/api/matches",
+            json={
+                "organisation_id": organisation_id,
+                "home_team_id": home_id,
+                "away_team_id": away_id,
+                "match_date": "2026-07-12",
+            },
+        ).json()["id"]
+        video = client.post(
+            f"/api/matches/{match_id}/videos",
+            files={"file": ("taxonomy-source.mp4", b"not a real video", "video/mp4")},
+        ).json()
+        for index, payload in enumerate(
+            [
+                {"event_type": "custom", "team": "home", "outcome": "Dominant Carry"},
+                {"event_type": "custom", "team": "home", "outcome": "Line Break"},
+                {"event_type": "custom", "team": "home", "outcome": "Penalty Goal"},
+                {"event_type": "custom", "team": "away", "outcome": "Missed Tackle"},
+                {"event_type": "custom", "team": "away", "outcome": "Knock On"},
+                {"event_type": "turnover", "team": "away", "outcome": "Turnover Won"},
+            ]
+        ):
+            response = client.post(
+                "/api/timeline-events",
+                json={
+                    "match_id": match_id,
+                    "video_asset_id": video["id"],
+                    "start_seconds": 10 + index * 20,
+                    "end_seconds": 25 + index * 20,
+                    "clip_requested": False,
+                    **payload,
+                },
+            )
+            assert response.status_code == 201
+        metrics = client.get(f"/api/reports/matches/{match_id}/metrics?video_asset_id={video['id']}").json()
+
+    assert metrics["home_score"] == 3
+    assert metrics["home"]["carries"] == 1
+    assert metrics["home"]["dominant_carries"] == 1
+    assert metrics["home"]["line_breaks"] == 1
+    assert metrics["home"]["penalties"] == 1
+    assert metrics["away"]["missed_tackles"] == 1
+    assert metrics["away"]["errors"] == 1
+    assert metrics["away"]["turnovers_won"] == 1
+
+
 def test_delete_organisation_cascades_workspace_and_catalogue() -> None:
     unique = uuid4().hex[:8]
     with TestClient(app) as client:

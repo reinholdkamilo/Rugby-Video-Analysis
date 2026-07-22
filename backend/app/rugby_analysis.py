@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 from app.models import EventTeam, EventType, EvidenceItem, EvidenceType, TimelineEvent, VideoAsset
+from app.rugby_taxonomy import taxonomy_item_for_event
 
 EVENT_SOURCE_MANUAL = "manual"
 EVENT_SOURCE_AUTO = "auto"
@@ -31,6 +32,9 @@ def clean_label(value: str | None) -> str:
 
 
 def scoring_points(event: TimelineEvent) -> int:
+    taxonomy_item = taxonomy_item_for_event(event)
+    if taxonomy_item is not None and taxonomy_item.affects_score:
+        return taxonomy_item.score_points
     outcome = clean_label(event.outcome).lower()
     if event.event_type == EventType.try_event or outcome == "try":
         return 5

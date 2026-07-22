@@ -68,6 +68,9 @@ def _ensure_database_schema() -> None:
             connection.execute(text("ALTER TABLE timeline_events ADD COLUMN IF NOT EXISTS trust_status VARCHAR(40) DEFAULT 'confirmed'"))
             connection.execute(text("ALTER TABLE timeline_events ADD COLUMN IF NOT EXISTS linked_event_id INTEGER REFERENCES timeline_events(id) ON DELETE SET NULL"))
             connection.execute(text("ALTER TABLE timeline_events ADD COLUMN IF NOT EXISTS linked_reason TEXT"))
+            connection.execute(text("ALTER TABLE timeline_events ADD COLUMN IF NOT EXISTS confidence DOUBLE PRECISION"))
+            connection.execute(text("ALTER TABLE timeline_events ADD COLUMN IF NOT EXISTS inference_rule VARCHAR(120)"))
+            connection.execute(text("ALTER TABLE timeline_events ADD COLUMN IF NOT EXISTS created_from_event_ids TEXT"))
             connection.execute(text("ALTER TABLE evidence_items ADD COLUMN IF NOT EXISTS status VARCHAR(40) DEFAULT 'unconfirmed'"))
             connection.execute(text("ALTER TABLE evidence_items ADD COLUMN IF NOT EXISTS source VARCHAR(40) DEFAULT 'manual'"))
             connection.execute(text("ALTER TABLE evidence_items ADD COLUMN IF NOT EXISTS trust_notes TEXT"))
@@ -82,6 +85,9 @@ def _ensure_database_schema() -> None:
                     "trust_status": "VARCHAR(40) DEFAULT 'confirmed'",
                     "linked_event_id": "INTEGER",
                     "linked_reason": "TEXT",
+                    "confidence": "FLOAT",
+                    "inference_rule": "VARCHAR(120)",
+                    "created_from_event_ids": "TEXT",
                 },
                 "evidence_items": {
                     "status": "VARCHAR(40) DEFAULT 'unconfirmed'",

@@ -27,7 +27,7 @@ RUGBY_TAXONOMY_V1: tuple[RugbyTaxonomyItem, ...] = (
     RugbyTaxonomyItem("pass", "Pass", "attack", EventType.pass_event, "pass"),
     RugbyTaxonomyItem("kick", "Kick", "kicking", EventType.kick, "kick"),
     RugbyTaxonomyItem("ruck", "Ruck", "breakdown_ruck", EventType.ruck, "ruck"),
-    RugbyTaxonomyItem("ruck_won", "Ruck Won", "breakdown_ruck", EventType.ruck, "ruck won"),
+    RugbyTaxonomyItem("ruck_retained", "Ruck Retained", "breakdown_ruck", EventType.ruck, "ruck retained"),
     RugbyTaxonomyItem("ruck_lost", "Ruck Lost", "breakdown_ruck", EventType.ruck, "ruck lost"),
     RugbyTaxonomyItem("maul", "Maul", "set_piece", EventType.maul, "maul"),
     RugbyTaxonomyItem("maul_won", "Maul Won", "set_piece", EventType.maul, "maul won"),

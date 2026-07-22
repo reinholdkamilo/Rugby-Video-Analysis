@@ -430,7 +430,7 @@ export default function EvidenceLibraryPage() {
                 const linkedEvent = events.find((timelineEvent) => timelineEvent.id === item.timeline_event_id);
                 const mediaUrl = itemMediaUrl(item, linkedEvent);
                 const startSeconds = linkedEvent?.start_seconds ?? item.timestamp_seconds ?? 0;
-                const endSeconds = linkedEvent?.end_seconds ?? (startSeconds + 15);
+                const endSeconds = linkedEvent?.end_seconds ?? (startSeconds + 10);
                 return (
                   <article key={item.id} className="rounded-lg border border-slate-200 p-4">
                     <div className="flex flex-wrap items-start justify-between gap-3">

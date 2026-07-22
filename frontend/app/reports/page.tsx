@@ -62,6 +62,10 @@ function teamLabel(team: EventTeam, homeName: string, awayName: string) {
   return "Neutral";
 }
 
+function isReportActiveEvent(event: TimelineEvent) {
+  return event.trust_status !== "rejected" && event.trust_status !== "stale";
+}
+
 export default function ReportsPage() {
   const [teams, setTeams] = useState<Team[]>([]);
   const [matches, setMatches] = useState<Match[]>([]);
@@ -72,6 +76,7 @@ export default function ReportsPage() {
   const [reviewMeta, setReviewMeta] = useState<Record<number, ReviewMeta>>({});
   const [reviewedOnly, setReviewedOnly] = useState(false);
   const [clipQueueOnly, setClipQueueOnly] = useState(false);
+  const [includeInferred, setIncludeInferred] = useState(true);
   const [selectedCategories, setSelectedCategories] = useState<EventCategory[]>(["attack", "defence", "set_piece", "discipline", "transition", "kicking", "possession", "core"]);
   const [selectedSections, setSelectedSections] = useState<ReportSection[]>([...REPORT_SECTIONS]);
   const [notice, setNotice] = useState("Select a match to build a report.");
@@ -108,7 +113,7 @@ export default function ReportsPage() {
       const eventData = await api.timeline.list(matchId, chosenVideoId ?? undefined);
       setVideos(videoData);
       setSelectedVideoId(chosenVideoId);
-      setEvents(eventData);
+      setEvents(eventData.filter(isReportActiveEvent));
       setNotice(eventData.length ? "Report preview updated from coded events." : "This match has no coded timeline events yet.");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Unable to load match report data.");
@@ -129,7 +134,7 @@ export default function ReportsPage() {
 
   useEffect(() => {
     if (!selectedMatchId || !selectedVideoId) return;
-    void api.timeline.list(selectedMatchId, selectedVideoId).then(setEvents).catch((error) => {
+    void api.timeline.list(selectedMatchId, selectedVideoId).then((items) => setEvents(items.filter(isReportActiveEvent))).catch((error) => {
       setNotice(error instanceof Error ? error.message : "Unable to reload selected video events.");
     });
   }, [selectedMatchId, selectedVideoId]);
@@ -138,12 +143,14 @@ export default function ReportsPage() {
     return events.filter((event) => {
       const review = reviewMeta[event.id];
       const category = semanticCategory(event);
+      const inferred = event.event_source === "inferred" || event.event_source === "linked_logic";
+      if (!includeInferred && inferred) return false;
       if (reviewedOnly && review?.status !== "confirmed") return false;
       if (clipQueueOnly && !event.clip_requested) return false;
       if (!selectedCategories.includes(category)) return false;
       return true;
     });
-  }, [clipQueueOnly, events, reviewedOnly, reviewMeta, selectedCategories]);
+  }, [clipQueueOnly, events, includeInferred, reviewedOnly, reviewMeta, selectedCategories]);
 
   const teamCounts = useMemo(() => countBy(reportEvents, (event) => event.team), [reportEvents]);
   const categoryCounts = useMemo(() => countBy(reportEvents, semanticCategory), [reportEvents]);
@@ -213,6 +220,10 @@ export default function ReportsPage() {
               <label className="report-control-label flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-900" style={{ color: "#13221f" }}>
                 <input type="checkbox" checked={clipQueueOnly} onChange={(event) => setClipQueueOnly(event.target.checked)} className="h-4 w-4 accent-emerald-600" />
                 <span style={{ color: "#13221f" }}>Clip queue only</span>
+              </label>
+              <label className="report-control-label flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-900" style={{ color: "#13221f" }}>
+                <input type="checkbox" checked={includeInferred} onChange={(event) => setIncludeInferred(event.target.checked)} className="h-4 w-4 accent-emerald-600" />
+                <span style={{ color: "#13221f" }}>Include inferred events</span>
               </label>
             </div>
             <p className="mt-4 text-sm text-slate-500">{loading ? "Loading report data..." : notice}</p>

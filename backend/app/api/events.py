@@ -1,7 +1,8 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select, update
+from pydantic import BaseModel
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, selectinload
 
 from app.clips import generate_event_clip
@@ -11,17 +12,34 @@ from app.models import AutomaticEventSuggestion, EventClip, EvidenceItem, Match,
 from app.object_storage import delete_object, is_object_uri
 from app.rugby_analysis import (
     EVENT_SOURCE_LINKED,
-    EVIDENCE_SOURCE_LINKED,
+    EVIDENCE_SOURCE_INFERRED,
     EVIDENCE_SOURCE_MANUAL,
     TRUST_CONFIRMED,
+    TRUST_INFERRED_UNCONFIRMED,
     TRUST_LINKED_UNCONFIRMED,
     evidence_for_event,
-    linked_event_candidates,
 )
+from app.rugby_inference import EVENT_SOURCE_INFERRED, TRUST_STALE, immediate_inference_candidates, infer_events
 from app.storage import delete_stored_file
 
 router = APIRouter(prefix="/api", tags=["timeline"])
 logger = logging.getLogger(__name__)
+
+
+class InferenceRunRequest(BaseModel):
+    match_id: int
+    video_asset_id: int | None = None
+    replace_unconfirmed: bool = True
+
+
+class InferenceRunRead(BaseModel):
+    match_id: int
+    video_asset_id: int | None = None
+    source_event_count: int
+    created_count: int
+    stale_count: int
+    skipped_count: int
+    inferred_event_count: int
 
 
 def get_event_or_404(event_id: int, db: Session) -> TimelineEvent:
@@ -59,29 +77,58 @@ def add_event_evidence(event: TimelineEvent, db: Session, *, status: str | None 
     db.add(evidence_for_event(event, status=status, source=source))
 
 
+def _candidate_exists(candidate, events: list[TimelineEvent]) -> bool:
+    return any(
+        event.team == candidate.team
+        and event.event_type == candidate.event_type
+        and (event.outcome or "").strip().lower() == candidate.outcome.strip().lower()
+        and event.inference_rule == candidate.rule
+        and event.created_from_event_ids == candidate.source_json
+        and event.trust_status not in {"rejected", TRUST_STALE}
+        for event in events
+    )
+
+
+def _create_inferred_event(candidate, parent: TimelineEvent, db: Session) -> TimelineEvent:
+    inferred = TimelineEvent(
+        match_id=parent.match_id,
+        video_asset_id=parent.video_asset_id,
+        event_type=candidate.event_type,
+        team=candidate.team,
+        start_seconds=candidate.start_seconds,
+        end_seconds=candidate.end_seconds,
+        outcome=candidate.outcome,
+        notes=f"Inferred rugby logic: {candidate.reason}",
+        field_zone=candidate.field_zone,
+        clip_requested=False,
+        event_source=EVENT_SOURCE_INFERRED,
+        trust_status=TRUST_INFERRED_UNCONFIRMED,
+        linked_event_id=candidate.linked_event_id,
+        linked_reason=candidate.reason,
+        confidence=candidate.confidence,
+        inference_rule=candidate.rule,
+        created_from_event_ids=candidate.source_json,
+    )
+    db.add(inferred)
+    db.flush()
+    add_event_evidence(inferred, db, status=TRUST_INFERRED_UNCONFIRMED, source=EVIDENCE_SOURCE_INFERRED)
+    return inferred
+
+
 def add_linked_events(parent: TimelineEvent, db: Session) -> None:
-    if parent.event_source == EVENT_SOURCE_LINKED:
+    if parent.event_source in {EVENT_SOURCE_LINKED, EVENT_SOURCE_INFERRED}:
         return
-    for candidate in linked_event_candidates(parent):
-        linked = TimelineEvent(
-            match_id=parent.match_id,
-            video_asset_id=parent.video_asset_id,
-            event_type=candidate.event_type,
-            team=candidate.team,
-            start_seconds=parent.start_seconds,
-            end_seconds=parent.end_seconds,
-            outcome=candidate.outcome,
-            notes=f"Linked rugby logic: {candidate.reason}",
-            field_zone=parent.field_zone,
-            clip_requested=False,
-            event_source=EVENT_SOURCE_LINKED,
-            trust_status=TRUST_LINKED_UNCONFIRMED,
-            linked_event_id=parent.id,
-            linked_reason=candidate.reason,
+    existing = list(
+        db.scalars(
+            select(TimelineEvent).where(
+                TimelineEvent.match_id == parent.match_id,
+                TimelineEvent.video_asset_id == parent.video_asset_id,
+            )
         )
-        db.add(linked)
-        db.flush()
-        add_event_evidence(linked, db, status=TRUST_LINKED_UNCONFIRMED, source=EVIDENCE_SOURCE_LINKED)
+    )
+    for candidate in immediate_inference_candidates(parent, existing):
+        if not _candidate_exists(candidate, existing):
+            _create_inferred_event(candidate, parent, db)
 
 
 @router.post("/timeline-events", response_model=TimelineEventRead, status_code=status.HTTP_201_CREATED)
@@ -126,6 +173,67 @@ def list_timeline_events(
     return list(db.scalars(statement).unique())
 
 
+@router.post("/timeline-events/infer", response_model=InferenceRunRead)
+def run_timeline_inference(payload: InferenceRunRequest, db: Session = Depends(get_db)) -> InferenceRunRead:
+    if db.get(Match, payload.match_id) is None:
+        raise HTTPException(status_code=404, detail="Match not found.")
+    statement = select(TimelineEvent).where(TimelineEvent.match_id == payload.match_id).order_by(
+        TimelineEvent.start_seconds,
+        TimelineEvent.id,
+    )
+    if payload.video_asset_id is not None:
+        if db.get(VideoAsset, payload.video_asset_id) is None:
+            raise HTTPException(status_code=404, detail="Video not found.")
+        statement = statement.where(TimelineEvent.video_asset_id == payload.video_asset_id)
+    events = list(db.scalars(statement))
+
+    stale_count = 0
+    if payload.replace_unconfirmed:
+        for event in events:
+            if (
+                event.event_source in {EVENT_SOURCE_INFERRED, EVENT_SOURCE_LINKED}
+                and event.trust_status in {TRUST_INFERRED_UNCONFIRMED, TRUST_LINKED_UNCONFIRMED, TRUST_STALE}
+            ):
+                event.trust_status = TRUST_STALE
+                event.linked_reason = f"{event.linked_reason or 'Inferred event'} Marked stale before inference re-run."
+                stale_count += 1
+
+    db.flush()
+    events = list(db.scalars(statement))
+    candidates = infer_events(events)
+    created_count = 0
+    skipped_count = 0
+    for candidate in candidates:
+        if _candidate_exists(candidate, events):
+            skipped_count += 1
+            continue
+        parent_id = candidate.linked_event_id or candidate.source_event_ids[0]
+        parent = next((event for event in events if event.id == parent_id), None)
+        if parent is None:
+            skipped_count += 1
+            continue
+        created = _create_inferred_event(candidate, parent, db)
+        events.append(created)
+        created_count += 1
+
+    db.commit()
+    inferred_event_count = db.scalar(
+        select(func.count(TimelineEvent.id))
+        .where(TimelineEvent.match_id == payload.match_id)
+        .where(TimelineEvent.event_source.in_([EVENT_SOURCE_INFERRED, EVENT_SOURCE_LINKED]))
+        .where(TimelineEvent.trust_status != TRUST_STALE)
+    )
+    return InferenceRunRead(
+        match_id=payload.match_id,
+        video_asset_id=payload.video_asset_id,
+        source_event_count=sum(event.event_source not in {EVENT_SOURCE_INFERRED, EVENT_SOURCE_LINKED} for event in events),
+        created_count=created_count,
+        stale_count=stale_count,
+        skipped_count=skipped_count,
+        inferred_event_count=int(inferred_event_count or 0),
+    )
+
+
 @router.get("/timeline-events/{event_id}", response_model=TimelineEventRead)
 def get_timeline_event(event_id: int, db: Session = Depends(get_db)) -> TimelineEvent:
     return get_event_or_404(event_id, db)
@@ -156,6 +264,16 @@ def update_timeline_event(
 def delete_timeline_event(event_id: int, db: Session = Depends(get_db)) -> None:
     event = get_event_or_404(event_id, db)
     clip_path = event.clip.file_path if event.clip is not None else None
+    db.execute(
+        update(TimelineEvent)
+        .where(TimelineEvent.linked_event_id == event.id)
+        .where(TimelineEvent.event_source.in_([EVENT_SOURCE_INFERRED, EVENT_SOURCE_LINKED]))
+        .where(TimelineEvent.trust_status != TRUST_CONFIRMED)
+        .values(
+            trust_status=TRUST_STALE,
+            linked_reason="Source event was deleted; inferred event marked stale.",
+        )
+    )
     db.execute(
         update(AutomaticEventSuggestion)
         .where(AutomaticEventSuggestion.timeline_event_id == event.id)

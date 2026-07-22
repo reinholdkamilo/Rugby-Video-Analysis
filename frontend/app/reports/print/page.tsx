@@ -57,6 +57,10 @@ function teamLabel(team: EventTeam, homeName: string, awayName: string) {
   return "Neutral";
 }
 
+function isReportActiveEvent(event: TimelineEvent) {
+  return event.trust_status !== "rejected" && event.trust_status !== "stale";
+}
+
 function eventsFor(events: TimelineEvent[], team: EventTeam, types?: SemanticEventType[]) {
   return semanticEventsFor(events, team, types);
 }
@@ -223,7 +227,7 @@ export default function PrintableReportPage() {
         const eventData = await api.timeline.list(matchId, nextVideoId ?? undefined);
         setVideos(videoData);
         setSelectedVideoId(nextVideoId);
-        setEvents(eventData);
+        setEvents(eventData.filter(isReportActiveEvent));
         setNotice(eventData.length ? "Printable report ready." : "No coded events yet. The report will print with empty tables.");
       } catch (error) {
         setNotice(error instanceof Error ? error.message : "Unable to load match report data.");
@@ -239,6 +243,7 @@ export default function PrintableReportPage() {
   const zoneRows = useMemo(() => sortedEntries(countBy(events.filter((event) => event.field_zone), (event) => event.field_zone ?? "Unknown")), [events]);
   const outcomeRows = useMemo(() => sortedEntries(countBySemanticLabel(events)), [events]);
   const clipEvents = useMemo(() => events.filter((event) => event.clip_requested), [events]);
+  const inferredEventCount = useMemo(() => events.filter((event) => event.event_source === "inferred" || event.event_source === "linked_logic").length, [events]);
   const keyMoments = useMemo(() => {
     const priority = new Set<EventType>(["try", "penalty", "card", "turnover", "kick", "lineout", "scrum"]);
     return events
@@ -430,6 +435,7 @@ export default function PrintableReportPage() {
           <div className="report-note">
             <strong>Analyst note</strong>
             <span>This template is generated from coded timeline events, zones, outcomes and clip requests. As the coding model improves, these tables will automatically become richer.</span>
+            {inferredEventCount ? <span>{inferredEventCount} high-confidence inferred event{inferredEventCount === 1 ? "" : "s"} included for analyst review.</span> : null}
             <span className="print-hidden">{notice}</span>
           </div>
         </ReportPage>

@@ -6,16 +6,19 @@ from app.rugby_taxonomy import taxonomy_item_for_event
 EVENT_SOURCE_MANUAL = "manual"
 EVENT_SOURCE_AUTO = "auto"
 EVENT_SOURCE_LINKED = "linked_logic"
+EVENT_SOURCE_INFERRED = "inferred"
 
 TRUST_CONFIRMED = "confirmed"
 TRUST_UNCONFIRMED = "unconfirmed"
 TRUST_LINKED_UNCONFIRMED = "linked_unconfirmed"
+TRUST_INFERRED_UNCONFIRMED = "inferred_unconfirmed"
 TRUST_REJECTED = "rejected"
 
 EVIDENCE_SOURCE_MANUAL = "manual_code"
 EVIDENCE_SOURCE_UPLOAD = "uploaded_video"
 EVIDENCE_SOURCE_AUTO = "auto_analysis"
 EVIDENCE_SOURCE_LINKED = "linked_logic"
+EVIDENCE_SOURCE_INFERRED = "inferred"
 
 SCORING_OUTCOMES: dict[str, int] = {
     "try": 5,

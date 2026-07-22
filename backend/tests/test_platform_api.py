@@ -566,13 +566,16 @@ def test_manual_tackle_creates_confirmed_evidence_and_linked_opposition_carry() 
     assert len(linked) == 1
     assert linked[0]["event_type"] == "carry"
     assert linked[0]["team"] == "away"
-    assert linked[0]["outcome"] == "negative carry"
-    assert linked[0]["trust_status"] == "linked_unconfirmed"
+    assert linked[0]["outcome"] == "carry"
+    assert linked[0]["event_source"] == "inferred"
+    assert linked[0]["trust_status"] == "inferred_unconfirmed"
+    assert linked[0]["inference_rule"] == "tackle_implies_opposition_carry"
+    assert linked[0]["confidence"] == 0.9
     assert any(item["timeline_event_id"] == tackle["id"] and item["status"] == "confirmed" for item in evidence)
-    assert any(item["timeline_event_id"] == linked[0]["id"] and item["status"] == "linked_unconfirmed" for item in evidence)
+    assert any(item["timeline_event_id"] == linked[0]["id"] and item["status"] == "inferred_unconfirmed" for item in evidence)
 
 
-def test_manual_carry_creates_linked_opposition_tackle() -> None:
+def test_manual_carry_does_not_create_overconfident_opposition_tackle() -> None:
     unique = uuid4().hex[:8]
     with TestClient(app) as client:
         organisation_id = client.post(
@@ -626,17 +629,9 @@ def test_manual_carry_creates_linked_opposition_tackle() -> None:
         evidence = client.get(f"/api/evidence-items?match_id={match_id}").json()
 
     assert carry["trust_status"] == "confirmed"
-    assert len(linked) == 1
-    assert linked[0]["event_type"] == "tackle"
-    assert linked[0]["team"] == "away"
-    assert linked[0]["outcome"] == "tackle made"
-    assert linked[0]["trust_status"] == "linked_unconfirmed"
+    assert linked == []
     assert any(
         item["timeline_event_id"] == carry["id"] and item["status"] == "confirmed" for item in evidence
-    )
-    assert any(
-        item["timeline_event_id"] == linked[0]["id"] and item["status"] == "linked_unconfirmed"
-        for item in evidence
     )
 
 
@@ -747,9 +742,80 @@ def test_report_metrics_normalise_taxonomy_outcomes() -> None:
     assert metrics["home"]["dominant_carries"] == 1
     assert metrics["home"]["line_breaks"] == 1
     assert metrics["home"]["penalties"] == 1
-    assert metrics["away"]["missed_tackles"] == 1
-    assert metrics["away"]["errors"] == 1
+    assert metrics["away"]["missed_tackles"] == 2
+    assert metrics["away"]["errors"] == 2
     assert metrics["away"]["turnovers_won"] == 1
+
+
+def test_inference_run_creates_ruck_retained_and_is_idempotent() -> None:
+    unique = uuid4().hex[:8]
+    with TestClient(app) as client:
+        organisation_id = client.post(
+            "/api/organisations", json={"name": f"Inference Run {unique}"}
+        ).json()["id"]
+        home_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"Home {unique}"},
+        ).json()["id"]
+        away_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"Away {unique}"},
+        ).json()["id"]
+        match_id = client.post(
+            "/api/matches",
+            json={
+                "organisation_id": organisation_id,
+                "home_team_id": home_id,
+                "away_team_id": away_id,
+                "match_date": "2026-07-12",
+            },
+        ).json()["id"]
+        video = client.post(
+            f"/api/matches/{match_id}/videos",
+            files={"file": ("inference-source.mp4", b"not a real video", "video/mp4")},
+        ).json()
+        for start in (30, 42):
+            response = client.post(
+                "/api/timeline-events",
+                json={
+                    "match_id": match_id,
+                    "video_asset_id": video["id"],
+                    "event_type": "carry",
+                    "team": "home",
+                    "start_seconds": start,
+                    "end_seconds": start + 10,
+                    "outcome": "carry",
+                    "clip_requested": False,
+                },
+            )
+            assert response.status_code == 201
+
+        first = client.post(
+            "/api/timeline-events/infer",
+            json={"match_id": match_id, "video_asset_id": video["id"]},
+        )
+        second = client.post(
+            "/api/timeline-events/infer",
+            json={"match_id": match_id, "video_asset_id": video["id"]},
+        )
+        timeline = client.get(f"/api/timeline-events?match_id={match_id}&video_asset_id={video['id']}").json()
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["created_count"] == 1
+    assert second.json()["created_count"] == 1
+    retained = [
+        event for event in timeline
+        if event["event_source"] == "inferred" and event["trust_status"] == "inferred_unconfirmed" and event["outcome"] == "ruck retained"
+    ]
+    stale = [
+        event for event in timeline
+        if event["event_source"] == "inferred" and event["trust_status"] == "stale" and event["outcome"] == "ruck retained"
+    ]
+    assert len(retained) == 1
+    assert len(stale) == 1
+    assert retained[0]["inference_rule"] == "same_team_carry_sequence_implies_ruck_retained"
+    assert retained[0]["created_from_event_ids"].startswith("[")
 
 
 def test_delete_organisation_cascades_workspace_and_catalogue() -> None:

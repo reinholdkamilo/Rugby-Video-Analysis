@@ -26,8 +26,8 @@ type VideoCommand =
   | "speed_normal"
   | "speed_double";
 
-type ReviewStatus = "unreviewed" | "confirmed" | "flagged";
-type EventSource = "manual" | "auto" | "vision" | "imported";
+type ReviewStatus = "unreviewed" | "confirmed" | "flagged" | "inferred" | "rejected" | "stale";
+type EventSource = "manual" | "auto" | "vision" | "imported" | "inferred" | "linked_logic";
 type VideoLayoutMode = "standard" | "large" | "theatre";
 type LayoutDensity = "compact" | "comfortable";
 type LayoutColumnCount = 2 | 3 | 4;
@@ -104,7 +104,7 @@ const CODING_LAYOUT_STORAGE_KEY = "rugby-video-analysis:coding-layout:v2";
 const HUD_LAYOUT_STORAGE_KEY = "rugby-video-analysis:coding-hud-layout:v2";
 const SELECTED_MATCH_STORAGE_KEY = "rugby-video-analysis:coding-selected-match:v1";
 const SELECTED_VIDEO_STORAGE_KEY = "rugby-video-analysis:coding-selected-video:v1";
-const QUICK_CODE_CAPTURE_SECONDS = 15;
+const QUICK_CODE_CAPTURE_SECONDS = 10;
 
 const DEFAULT_QUICK_COLUMN_ORDER: QuickColumnId[] = ["home", "away"];
 const DEFAULT_CODING_LAYOUT: CodingLayout = {
@@ -175,6 +175,9 @@ const REVIEW_STATUSES: { value: ReviewStatus; label: string }[] = [
   { value: "unreviewed", label: "Unreviewed" },
   { value: "confirmed", label: "Confirmed" },
   { value: "flagged", label: "Flagged" },
+  { value: "inferred", label: "Inferred" },
+  { value: "rejected", label: "Rejected" },
+  { value: "stale", label: "Stale" },
 ];
 
 const EVENT_SOURCES: { value: EventSource; label: string }[] = [
@@ -182,6 +185,8 @@ const EVENT_SOURCES: { value: EventSource; label: string }[] = [
   { value: "auto", label: "Auto" },
   { value: "vision", label: "Vision" },
   { value: "imported", label: "Imported" },
+  { value: "inferred", label: "Inferred" },
+  { value: "linked_logic", label: "Linked logic" },
 ];
 
 const ZONE_KEYS = ["KeyA", "KeyS", "KeyD", "KeyF", "KeyG", "KeyH", "KeyJ", "KeyK"];
@@ -508,6 +513,7 @@ function loadShortcutBindings() {
         label: savedLabel,
         group: binding.group,
         custom: binding.custom,
+        duration: Number(savedBinding?.duration || binding.duration || QUICK_CODE_CAPTURE_SECONDS) === 15 ? QUICK_CODE_CAPTURE_SECONDS : Number(savedBinding?.duration || binding.duration || QUICK_CODE_CAPTURE_SECONDS),
         shortcut: normaliseShortcut(savedBinding?.shortcut || binding.shortcut),
         team: (savedBinding?.team as ShortcutBinding["team"]) || binding.team,
       };
@@ -525,7 +531,7 @@ function loadShortcutBindings() {
         group: item.group === "zone" ? "zone" as const : "event" as const,
         shortcut: normaliseShortcut(String(item.shortcut || "Unassigned")),
         eventType: cleanEventType(item.eventType, String(item.outcome || item.label)),
-        duration: Number(item.duration || 8),
+        duration: Number(item.duration || QUICK_CODE_CAPTURE_SECONDS) === 15 ? QUICK_CODE_CAPTURE_SECONDS : Number(item.duration || QUICK_CODE_CAPTURE_SECONDS),
         category: (item.category as EventCategory) || "attack",
         outcome: item.outcome ? String(item.outcome) : String(item.label),
         team: item.group === "zone" ? undefined : cleanShortcutTeam(item.team as ShortcutBinding["team"]),
@@ -608,10 +614,21 @@ function loadStoredNumber(key: string) {
 }
 
 function defaultReviewMeta(event?: TimelineEvent | null): ReviewMeta {
+  const trustStatus = event?.trust_status;
+  const eventSource = event?.event_source;
+  const inferred = eventSource === "inferred" || eventSource === "linked_logic";
   return {
-    status: "unreviewed",
-    source: event?.created_at === event?.updated_at ? "manual" : "auto",
-    confidence: 100,
+    status: trustStatus === "confirmed"
+      ? "confirmed"
+      : trustStatus === "rejected"
+        ? "rejected"
+        : trustStatus === "stale"
+          ? "stale"
+          : inferred
+            ? "inferred"
+            : "unreviewed",
+    source: inferred ? eventSource as EventSource : event?.created_at === event?.updated_at ? "manual" : "auto",
+    confidence: Math.round((event?.confidence ?? 1) * 100),
   };
 }
 
@@ -849,7 +866,7 @@ export default function CodingWorkspace() {
       const status = reviewForEvent(event).status;
       counts[status] += 1;
       return counts;
-    }, { unreviewed: 0, confirmed: 0, flagged: 0 });
+    }, { unreviewed: 0, confirmed: 0, flagged: 0, inferred: 0, rejected: 0, stale: 0 });
   }, [events, reviewForEvent]);
 
   const shortcutConflict = useMemo(() => {
@@ -936,8 +953,13 @@ export default function CodingWorkspace() {
     }
     const playhead = Math.max(0, videoRef.current?.currentTime ?? currentTime);
     const safeDuration = Math.max(0.5, duration);
-    const start = extras?.centeredWindow ? Math.max(0, playhead - safeDuration / 2) : playhead;
-    const end = Math.min(videoRef.current?.duration || start + safeDuration, extras?.centeredWindow ? playhead + safeDuration / 2 : start + safeDuration);
+    const videoDuration = videoRef.current?.duration;
+    let start = extras?.centeredWindow ? Math.max(0, playhead - safeDuration / 2) : playhead;
+    let end = start + safeDuration;
+    if (Number.isFinite(videoDuration) && videoDuration && end > videoDuration) {
+      end = videoDuration;
+      if (extras?.centeredWindow) start = Math.max(0, end - safeDuration);
+    }
     const team = extras?.team && extras.team !== "selected" ? extras.team : selectedTeam;
     setBusy(true);
     try {
@@ -1339,6 +1361,26 @@ export default function CodingWorkspace() {
     }));
   }
 
+  async function updateEventTrust(event: TimelineEvent, trustStatus: "confirmed" | "rejected" | "stale") {
+    setBusy(true);
+    try {
+      const updated = await codingApi.updateEvent(event.id, { trust_status: trustStatus });
+      setEvents((current) => current.map((item) => item.id === updated.id ? updated : item).sort((a, b) => a.start_seconds - b.start_seconds));
+      setReviewMeta((current) => ({
+        ...current,
+        [event.id]: {
+          ...defaultReviewMeta(updated),
+          status: trustStatus === "confirmed" ? "confirmed" : trustStatus,
+        },
+      }));
+      setNotice(`${eventLabel(updated)} marked ${trustStatus}.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Unable to update inferred event status");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function markFilteredReviewed() {
     setReviewMeta((current) => {
       const next = { ...current };
@@ -1354,7 +1396,7 @@ export default function CodingWorkspace() {
     const eventIds = new Set(eventsToDelete.map((event) => event.id));
     return events.filter((event) => (
       eventIds.has(event.id) ||
-      (event.linked_event_id !== null && event.linked_event_id !== undefined && eventIds.has(event.linked_event_id) && event.event_source === "linked_logic" && event.trust_status !== "confirmed")
+      (event.linked_event_id !== null && event.linked_event_id !== undefined && eventIds.has(event.linked_event_id) && (event.event_source === "linked_logic" || event.event_source === "inferred") && event.trust_status !== "confirmed")
     ));
   }
 
@@ -1406,6 +1448,24 @@ export default function CodingWorkspace() {
     }
   }
 
+  async function runInference() {
+    if (!selectedMatchId || !selectedVideoId) {
+      setNotice("Select a match and video before running rugby inference.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await codingApi.runInference(selectedMatchId, selectedVideoId);
+      const refreshedEvents = await codingApi.events(selectedMatchId, selectedVideoId);
+      setEvents(refreshedEvents);
+      setNotice(`Inference complete: ${result.created_count} inferred, ${result.stale_count} stale, ${result.skipped_count} skipped. Inferred events stay reviewable.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Unable to run rugby inference");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function submitCustomEvent(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const formElement = event.currentTarget;
@@ -1416,6 +1476,7 @@ export default function CodingWorkspace() {
       phaseNumber: form.get("phase_number") ? Number(form.get("phase_number")) : null,
       fieldZone: String(form.get("field_zone") || "").trim(),
       team: String(form.get("team") || "selected") as EventTeam | "selected",
+      centeredWindow: true,
     });
     if (created) formElement.reset();
   }
@@ -1889,7 +1950,7 @@ export default function CodingWorkspace() {
               <div className="grid grid-cols-3 gap-2 text-center text-xs">
                 <div className="rounded bg-slate-950 px-3 py-2"><p className="font-bold text-slate-400">Unreviewed</p><p className="text-white">{reviewCounts.unreviewed}</p></div>
                 <div className="rounded bg-slate-950 px-3 py-2"><p className="font-bold text-emerald-400">Confirmed</p><p className="text-white">{reviewCounts.confirmed}</p></div>
-                <div className="rounded bg-slate-950 px-3 py-2"><p className="font-bold text-amber-300">Flagged</p><p className="text-white">{reviewCounts.flagged}</p></div>
+                <div className="rounded bg-slate-950 px-3 py-2"><p className="font-bold text-sky-300">Inferred</p><p className="text-white">{reviewCounts.inferred}</p></div>
               </div>
             </div>
             <div
@@ -1925,7 +1986,10 @@ export default function CodingWorkspace() {
                       <span className="mr-8 rounded bg-slate-800 px-2 py-1 text-[11px] capitalize text-slate-300">{teamLabel(item.team)}</span>
                     </div>
                     <p className="mt-2 truncate text-sm font-bold capitalize">{eventLabel(item)}</p>
-                    <p className={`mt-2 text-[11px] font-bold uppercase tracking-[0.12em] ${review.status === "confirmed" ? "text-emerald-300" : review.status === "flagged" ? "text-amber-300" : "text-slate-500"}`}>{review.status}</p>
+                    <div className="mt-2 flex flex-wrap gap-1 text-[11px] font-bold uppercase tracking-[0.12em]">
+                      <span className={review.status === "confirmed" ? "text-emerald-300" : review.status === "flagged" ? "text-amber-300" : review.status === "inferred" ? "text-sky-300" : "text-slate-500"}>{review.status}</span>
+                      {(item.event_source === "inferred" || item.event_source === "linked_logic") ? <span className="rounded bg-sky-950 px-2 py-0.5 text-sky-300">logic</span> : null}
+                    </div>
                   </div>
                 );
               })}
@@ -2138,7 +2202,7 @@ export default function CodingWorkspace() {
               </div>
               <span className="rounded bg-slate-950 px-2 py-1 text-xs font-bold text-emerald-400">{filteredEvents.length}/{events.length}</span>
             </div>
-            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-7" data-design-id="coding-timeline-filter-grid" data-design-label="Timeline filter grid" data-design-priority="510">
+            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-8" data-design-id="coding-timeline-filter-grid" data-design-label="Timeline filter grid" data-design-priority="510">
               <input value={timelineSearch} onChange={(event) => setTimelineSearch(event.target.value)} placeholder="Search event, note, zone or phase" className={`${inputClass} xl:col-span-2`} data-design-id="coding-timeline-search" data-design-label="Timeline search field" />
               <select value={timelineTeamFilter} onChange={(event) => setTimelineTeamFilter(event.target.value as EventTeam | "all")} className={inputClass} data-design-id="coding-timeline-team-filter" data-design-label="Timeline team filter">
                 <option value="all">All teams</option>
@@ -2155,6 +2219,7 @@ export default function CodingWorkspace() {
                 {REVIEW_STATUSES.map((status) => <option key={status.value} value={status.value}>{status.label}</option>)}
               </select>
               <button type="button" onClick={markFilteredReviewed} disabled={!filteredEvents.length} className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-bold disabled:opacity-40" data-design-id="coding-timeline-confirm-filtered" data-design-label="Timeline confirm filtered button">Confirm filtered</button>
+              <button type="button" onClick={() => void runInference()} disabled={busy || !selectedVideoId} className="rounded-lg border border-sky-800 px-3 py-2 text-sm font-bold text-sky-300 disabled:opacity-40" data-design-id="coding-timeline-run-inference" data-design-label="Timeline run inference button">Run inference</button>
               <button type="button" onClick={() => void deleteTimelineEvents(filteredEvents, `${filteredEvents.length} filtered timeline event${filteredEvents.length === 1 ? "" : "s"}`)} disabled={busy || !filteredEvents.length} className="rounded-lg border border-rose-900 px-3 py-2 text-sm font-bold text-rose-300 disabled:opacity-40" data-design-id="coding-timeline-delete-filtered" data-design-label="Timeline delete filtered button">Delete filtered</button>
               <select value={timelineCategoryFilter} onChange={(event) => setTimelineCategoryFilter(event.target.value as EventCategory | "all")} className={inputClass} data-design-id="coding-timeline-category-filter" data-design-label="Timeline category filter">
                 <option value="all">All categories</option>
@@ -2181,7 +2246,8 @@ export default function CodingWorkspace() {
                     <p className="mt-2 truncate text-sm font-bold capitalize">{eventLabel(item)}</p>
                     <div className="mt-2 flex flex-wrap gap-1 text-[11px] font-bold uppercase tracking-[0.12em]">
                       <span className="rounded bg-slate-900 px-2 py-1 text-slate-400">{categoryLabel(eventCategory(item))}</span>
-                      <span className={`rounded px-2 py-1 ${review.status === "confirmed" ? "bg-emerald-950 text-emerald-300" : review.status === "flagged" ? "bg-amber-950 text-amber-300" : "bg-slate-900 text-slate-400"}`}>{review.status}</span>
+                      <span className={`rounded px-2 py-1 ${review.status === "confirmed" ? "bg-emerald-950 text-emerald-300" : review.status === "flagged" ? "bg-amber-950 text-amber-300" : review.status === "inferred" ? "bg-sky-950 text-sky-300" : review.status === "rejected" || review.status === "stale" ? "bg-rose-950 text-rose-300" : "bg-slate-900 text-slate-400"}`}>{review.status}</span>
+                      {(item.event_source === "inferred" || item.event_source === "linked_logic") && <span className="rounded bg-sky-950 px-2 py-1 text-sky-300">logic</span>}
                       {item.clip_requested && <span className="rounded bg-sky-950 px-2 py-1 text-sky-300">clip</span>}
                     </div>
                   </div>
@@ -2198,6 +2264,12 @@ export default function CodingWorkspace() {
                   <div className="flex gap-2">
                     <button type="button" onClick={() => seekTo(selectedEvent.start_seconds)} className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-bold">Play</button>
                     <button type="button" onClick={() => void toggleClipRequest(selectedEvent)} disabled={busy} className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-bold disabled:opacity-40">{selectedEvent.clip_requested ? "Queued" : "Clip queue"}</button>
+                    {(selectedEvent.event_source === "inferred" || selectedEvent.event_source === "linked_logic") ? (
+                      <>
+                        <button type="button" onClick={() => void updateEventTrust(selectedEvent, "confirmed")} disabled={busy} className="rounded-lg border border-emerald-900 px-3 py-2 text-sm font-bold text-emerald-300 disabled:opacity-40">Accept logic</button>
+                        <button type="button" onClick={() => void updateEventTrust(selectedEvent, "rejected")} disabled={busy} className="rounded-lg border border-rose-900 px-3 py-2 text-sm font-bold text-rose-300 disabled:opacity-40">Reject logic</button>
+                      </>
+                    ) : null}
                     <button type="button" onClick={() => void deleteTimelineEvents([selectedEvent], `${eventLabel(selectedEvent)} at ${formatTime(selectedEvent.start_seconds)}`)} disabled={busy} className="rounded-lg border border-rose-900 px-3 py-2 text-sm font-bold text-rose-300 disabled:opacity-40">Delete</button>
                   </div>
                 </div>
@@ -2213,7 +2285,7 @@ export default function CodingWorkspace() {
                 <select value={selectedReview?.status ?? "unreviewed"} onChange={(event) => updateReview(selectedEvent.id, { status: event.target.value as ReviewStatus })} className={inputClass} aria-label="Review status">{REVIEW_STATUSES.map((status) => <option key={status.value} value={status.value}>{status.label}</option>)}</select>
                 <select value={selectedReview?.source ?? "manual"} onChange={(event) => updateReview(selectedEvent.id, { source: event.target.value as EventSource })} className={inputClass} aria-label="Event source">{EVENT_SOURCES.map((source) => <option key={source.value} value={source.value}>{source.label}</option>)}</select>
                 <input type="number" min="0" max="100" value={selectedReview?.confidence ?? 100} onChange={(event) => updateReview(selectedEvent.id, { confidence: Number(event.target.value || 0) })} className={inputClass} aria-label="Confidence percent" />
-                <button type="button" onClick={() => updateReview(selectedEvent.id, { status: "confirmed" })} className="rounded-lg border border-emerald-900 px-3 py-2 text-sm font-bold text-emerald-300">Confirm</button>
+                <button type="button" onClick={() => void updateEventTrust(selectedEvent, "confirmed")} className="rounded-lg border border-emerald-900 px-3 py-2 text-sm font-bold text-emerald-300">Confirm</button>
               </form>
             ) : null}
           </section>

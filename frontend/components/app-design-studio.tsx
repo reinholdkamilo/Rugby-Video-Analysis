@@ -26,6 +26,7 @@ type ElementDesign = {
   kind?: "block" | "button" | "text" | "row" | "column";
   hidden?: boolean;
   deleted?: boolean;
+  locked?: boolean;
   order?: number;
   x?: number;
   y?: number;
@@ -42,6 +43,8 @@ type ElementDesign = {
   background?: string;
   color?: string;
   borderColor?: string;
+  opacity?: number;
+  zIndex?: number;
   radius?: number;
   fontSize?: number;
   fontWeight?: number;
@@ -81,6 +84,27 @@ const DEFAULT_SETTINGS: DesignSettings = {
   theme: DEFAULT_THEME,
   pages: {},
 };
+
+const CODING_BLOCK_LIBRARY: Array<{ id: string; label: string; kind: NonNullable<ElementDesign["kind"]> }> = [
+  { id: "coding-match-video-selector-block", label: "Match and Video Selector", kind: "block" },
+  { id: "coding-notice-block", label: "Status Notice", kind: "block" },
+  { id: "coding-zone-status-block", label: "Active Zone Status", kind: "block" },
+  { id: "coding-workspace-layout-block", label: "Workspace Layout", kind: "block" },
+  { id: "coding-playback-block", label: "Playback Block", kind: "block" },
+  { id: "coding-video-shell-block", label: "Video Player", kind: "block" },
+  { id: "coding-floating-home-key-overlay", label: "Home Transparent Overlay", kind: "block" },
+  { id: "coding-floating-away-key-overlay", label: "Away Transparent Overlay", kind: "block" },
+  { id: "coding-last-code-toast", label: "Recently Coded Event Toast", kind: "block" },
+  { id: "coding-quick-matrix-block", label: "Quick Coding Matrix", kind: "block" },
+  { id: "coding-lower-workspace-grid", label: "Recent and Manual Grid", kind: "row" },
+  { id: "coding-recent-codes-block", label: "Recent Codes", kind: "block" },
+  { id: "coding-manual-event-block", label: "Manual Event Form", kind: "block" },
+  { id: "coding-keyboard-mapping-block", label: "Keyboard Mapping", kind: "block" },
+  { id: "coding-zone-mapping-block", label: "Zone Keyboard Mapping", kind: "block" },
+  { id: "coding-video-controls-block", label: "Video Controls", kind: "block" },
+  { id: "coding-timeline-cleanup-block", label: "Timeline Cleanup", kind: "block" },
+  { id: "coding-timeline-selected-editor", label: "Selected Event Editor", kind: "block" },
+];
 
 const editableSelector = [
   "main [data-design-id]",
@@ -180,6 +204,14 @@ function snap(value: number, grid: number) {
   return Math.round(value / size) * size;
 }
 
+function hasVisualLayout(design?: ElementDesign) {
+  return design?.x !== undefined || design?.y !== undefined || design?.width !== undefined || design?.height !== undefined;
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
+
 function closestDesignElement(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) return null;
   const closest = target.closest<HTMLElement>("[data-design-id]");
@@ -220,6 +252,7 @@ export function AppDesignStudio() {
   const priorityElements = currentElements.filter((item) => (item.order ?? 1000) < 1000);
   const selected = currentElements.find((item) => item.id === selectedId) ?? null;
   const activeSelectionIds = useMemo(() => selectedIds.length ? selectedIds : selectedId ? [selectedId] : [], [selectedId, selectedIds]);
+  const movableSelectionIds = useMemo(() => activeSelectionIds.filter((id) => !currentElements.find((item) => item.id === id)?.locked), [activeSelectionIds, currentElements]);
   const selectedGroupId = selected?.groupId;
 
   const updateElement = useCallback((id: string, updates: Partial<ElementDesign>) => {
@@ -262,13 +295,16 @@ export function AppDesignStudio() {
       element.classList.toggle("design-editable", open);
       element.classList.toggle("design-selected", open && activeSelectionIds.includes(element.dataset.designId ?? ""));
       element.classList.toggle("design-grouped", open && Boolean(design?.groupId));
-      element.classList.toggle("design-positioned", Boolean(design?.x || design?.y || design?.width || design?.height));
+      element.classList.toggle("design-locked", open && Boolean(design?.locked));
+      element.classList.toggle("design-positioned", hasVisualLayout(design));
       element.hidden = Boolean(design?.hidden);
       element.classList.toggle("design-hidden-section", Boolean(design?.hidden));
       element.style.order = design?.order !== undefined ? String(design.order) : "";
-      element.style.transform = design?.x || design?.y ? `translate(${design.x ?? 0}px, ${design.y ?? 0}px)` : "";
-      element.style.position = design?.x || design?.y ? "relative" : "";
-      element.style.zIndex = design?.x || design?.y ? "5" : "";
+      element.style.transform = design?.x !== undefined || design?.y !== undefined ? `translate(${design.x ?? 0}px, ${design.y ?? 0}px)` : "";
+      element.style.position = design?.x !== undefined || design?.y !== undefined
+        ? (window.getComputedStyle(element).position === "static" ? "relative" : "")
+        : "";
+      element.style.zIndex = design?.zIndex !== undefined ? String(design.zIndex) : (design?.x !== undefined || design?.y !== undefined ? "5" : "");
       element.style.width = design?.width ? `${design.width}px` : "";
       element.style.height = design?.height ? `${design.height}px` : "";
       element.style.minHeight = design?.minHeight ? `${design.minHeight}px` : "";
@@ -278,6 +314,7 @@ export function AppDesignStudio() {
       element.style.background = design?.background ?? "";
       element.style.color = design?.color ?? "";
       element.style.borderColor = design?.borderColor ?? "";
+      element.style.opacity = design?.opacity !== undefined ? String(design.opacity) : "";
       element.style.borderRadius = design?.radius !== undefined ? `${design.radius}px` : "";
       element.style.fontSize = design?.fontSize ? `${design.fontSize}px` : "";
       element.style.fontWeight = design?.fontWeight ? String(design.fontWeight) : "";
@@ -298,7 +335,7 @@ export function AppDesignStudio() {
         }
       } else {
         element.classList.remove("design-layout-controlled");
-        const moveDisplay = design?.x || design?.y || design?.width || design?.height ? displayForDesignMove(element, design) : "";
+        const moveDisplay = hasVisualLayout(design) ? displayForDesignMove(element, design) : "";
         element.style.display = moveDisplay;
         if (!active) {
           element.style.display = "";
@@ -374,8 +411,10 @@ export function AppDesignStudio() {
       const detected = detectElements();
       const saved = pageSettings(settings, key).elements;
       const custom = saved.filter((item) => item.custom && !item.deleted);
+      const retainedSaved = saved.filter((item) => !item.custom && !item.deleted && !detected.some((detectedItem) => detectedItem.id === item.id));
       const merged: ElementDesign[] = [
         ...detected.map((item) => saved.find((element) => element.id === item.id) ?? item),
+        ...retainedSaved,
         ...custom,
       ].filter((item) => !item.deleted);
       setElements(merged.sort((a, b) => (a.order ?? 0) - (b.order ?? 0)));
@@ -474,10 +513,10 @@ export function AppDesignStudio() {
   }
 
   const nudgeSelected = useCallback((direction: "up" | "down" | "left" | "right", event: KeyboardEvent) => {
-    if (!activeSelectionIds.length) return;
+    if (!movableSelectionIds.length) return;
     const baseStep = event.altKey ? 1 : settings.theme.snapGrid;
     const step = event.shiftKey ? baseStep * 4 : baseStep;
-    const updates = Object.fromEntries(activeSelectionIds.map((id) => {
+    const updates = Object.fromEntries(movableSelectionIds.map((id) => {
       const item = currentElements.find((element) => element.id === id);
       return [
         id,
@@ -488,7 +527,7 @@ export function AppDesignStudio() {
       ];
     }));
     updateElements(updates);
-  }, [activeSelectionIds, currentElements, settings.theme.snapGrid, updateElements]);
+  }, [currentElements, movableSelectionIds, settings.theme.snapGrid, updateElements]);
 
   useEffect(() => {
     if (!open || !activeSelectionIds.length) return;
@@ -564,14 +603,14 @@ export function AppDesignStudio() {
         nextElements = selectedElement?.custom
           ? nextElements.filter((item) => item.id !== id)
           : nextElements.some((item) => item.id === id)
-            ? nextElements.map((item) => item.id === id ? { ...item, hidden: true, deleted: true } : item)
+            ? nextElements.map((item) => item.id === id ? { ...item, hidden: true, deleted: false } : item)
             : existing
-              ? [...nextElements, { ...existing, hidden: true, deleted: true }]
+              ? [...nextElements, { ...existing, hidden: true, deleted: false }]
               : nextElements;
       }
       return { ...current, pages: { ...current.pages, [key]: { elements: nextElements } } };
     });
-    setElements((current) => current.filter((item) => !activeSelectionIds.includes(item.id)));
+    setElements((current) => current.map((item) => activeSelectionIds.includes(item.id) && !item.custom ? { ...item, hidden: true, deleted: false } : item).filter((item) => !(activeSelectionIds.includes(item.id) && item.custom)));
     setSelectedId(null);
     setSelectedIds([]);
   }
@@ -593,6 +632,37 @@ export function AppDesignStudio() {
       delete pages[key];
       return { ...current, pages };
     });
+  }
+
+  function restoreHiddenBlocks() {
+    const hiddenIds = currentElements.filter((item) => item.hidden && !item.deleted).map((item) => item.id);
+    if (!hiddenIds.length) return;
+    updateElements(Object.fromEntries(hiddenIds.map((id) => [id, { hidden: false, deleted: false }])));
+  }
+
+  function selectOrRestoreBlock(block: { id: string; label: string; kind: NonNullable<ElementDesign["kind"]> }) {
+    const existing = currentElements.find((item) => item.id === block.id);
+    if (existing) {
+      if (existing.hidden) updateElement(block.id, { hidden: false, deleted: false });
+      setSelectedId(block.id);
+      setSelectedIds([block.id]);
+      setPanelTab("element");
+      return;
+    }
+    setSettings((current) => {
+      const page = pageSettings(current, key);
+      const next: ElementDesign = {
+        id: block.id,
+        label: block.label,
+        kind: block.kind,
+        hidden: false,
+        order: 100 + CODING_BLOCK_LIBRARY.findIndex((item) => item.id === block.id),
+      };
+      return { ...current, pages: { ...current.pages, [key]: { elements: [...page.elements, next] } } };
+    });
+    setSelectedId(block.id);
+    setSelectedIds([block.id]);
+    setPanelTab("element");
   }
 
   function resetAllDesign() {
@@ -623,7 +693,8 @@ export function AppDesignStudio() {
   }
 
   function startHandleDrag(mode: DragState["mode"], event: ReactMouseEvent<HTMLButtonElement>) {
-    const ids = activeSelectionIds.length ? activeSelectionIds : selectedId ? [selectedId] : [];
+    const ids = (activeSelectionIds.length ? activeSelectionIds : selectedId ? [selectedId] : [])
+      .filter((id) => !currentElements.find((element) => element.id === id)?.locked);
     if (!ids.length) return;
     event.preventDefault();
     event.stopPropagation();
@@ -668,8 +739,10 @@ export function AppDesignStudio() {
 
       {open && selectedRect ? (
         <div className="design-selection-tools" style={{ left: selectedRect.left, top: selectedRect.top, width: selectedRect.width, height: selectedRect.height }}>
-          <button type="button" className="design-drag-handle" onMouseDown={(event) => startHandleDrag("move", event)}>Move</button>
-          <button type="button" className="design-resize-handle" onMouseDown={(event) => startHandleDrag("resize", event)}>Resize</button>
+          <button type="button" className="design-drag-handle" disabled={!movableSelectionIds.length} onMouseDown={(event) => startHandleDrag("move", event)}>
+            {movableSelectionIds.length ? "Move" : "Locked"}
+          </button>
+          <button type="button" className="design-resize-handle" disabled={!movableSelectionIds.length} onMouseDown={(event) => startHandleDrag("resize", event)}>Resize</button>
         </div>
       ) : null}
 
@@ -698,7 +771,8 @@ export function AppDesignStudio() {
                   <div className="design-button-row">
                     <button type="button" onClick={() => moveElement(-1)}>Move up</button>
                     <button type="button" onClick={() => moveElement(1)}>Move down</button>
-                    <button type="button" onClick={() => updateCurrent({ hidden: !selected.hidden })}>{selected.hidden ? "Show" : "Hide"}</button>
+                    <button type="button" aria-label={selected.hidden ? "Show selected block" : "Hide selected block"} onClick={() => updateCurrent({ hidden: !selected.hidden })}>{selected.hidden ? "Show" : "Hide"}</button>
+                    <button type="button" aria-label={selected.locked ? "Unlock selected block" : "Lock selected block"} onClick={() => updateCurrent({ locked: !selected.locked })}>{selected.locked ? "Unlock" : "Lock"}</button>
                   </div>
                   <div className="design-button-row">
                     <button type="button" onClick={groupSelected} disabled={activeSelectionIds.length < 2}>Group</button>
@@ -708,9 +782,9 @@ export function AppDesignStudio() {
                   <div className="design-button-row">
                     <button type="button" onClick={() => updateCurrent({ x: 0, y: 0 })}>Reset position</button>
                     <button type="button" onClick={resetSelected}>Reset element</button>
-                    <button type="button" className="design-danger" onClick={deleteSelected}>Delete</button>
+                    <button type="button" className="design-danger" aria-label={selected.custom ? "Delete selected custom block" : "Hide selected app block"} onClick={deleteSelected}>{selected.custom ? "Delete" : "Hide"}</button>
                   </div>
-                  <p className="design-empty">Shift-click to multi-select. Grouped items move and resize together. Arrow keys move the current selection; hold Shift for larger moves or Option for 1px nudges.</p>
+                  <p className="design-empty">Shift-click to multi-select. Grouped items move and resize together. Arrow keys move unlocked selections; hold Shift for larger moves or Option for 1px nudges.</p>
                 </>
               ) : <p className="design-empty">Click any section, card, text, button or tool on the page.</p>}
             </section>
@@ -728,12 +802,34 @@ export function AppDesignStudio() {
               <label>Align <select value={selected?.align ?? "stretch"} onChange={(event) => updateCurrent({ align: event.target.value as ElementDesign["align"] })}><option value="stretch">Stretch</option><option value="start">Left/top</option><option value="center">Center</option><option value="end">Right/bottom</option></select></label>
               <label>Width <input type="number" min="0" value={selected?.width ?? ""} onChange={(event) => updateCurrent({ width: numericValue(event.target.value) })} /></label>
               <label>Height <input type="number" min="0" value={selected?.height ?? ""} onChange={(event) => updateCurrent({ height: numericValue(event.target.value) })} /></label>
+              <label>X position <input type="number" value={selected?.x ?? 0} onChange={(event) => updateCurrent({ x: numericValue(event.target.value) ?? 0 })} /></label>
+              <label>Y position <input type="number" value={selected?.y ?? 0} onChange={(event) => updateCurrent({ y: numericValue(event.target.value) ?? 0 })} /></label>
+              <label>Layer <input type="number" min="0" max="200" value={selected?.zIndex ?? ""} onChange={(event) => updateCurrent({ zIndex: numericValue(event.target.value) })} /></label>
             </section>
           ) : null}
 
           {panelTab === "blocks" ? (
             <section>
-              <h3>Add Blocks</h3>
+              {key === "coding" ? (
+                <>
+                  <h3>Coding Blocks</h3>
+                  <div className="design-section-list">
+                    {CODING_BLOCK_LIBRARY.map((block) => {
+                      const existing = currentElements.find((item) => item.id === block.id);
+                      return (
+                        <button key={block.id} type="button" className={selectedId === block.id ? "is-active" : ""} onClick={() => selectOrRestoreBlock(block)}>
+                          {block.label}{existing?.hidden ? " · hidden" : existing ? " · on page" : " · add"}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="design-button-row">
+                    <button type="button" onClick={restoreHiddenBlocks}>Restore hidden blocks</button>
+                    <button type="button" onClick={resetCurrentPage}>Reset Coding layout</button>
+                  </div>
+                </>
+              ) : null}
+              <h3>Custom Blocks</h3>
               <div className="design-block-grid">
                 <button type="button" onClick={() => addCustomElement("block")}>Block</button>
                 <button type="button" onClick={() => addCustomElement("row")}>Row</button>
@@ -762,6 +858,7 @@ export function AppDesignStudio() {
               <label>Background <input type="color" value={selected?.background ?? settings.theme.surface} onChange={(event) => updateCurrent({ background: event.target.value })} /></label>
               <label>Text <input type="color" value={selected?.color ?? settings.theme.ink} onChange={(event) => updateCurrent({ color: event.target.value })} /></label>
               <label>Border <input type="color" value={selected?.borderColor ?? "#dfe6e2"} onChange={(event) => updateCurrent({ borderColor: event.target.value })} /></label>
+              <label>Opacity <input type="range" min="0" max="1" step="0.05" value={selected?.opacity ?? 1} onInput={(event) => updateCurrent({ opacity: clamp(Number(event.currentTarget.value), 0, 1) })} onChange={(event) => updateCurrent({ opacity: clamp(Number(event.target.value), 0, 1) })} /></label>
               <label>Radius <input type="range" min="0" max="40" step="1" value={selected?.radius ?? settings.theme.radius} onChange={(event) => updateCurrent({ radius: Number(event.target.value) })} /></label>
             </section>
           ) : null}
@@ -795,6 +892,19 @@ export function AppDesignStudio() {
                 <label>Corner radius <input type="range" min="0" max="28" step="1" value={settings.theme.radius} onChange={(event) => updateTheme({ radius: Number(event.target.value) })} /></label>
                 <label>Content width <input type="range" min="980" max="1760" step="20" value={settings.theme.contentWidth} onChange={(event) => updateTheme({ contentWidth: Number(event.target.value) })} /></label>
                 <label>Snap grid <input type="range" min="1" max="32" step="1" value={settings.theme.snapGrid} onChange={(event) => updateTheme({ snapGrid: Number(event.target.value) })} /></label>
+              </section>
+
+              <section>
+                <h3>Hidden Blocks</h3>
+                <div className="design-section-list">
+                  {currentElements.filter((element) => element.hidden && !element.deleted).map((element) => (
+                    <button key={element.id} type="button" onClick={() => { updateElement(element.id, { hidden: false, deleted: false }); setSelectedId(element.id); setSelectedIds([element.id]); }}>{element.label}</button>
+                  ))}
+                  {!currentElements.some((element) => element.hidden && !element.deleted) ? <p className="design-empty">No hidden blocks on this tab.</p> : null}
+                </div>
+                <div className="design-button-row">
+                  <button type="button" onClick={restoreHiddenBlocks}>Restore all hidden</button>
+                </div>
               </section>
 
               <section>

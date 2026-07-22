@@ -71,6 +71,25 @@ body main :is(section, article, form, aside, header, .rounded-xl, .rounded-2xl) 
   outline-offset: 3px;
 }
 
+.design-mode-active .design-locked {
+  cursor: not-allowed !important;
+}
+
+.design-mode-active .design-locked::after {
+  content: "Locked";
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  z-index: 3;
+  border-radius: 999px;
+  background: rgba(15,23,42,.84);
+  padding: 3px 7px;
+  color: #f8fafc;
+  font-size: 10px;
+  font-weight: 900;
+  pointer-events: none;
+}
+
 .design-mode-active [contenteditable=true] {
   cursor: text !important;
 }
@@ -186,6 +205,12 @@ body main :is(section, article, form, aside, header, .rounded-xl, .rounded-2xl) 
 
 .design-drag-handle:active {
   cursor: grabbing;
+}
+
+.design-drag-handle:disabled,
+.design-resize-handle:disabled {
+  cursor: not-allowed;
+  opacity: .62;
 }
 
 .design-resize-handle {

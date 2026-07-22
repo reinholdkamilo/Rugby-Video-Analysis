@@ -1648,21 +1648,26 @@ export default function CodingWorkspace() {
       </header>
 
       <div className="mx-auto max-w-[1600px] px-5 py-5">
-        <div className="mb-5 grid gap-3 rounded-xl border border-slate-800 bg-slate-900 p-4 lg:grid-cols-[1fr_1fr_auto]">
-          <select className={inputClass} value={selectedMatchId ?? ""} onChange={(event) => setSelectedMatchId(event.target.value ? Number(event.target.value) : null)}>
+        <div
+          className="mb-5 grid gap-3 rounded-xl border border-slate-800 bg-slate-900 p-4 lg:grid-cols-[1fr_1fr_auto]"
+          data-design-id="coding-match-video-selector-block"
+          data-design-label="Match and video selector block"
+          data-design-priority="5"
+        >
+          <select className={inputClass} value={selectedMatchId ?? ""} onChange={(event) => setSelectedMatchId(event.target.value ? Number(event.target.value) : null)} data-design-id="coding-match-selector" data-design-label="Match selector">
             <option value="">Select match</option>
             {matches.map((match) => <option key={match.id} value={match.id}>{match.match_date} · {teams.find((team) => team.id === match.home_team_id)?.name ?? "Home"} vs {teams.find((team) => team.id === match.away_team_id)?.name ?? "Away"}</option>)}
           </select>
-          <select className={inputClass} value={selectedVideoId ?? ""} onChange={(event) => setSelectedVideoId(event.target.value ? Number(event.target.value) : null)} disabled={!videos.length}>
+          <select className={inputClass} value={selectedVideoId ?? ""} onChange={(event) => setSelectedVideoId(event.target.value ? Number(event.target.value) : null)} disabled={!videos.length} data-design-id="coding-video-selector" data-design-label="Video selector">
             <option value="">Select source video</option>
             {videos.map((video) => <option key={video.id} value={video.id}>{video.original_filename}</option>)}
           </select>
-          <div className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-300">{formatTime(currentTime)} · {events.length} events</div>
+          <div className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-300" data-design-id="coding-video-time-counter" data-design-label="Video time and event counter">{formatTime(currentTime)} · {events.length} events</div>
         </div>
 
         <div className="mb-5 grid gap-3 md:grid-cols-[1fr_auto]">
-          <div className="rounded-xl border border-slate-800 bg-slate-900 px-4 py-3 text-sm text-slate-300">{notice}</div>
-          <div className="rounded-xl border border-emerald-900 bg-emerald-950/30 px-4 py-3 text-sm font-bold text-emerald-200">
+          <div className="rounded-xl border border-slate-800 bg-slate-900 px-4 py-3 text-sm text-slate-300" data-design-id="coding-notice-block" data-design-label="Status notice block" data-design-priority="6">{notice}</div>
+          <div className="rounded-xl border border-emerald-900 bg-emerald-950/30 px-4 py-3 text-sm font-bold text-emerald-200" data-design-id="coding-zone-status-block" data-design-label="Active zone status block" data-design-priority="7">
             {activeZone ? `Active zone: ${zoneValue(activeZone)}` : "Timeline events save immediately"}
           </div>
         </div>
@@ -1713,7 +1718,7 @@ export default function CodingWorkspace() {
             </div>
           </section>
 
-          <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+          <div className="rounded-xl border border-slate-800 bg-slate-900 p-4" data-design-id="coding-playback-block" data-design-label="Playback block" data-design-priority="12">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="font-bold">Playback</h2>
@@ -1733,7 +1738,7 @@ export default function CodingWorkspace() {
                 </div>
               </div>
             </div>
-            <div className={`${videoShellClass} relative overflow-hidden rounded-xl border border-slate-800 bg-black`}>
+            <div className={`${videoShellClass} relative overflow-hidden rounded-xl border border-slate-800 bg-black`} data-design-id="coding-video-shell-block" data-design-label="Video player shell" data-design-priority="13">
               {selectedVideo ? (
                 <video
                   key={selectedVideo.id}

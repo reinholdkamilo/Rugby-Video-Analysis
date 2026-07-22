@@ -148,7 +148,7 @@ export default function LibraryPage() {
       </header>
 
       <section className="mx-auto grid max-w-[1600px] gap-5 px-6 py-6 lg:grid-cols-[310px_1fr]">
-        <aside className="space-y-4">
+        <aside className="space-y-4" data-design-id="library-filters-block" data-design-label="Library filters block">
           <form onSubmit={applyFilters} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
             <h2 className="text-lg font-bold">Find media</h2>
             <div className="mt-4 grid gap-3">
@@ -177,7 +177,7 @@ export default function LibraryPage() {
           </div>
         </aside>
 
-        <section className="space-y-4">
+        <section className="space-y-4" data-design-id="library-grid-block" data-design-label="Library grid block">
           <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>

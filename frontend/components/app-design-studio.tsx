@@ -3,6 +3,7 @@
 import { MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { createPortal } from "react-dom";
 
 type PageKey = "home" | "upload" | "library" | "coding" | "reports" | "evidence" | "intelligence";
 type NodeType = "section" | "row" | "column" | "container" | "group" | "static" | "slot";
@@ -111,6 +112,28 @@ const COMPONENTS: ComponentDefinition[] = [
   { id: "evidence-clips", label: "Evidence Clips", page: "evidence", stateful: true, minWidth: 560, minHeight: 360, description: "Evidence clips and training examples.", href: "/evidence" },
   { id: "intelligence-panels", label: "Intelligence Panels", page: "intelligence", stateful: true, minWidth: 640, minHeight: 360, description: "Learning, analysis and insight panels.", href: "/intelligence" },
 ];
+
+const LIVE_COMPONENT_TARGETS: Partial<Record<PageKey, Record<string, string>>> = {
+  coding: {
+    "match-video-selector": "coding-match-video-selector-block",
+    "video-player": "coding-playback-block",
+    "video-controls": "coding-video-controls-block",
+    "quick-coding-matrix": "coding-quick-matrix-block",
+    "recent-codes": "coding-recent-codes-block",
+    "manual-event-form": "coding-manual-event-block",
+    "timeline-cleanup": "coding-timeline-cleanup-block",
+    "keyboard-mapping": "coding-keyboard-mapping-block",
+    "zone-mapping": "coding-zone-mapping-block",
+  },
+  library: {
+    "library-filters": "library-filters-block",
+    "library-grid": "library-grid-block",
+  },
+  reports: {
+    "report-setup": "reports-setup-block",
+    "report-preview": "reports-preview-block",
+  },
+};
 
 const STATIC_BLOCKS: Array<{ kind: StaticKind; label: string; text: string; width: number; height: number }> = [
   { kind: "blank", label: "Blank Container", text: "", width: 320, height: 180 },
@@ -259,6 +282,113 @@ function normalizeLayout(layout: PageLayout): PageLayout {
   };
 }
 
+function cssEscape(value: string) {
+  if (typeof CSS !== "undefined" && CSS.escape) return CSS.escape(value);
+  return value.replace(/[^a-zA-Z0-9_-]/g, "\\$&");
+}
+
+function liveNodeSelector(targetId: string) {
+  return `[data-design-id="${cssEscape(targetId)}"]`;
+}
+
+function liveNodeStyles(node: CanvasNode) {
+  return [
+    "position:absolute!important",
+    `left:${node.x}px!important`,
+    `top:${node.y}px!important`,
+    `width:${node.width}px!important`,
+    `min-width:${node.minWidth ?? 0}px!important`,
+    `min-height:${node.minHeight ?? 0}px!important`,
+    `height:${node.height}px!important`,
+    `padding:${node.padding}px!important`,
+    `gap:${node.gap}px!important`,
+    `margin:${node.margin}px!important`,
+    `background:${node.background}!important`,
+    `color:${node.color}!important`,
+    `border-color:${node.borderColor}!important`,
+    `border-width:${node.borderWidth}px!important`,
+    "border-style:solid!important",
+    `border-radius:${node.radius}px!important`,
+    `opacity:${node.opacity}!important`,
+    `z-index:${node.zIndex}!important`,
+    `overflow:${node.overflow}!important`,
+    node.hidden ? "display:none!important" : "",
+  ].filter(Boolean).join(";");
+}
+
+function liveLayoutCss(page: PageKey, layout: PageLayout) {
+  const targets = LIVE_COMPONENT_TARGETS[page];
+  if (!targets || !FULLY_WIRED_PAGES.has(page)) return "";
+  const slotNodes = layout.nodes
+    .filter((node) => node.componentId && targets[node.componentId])
+    .sort((a, b) => a.order - b.order);
+  if (!slotNodes.length) return "";
+  const maxHeight = Math.max(920, ...slotNodes.map((node) => node.y + node.height + 80));
+  const rules = [
+    "body.design-engine-editing [data-design-id]{outline:none!important}",
+    `body:has(${liveNodeSelector(Object.values(targets)[0])}) main{position:relative!important;min-height:${maxHeight}px!important;}`,
+    `body:has(${liveNodeSelector(Object.values(targets)[0])}) main > header{position:relative!important;z-index:50!important;}`,
+  ];
+  slotNodes.forEach((node) => {
+    const targetId = targets[node.componentId ?? ""];
+    if (!targetId) return;
+    rules.push(`${liveNodeSelector(targetId)}{${liveNodeStyles(node)}}`);
+  });
+  return rules.join("\n");
+}
+
+function liveStaticNodeStyle(node: CanvasNode): React.CSSProperties {
+  return {
+    position: "absolute",
+    left: node.x,
+    top: node.y,
+    width: node.width,
+    height: node.height,
+    minWidth: node.minWidth,
+    minHeight: node.minHeight,
+    padding: node.padding,
+    margin: node.margin,
+    background: node.background,
+    color: node.color,
+    borderColor: node.borderColor,
+    borderWidth: node.borderWidth,
+    borderStyle: "solid",
+    borderRadius: node.radius,
+    opacity: node.opacity,
+    zIndex: node.zIndex,
+    overflow: node.overflow,
+    display: node.hidden ? "none" : "grid",
+    alignContent: node.align === "center" ? "center" : node.align,
+    pointerEvents: "none",
+  };
+}
+
+function LiveStaticLayout({ layout, page }: { layout: PageLayout; page: PageKey }) {
+  const [mainElement, setMainElement] = useState<HTMLElement | null>(null);
+  const staticNodes = useMemo(() => (
+    FULLY_WIRED_PAGES.has(page)
+      ? layout.nodes.filter((node) => !node.componentId && !node.hidden).sort((a, b) => a.order - b.order)
+      : []
+  ), [layout.nodes, page]);
+
+  useEffect(() => {
+    setMainElement(document.querySelector("main"));
+  }, [page]);
+
+  if (!mainElement || !staticNodes.length) return null;
+
+  return createPortal(
+    <div className="design-live-static-layer" aria-hidden="true">
+      {staticNodes.map((node) => (
+        <div key={node.id} className={`design-live-static design-live-static--${node.staticKind ?? node.type}`} style={liveStaticNodeStyle(node)}>
+          {node.staticKind === "divider" || node.staticKind === "spacer" ? null : <span>{node.text || readable(node.staticKind ?? node.type)}</span>}
+        </div>
+      ))}
+    </div>,
+    mainElement,
+  );
+}
+
 export function AppDesignStudio() {
   const pathname = usePathname();
   const page = pageKey(pathname);
@@ -277,6 +407,7 @@ export function AppDesignStudio() {
   const sortedNodes = [...layout.nodes].filter((node) => !node.hidden).sort((a, b) => a.order - b.order);
   const pageTemplates = store.templates.filter((template) => template.page === page);
   const wiredStatus = FULLY_WIRED_PAGES.has(page) ? "Canvas-enabled" : "Registered placeholder";
+  const appliedLayoutCss = useMemo(() => liveLayoutCss(page, layout), [layout, page]);
 
   const updateStore = useCallback((updater: (current: DesignStore) => DesignStore) => {
     setStore((current) => {
@@ -303,6 +434,11 @@ export function AppDesignStudio() {
     setStore(loaded);
     setReady(true);
   }, []);
+
+  useEffect(() => {
+    document.body.classList.toggle("design-engine-editing", open);
+    return () => document.body.classList.remove("design-engine-editing");
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -606,6 +742,8 @@ export function AppDesignStudio() {
 
   return (
     <>
+      {appliedLayoutCss ? <style id="rugby-live-design-layout">{appliedLayoutCss}</style> : null}
+      <LiveStaticLayout layout={layout} page={page} />
       <button type="button" className="design-studio-toggle" onClick={() => setOpen(true)} aria-expanded={open}>
         Design
       </button>

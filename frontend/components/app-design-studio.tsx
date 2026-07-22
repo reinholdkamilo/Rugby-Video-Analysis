@@ -72,10 +72,22 @@ type SavedTemplate = {
   createdAt: string;
 };
 
+type ElementCssResetMode = "all" | "colors" | "spacing" | "border" | "none";
+
+type ElementCssReset = {
+  id: string;
+  page: PageKey;
+  selector: string;
+  label: string;
+  mode: ElementCssResetMode;
+  createdAt: string;
+};
+
 type DesignStore = {
   version: 3;
   layouts: Partial<Record<PageKey, PageLayout>>;
   templates: SavedTemplate[];
+  elementCssResets?: ElementCssReset[];
 };
 
 type DragState =
@@ -88,7 +100,7 @@ const STORAGE_KEY = "rugby-video-analysis:blank-canvas-design:v3";
 const SUPPORTED_PAGES: PageKey[] = ["home", "upload", "library", "coding", "reports", "evidence", "intelligence"];
 const FULLY_WIRED_PAGES = new Set<PageKey>(["coding", "library", "reports"]);
 
-const DEFAULT_STORE: DesignStore = { version: 3, layouts: {}, templates: [] };
+const DEFAULT_STORE: DesignStore = { version: 3, layouts: {}, templates: [], elementCssResets: [] };
 
 const COMPONENTS: ComponentDefinition[] = [
   { id: "video-player", label: "Video Player", page: "coding", stateful: true, minWidth: 520, minHeight: 300, description: "Video surface with playback, overlays and HUD.", href: "/coding" },
@@ -174,7 +186,7 @@ function readStore(): DesignStore {
     if (!saved) return DEFAULT_STORE;
     const parsed = JSON.parse(saved) as Partial<DesignStore>;
     if (parsed.version !== 3) return DEFAULT_STORE;
-    return { version: 3, layouts: parsed.layouts ?? {}, templates: parsed.templates ?? [] };
+    return { version: 3, layouts: parsed.layouts ?? {}, templates: parsed.templates ?? [], elementCssResets: parsed.elementCssResets ?? [] };
   } catch {
     return DEFAULT_STORE;
   }
@@ -292,6 +304,41 @@ function liveNodeSelector(targetId: string) {
   return `[data-design-id="${cssEscape(targetId)}"]`;
 }
 
+function elementLabel(element: HTMLElement) {
+  const designLabel = element.getAttribute("data-design-label");
+  if (designLabel) return designLabel;
+  const text = element.innerText?.trim().replace(/\s+/g, " ").slice(0, 42);
+  const id = element.id ? `#${element.id}` : "";
+  return `${element.tagName.toLowerCase()}${id}${text ? ` · ${text}` : ""}`;
+}
+
+function selectorForElement(element: HTMLElement) {
+  const designId = element.getAttribute("data-design-id");
+  if (designId) return `[data-design-id="${cssEscape(designId)}"]`;
+  if (element.id) return `#${cssEscape(element.id)}`;
+  const parts: string[] = [];
+  let current: HTMLElement | null = element;
+  while (current && current.tagName.toLowerCase() !== "html") {
+    const tag = current.tagName.toLowerCase();
+    if (tag === "body") {
+      parts.unshift("body");
+      break;
+    }
+    if (tag === "main") {
+      parts.unshift("main");
+      break;
+    }
+    const parent: HTMLElement | null = current.parentElement;
+    if (!parent) break;
+    const currentTag = current.tagName;
+    const sameTagSiblings = Array.from(parent.children).filter((child) => child.tagName === currentTag);
+    const index = sameTagSiblings.indexOf(current) + 1;
+    parts.unshift(`${tag}:nth-of-type(${Math.max(1, index)})`);
+    current = parent;
+  }
+  return parts.join(" > ");
+}
+
 function liveNodeStyles(node: CanvasNode) {
   return [
     "position:absolute!important",
@@ -336,6 +383,50 @@ function liveLayoutCss(page: PageKey, layout: PageLayout) {
     rules.push(`${liveNodeSelector(targetId)}{${liveNodeStyles(node)}}`);
   });
   return rules.join("\n");
+}
+
+function elementResetStyles(mode: ElementCssResetMode) {
+  if (mode === "all") {
+    return [
+      "all:revert!important",
+      "box-sizing:border-box!important",
+      "font:inherit!important",
+      "color:inherit!important",
+    ].join(";");
+  }
+  if (mode === "colors") {
+    return [
+      "color:inherit!important",
+      "background:transparent!important",
+      "background-image:none!important",
+      "box-shadow:none!important",
+    ].join(";");
+  }
+  if (mode === "spacing") {
+    return [
+      "margin:0!important",
+      "padding:0!important",
+      "gap:0!important",
+      "min-width:0!important",
+      "min-height:0!important",
+    ].join(";");
+  }
+  if (mode === "border") {
+    return [
+      "border:0!important",
+      "border-radius:0!important",
+      "box-shadow:none!important",
+      "outline:0!important",
+    ].join(";");
+  }
+  return "";
+}
+
+function elementResetCss(page: PageKey, resets: ElementCssReset[]) {
+  return resets
+    .filter((reset) => reset.page === page && reset.mode !== "none")
+    .map((reset) => `${reset.selector}{${elementResetStyles(reset.mode)}}`)
+    .join("\n");
 }
 
 function liveStaticNodeStyle(node: CanvasNode): React.CSSProperties {
@@ -402,6 +493,8 @@ export function AppDesignStudio() {
   const [open, setOpen] = useState(false);
   const [store, setStore] = useState<DesignStore>(DEFAULT_STORE);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [elementPickMode, setElementPickMode] = useState(false);
+  const [selectedElement, setSelectedElement] = useState<{ selector: string; label: string; rect: LiveRect } | null>(null);
   const [templateName, setTemplateName] = useState("");
   const [notice, setNotice] = useState("Design Engine ready.");
   const [, setMeasureTick] = useState(0);
@@ -412,8 +505,9 @@ export function AppDesignStudio() {
   const usedComponents = usedStatefulComponents(layout);
   const sortedNodes = [...layout.nodes].filter((node) => !node.hidden).sort((a, b) => a.order - b.order);
   const pageTemplates = store.templates.filter((template) => template.page === page);
+  const pageElementResets = (store.elementCssResets ?? []).filter((reset) => reset.page === page);
   const wiredStatus = FULLY_WIRED_PAGES.has(page) ? "Canvas-enabled" : "Registered placeholder";
-  const appliedLayoutCss = useMemo(() => liveLayoutCss(page, layout), [layout, page]);
+  const appliedLayoutCss = useMemo(() => [liveLayoutCss(page, layout), elementResetCss(page, store.elementCssResets ?? [])].filter(Boolean).join("\n"), [layout, page, store.elementCssResets]);
 
   const updateStore = useCallback((updater: (current: DesignStore) => DesignStore) => {
     setStore((current) => {
@@ -444,6 +538,12 @@ export function AppDesignStudio() {
   useEffect(() => {
     document.body.classList.toggle("design-engine-editing", open);
     return () => document.body.classList.remove("design-engine-editing");
+  }, [open]);
+
+  useEffect(() => {
+    if (open) return;
+    setElementPickMode(false);
+    setSelectedElement(null);
   }, [open]);
 
   useEffect(() => {
@@ -508,6 +608,29 @@ export function AppDesignStudio() {
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [layout.gridSize, open, selected, updateNode]);
+
+  useEffect(() => {
+    if (!open || !elementPickMode) return;
+    const onClick = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target || target.closest(".design-live-topbar, .design-live-panel, .design-studio-toggle, .design-live-overlays")) return;
+      const candidate = target.closest<HTMLElement>("main *");
+      if (!candidate) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const rect = candidate.getBoundingClientRect();
+      const next = {
+        selector: selectorForElement(candidate),
+        label: elementLabel(candidate),
+        rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+      };
+      setSelectedElement(next);
+      setSelectedId(null);
+      setNotice(`Selected element: ${next.label}`);
+    };
+    document.addEventListener("click", onClick, true);
+    return () => document.removeEventListener("click", onClick, true);
+  }, [elementPickMode, open]);
 
   function startDrag(mode: DragState["mode"], node: CanvasNode, event: ReactMouseEvent<HTMLButtonElement | HTMLDivElement>) {
     if (node.locked) return;
@@ -702,6 +825,44 @@ export function AppDesignStudio() {
     updateNode(selected.id, updates);
   }
 
+  function applyElementReset(mode: ElementCssResetMode) {
+    if (!selectedElement) {
+      setNotice("Turn on Element Inspect and click a page element first.");
+      return;
+    }
+    updateStore((current) => {
+      const existing = current.elementCssResets ?? [];
+      const nextReset: ElementCssReset = {
+        id: uid("element-css"),
+        page,
+        selector: selectedElement.selector,
+        label: selectedElement.label,
+        mode,
+        createdAt: now(),
+      };
+      return {
+        ...current,
+        elementCssResets: [...existing.filter((reset) => !(reset.page === page && reset.selector === selectedElement.selector)), nextReset],
+      };
+    });
+    setNotice(`${mode === "all" ? "All CSS rules" : readable(mode)} removed from ${selectedElement.label}.`);
+  }
+
+  function restoreSelectedElement() {
+    if (!selectedElement) return;
+    updateStore((current) => ({
+      ...current,
+      elementCssResets: (current.elementCssResets ?? []).filter((reset) => !(reset.page === page && reset.selector === selectedElement.selector)),
+    }));
+    setNotice(`Restored styling for ${selectedElement.label}.`);
+  }
+
+  function clearPageElementResets() {
+    updateStore((current) => ({ ...current, elementCssResets: (current.elementCssResets ?? []).filter((reset) => reset.page !== page) }));
+    setSelectedElement(null);
+    setNotice(`All element CSS resets cleared for ${readable(page)}.`);
+  }
+
   function renderLiveOverlay(node: CanvasNode) {
     const rect = liveRectForNode(node);
     const selectedClass = selectedId === node.id ? " is-selected" : "";
@@ -809,6 +970,34 @@ export function AppDesignStudio() {
         </section>
 
         <section>
+          <h2>Element CSS</h2>
+          <div className="design-engine-form">
+            <button type="button" onClick={() => setElementPickMode((current) => !current)} className={elementPickMode ? "is-active" : ""}>
+              {elementPickMode ? "Element Inspect On" : "Inspect Any Element"}
+            </button>
+            {selectedElement ? (
+              <>
+                <p><strong>{selectedElement.label}</strong></p>
+                <small>{selectedElement.selector}</small>
+                <div className="design-engine-button-row">
+                  <button type="button" onClick={() => applyElementReset("all")}>Remove all CSS</button>
+                  <button type="button" onClick={() => applyElementReset("colors")}>Remove colours</button>
+                  <button type="button" onClick={() => applyElementReset("spacing")}>Remove spacing</button>
+                  <button type="button" onClick={() => applyElementReset("border")}>Remove borders</button>
+                </div>
+                <button type="button" onClick={restoreSelectedElement}>Restore selected element</button>
+              </>
+            ) : <p>Turn on inspect, then click any page element to target it.</p>}
+            {pageElementResets.length ? (
+              <>
+                <small>{pageElementResets.length} saved CSS reset{pageElementResets.length === 1 ? "" : "s"} on this page.</small>
+                <button type="button" className="design-engine-danger" onClick={clearPageElementResets}>Restore all page elements</button>
+              </>
+            ) : null}
+          </div>
+        </section>
+
+        <section>
           <h2>Templates</h2>
           <div className="design-engine-form">
             <input value={templateName} onChange={(event) => setTemplateName(event.target.value)} placeholder="Template name" />
@@ -842,6 +1031,7 @@ export function AppDesignStudio() {
         </div>
         <div className="design-live-notice">{notice}</div>
         <div className="design-live-overlays">{sortedNodes.map(renderLiveOverlay)}</div>
+        {selectedElement ? <div className="design-live-element-outline" style={{ left: selectedElement.rect.left, top: selectedElement.rect.top, width: selectedElement.rect.width, height: selectedElement.rect.height }}>{selectedElement.label}</div> : null}
         {renderInlineInspector()}
       </>,
       document.body,

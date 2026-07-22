@@ -90,7 +90,6 @@ const CODING_STATEFUL_BLOCKS: Array<{ id: string; label: string; kind: NonNullab
   { id: "coding-match-video-selector-block", label: "Match/Video Selector", kind: "block" },
   { id: "coding-notice-block", label: "Status Notice", kind: "block" },
   { id: "coding-zone-status-block", label: "Active Zone Status", kind: "block" },
-  { id: "coding-workspace-layout-block", label: "Workspace Layout Controls", kind: "block" },
   { id: "coding-playback-block", label: "Playback Area", kind: "block" },
   { id: "coding-video-shell-block", label: "Video Player", kind: "block" },
   { id: "coding-video-controls-block", label: "Video Controls", kind: "block" },
@@ -105,7 +104,6 @@ const CODING_STATEFUL_BLOCKS: Array<{ id: string; label: string; kind: NonNullab
   { id: "coding-zone-mapping-block", label: "Zone Mapping", kind: "block" },
   { id: "coding-floating-home-key-overlay", label: "Home Transparent Overlay", kind: "block" },
   { id: "coding-floating-away-key-overlay", label: "Away Transparent Overlay", kind: "block" },
-  { id: "coding-last-code-toast", label: "Last Coded Event Toast", kind: "block" },
 ];
 
 const CUSTOM_CONTAINER_LIBRARY: Array<{ kind: NonNullable<ElementDesign["kind"]>; label: string; text: string }> = [

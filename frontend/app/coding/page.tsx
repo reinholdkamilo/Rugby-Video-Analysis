@@ -69,6 +69,7 @@ type LastCodedEvent = {
   event: TimelineEvent;
   label: string;
   teamLabel: string;
+  shortcut?: string;
 };
 
 type ShortcutBinding = {
@@ -616,7 +617,6 @@ function defaultReviewMeta(event?: TimelineEvent | null): ReviewMeta {
 
 export default function CodingWorkspace() {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const hudDragRef = useRef<{ panelId: HudPanelId; startX: number; startY: number; originX: number; originY: number } | null>(null);
   const [matches, setMatches] = useState<Match[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
   const [videos, setVideos] = useState<VideoAsset[]>([]);
@@ -647,6 +647,7 @@ export default function CodingWorkspace() {
   const [showAdvancedMapping, setShowAdvancedMapping] = useState(false);
   const [hudLayouts, setHudLayouts] = useState<HudLayouts>(DEFAULT_HUD_LAYOUTS);
   const [lastCodedEvent, setLastCodedEvent] = useState<LastCodedEvent | null>(null);
+  const [lastCodedHudVisible, setLastCodedHudVisible] = useState(false);
   const [undoingEventId, setUndoingEventId] = useState<number | null>(null);
   const [notice, setNotice] = useState("Loading coding workspace...");
   const [busy, setBusy] = useState(false);
@@ -924,7 +925,7 @@ export default function CodingWorkspace() {
     ? "rounded-lg border border-slate-800 bg-slate-900 p-2"
     : "rounded-lg border border-slate-800 bg-slate-900 p-3";
 
-  const createEvent = useCallback(async (type: EventType, duration = QUICK_CODE_CAPTURE_SECONDS, extras?: { notes?: string; outcome?: string; phaseNumber?: number | null; fieldZone?: string; label?: string; team?: EventTeam | "selected"; centeredWindow?: boolean }) => {
+  const createEvent = useCallback(async (type: EventType, duration = QUICK_CODE_CAPTURE_SECONDS, extras?: { notes?: string; outcome?: string; phaseNumber?: number | null; fieldZone?: string; label?: string; team?: EventTeam | "selected"; centeredWindow?: boolean; shortcut?: string }) => {
     if (!selectedMatchId) {
       setNotice("Select a match before coding events.");
       return null;
@@ -969,7 +970,8 @@ export default function CodingWorkspace() {
       const zoneText = created.field_zone ? ` in ${created.field_zone}` : "";
       const label = extras?.label || extras?.outcome || type;
       const codedTeamLabel = teamLabel(team);
-      setLastCodedEvent({ event: created, label, teamLabel: codedTeamLabel });
+      setLastCodedEvent({ event: created, label, teamLabel: codedTeamLabel, shortcut: extras?.shortcut });
+      setLastCodedHudVisible(true);
       setNotice(`${label} saved from ${formatTime(start)} to ${formatTime(created.end_seconds)} for ${codedTeamLabel}${zoneText}. Reports update from saved timeline events.`);
       return created;
     } catch (error) {
@@ -982,7 +984,7 @@ export default function CodingWorkspace() {
 
   const createEventFromBinding = useCallback((binding: ShortcutBinding) => {
     if (!binding.eventType) {
-      setNotice("This coding button has no rugby event type assigned. Use Edit to set the event type.");
+      setNotice("This coding button has no rugby event type assigned. Use Option-click to open settings.");
       return;
     }
     void createEvent(binding.eventType, binding.duration || QUICK_CODE_CAPTURE_SECONDS, {
@@ -992,6 +994,7 @@ export default function CodingWorkspace() {
       label: binding.label,
       team: binding.team,
       centeredWindow: true,
+      shortcut: binding.shortcut,
     });
   }, [createEvent]);
 
@@ -1001,6 +1004,7 @@ export default function CodingWorkspace() {
     setUndoingEventId(eventToUndo.id);
     try {
       await deleteTimelineEvents([eventToUndo], `${lastCodedEvent.teamLabel} ${lastCodedEvent.label}`, false);
+      setLastCodedHudVisible(false);
       setNotice(`Undid ${lastCodedEvent.teamLabel} ${lastCodedEvent.label} at ${formatTime(eventToUndo.start_seconds)}.`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Unable to undo the last coded event");
@@ -1010,6 +1014,16 @@ export default function CodingWorkspace() {
   // deleteTimelineEvents is a local function declaration; including it causes a new callback each render.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastCodedEvent, undoingEventId]);
+
+  useEffect(() => {
+    if (!lastCodedEvent) {
+      setLastCodedHudVisible(false);
+      return;
+    }
+    setLastCodedHudVisible(true);
+    const timeout = window.setTimeout(() => setLastCodedHudVisible(false), 4000);
+    return () => window.clearTimeout(timeout);
+  }, [lastCodedEvent]);
 
   const runVideoCommand = useCallback((command: VideoCommand) => {
     const video = videoRef.current;
@@ -1147,75 +1161,6 @@ export default function CodingWorkspace() {
     setNotice("All rugby event buttons deleted. Use reset shortcuts to restore the clean Rugby Taxonomy v1 button set.");
   }
 
-  function updateCodingLayout(updates: Partial<CodingLayout>) {
-    setCodingLayout((current) => ({ ...current, ...updates }));
-  }
-
-  function resetCodingLayout() {
-    setCodingLayout(DEFAULT_CODING_LAYOUT);
-    setNotice("Coding workspace layout reset.");
-  }
-
-  function updateHudLayout(panelId: HudPanelId, updates: Partial<HudLayout>) {
-    setHudLayouts((current) => ({
-      ...current,
-      [panelId]: { ...current[panelId], ...updates },
-    }));
-  }
-
-  function setHudVisibility(visible: boolean) {
-    setHudLayouts((current) => ({
-      home: { ...current.home, visible },
-      away: { ...current.away, visible },
-    }));
-  }
-
-  function resetHudLayout(panelId?: HudPanelId) {
-    if (panelId) {
-      setHudLayouts((current) => ({ ...current, [panelId]: DEFAULT_HUD_LAYOUTS[panelId] }));
-      setNotice(`${panelId === "home" ? "Home" : "Away"} key overlay reset.`);
-      return;
-    }
-    setHudLayouts(DEFAULT_HUD_LAYOUTS);
-    setNotice("Floating key overlays reset.");
-  }
-
-  function startHudDrag(panelId: HudPanelId, event: ReactMouseEvent<HTMLDivElement>) {
-    const layout = hudLayouts[panelId];
-    hudDragRef.current = {
-      panelId,
-      startX: event.clientX,
-      startY: event.clientY,
-      originX: layout.x,
-      originY: layout.y,
-    };
-    event.preventDefault();
-  }
-
-  useEffect(() => {
-    const onMove = (event: MouseEvent) => {
-      const drag = hudDragRef.current;
-      if (!drag) return;
-      setHudLayouts((current) => ({
-        ...current,
-        [drag.panelId]: {
-          ...current[drag.panelId],
-          x: Math.max(0, drag.originX + event.clientX - drag.startX),
-          y: Math.max(0, drag.originY + event.clientY - drag.startY),
-        },
-      }));
-    };
-    const onUp = () => {
-      hudDragRef.current = null;
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-    return () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-  }, []);
-
   function moveQuickColumn(targetColumnId: QuickColumnId) {
     if (!draggingColumnId || draggingColumnId === targetColumnId) return;
     setCodingLayout((current) => {
@@ -1277,6 +1222,10 @@ export default function CodingWorkspace() {
   }
 
   function handleHudButtonClick(event: ReactMouseEvent<HTMLButtonElement>, binding: ShortcutBinding) {
+    if (event.altKey) {
+      openQuickEdit(binding);
+      return;
+    }
     if (event.shiftKey) {
       startShortcutRecording(binding);
       return;
@@ -1528,42 +1477,11 @@ export default function CodingWorkspace() {
           opacity: layout.opacity,
         }}
       >
-        <div className="mb-3 flex cursor-move items-center justify-between gap-2 border-b border-white/10 pb-2" onMouseDown={(event) => startHudDrag(panelId, event)}>
+        <div className="mb-3 flex items-center justify-between gap-2 border-b border-white/10 pb-2">
           <div>
             <h3 className="text-sm font-black">{title}</h3>
-            <p className="text-[11px] text-slate-400">{teamName}. Drag this bar. Press Delete to undo.</p>
+            <p className="text-[11px] text-slate-400">{teamName}. Press Delete to undo.</p>
           </div>
-          <button type="button" onMouseDown={(event) => event.stopPropagation()} onClick={() => updateHudLayout(panelId, { visible: false })} className="rounded border border-white/20 px-2 py-1 text-xs font-bold">Hide</button>
-        </div>
-
-        <div className="mb-3 grid gap-2 text-[11px] md:grid-cols-2">
-          <label className="grid gap-1">
-            <span className="font-bold uppercase tracking-[0.14em] text-slate-400">Opacity</span>
-            <input type="range" min="25" max="100" value={Math.round(layout.opacity * 100)} onChange={(event) => updateHudLayout(panelId, { opacity: Number(event.target.value) / 100 })} />
-          </label>
-          <label className="grid gap-1">
-            <span className="font-bold uppercase tracking-[0.14em] text-slate-400">Width</span>
-            <input type="range" min="240" max="760" value={layout.width} onChange={(event) => updateHudLayout(panelId, { width: Number(event.target.value) })} />
-          </label>
-          <button type="button" onClick={() => updateHudLayout(panelId, { compact: !layout.compact })} className="rounded border border-white/20 px-2 py-1 font-bold">{layout.compact ? "Full view" : "Compact"}</button>
-          <button type="button" onClick={() => resetHudLayout(panelId)} className="rounded border border-white/20 px-2 py-1 font-bold">Reset {panelId}</button>
-        </div>
-
-        <div className="mb-3 grid gap-2 text-[11px] md:grid-cols-3">
-          <label className="grid gap-1">
-            <span className="font-bold uppercase tracking-[0.14em] text-slate-400">Button columns</span>
-            <select value={layout.buttonColumns} onChange={(event) => updateHudLayout(panelId, { buttonColumns: Number(event.target.value) as HudButtonColumns })} className="rounded border border-white/20 bg-slate-950 px-2 py-1 text-white">
-              {([1, 2, 3, 4] as HudButtonColumns[]).map((count) => <option key={count} value={count}>{count}</option>)}
-            </select>
-          </label>
-          <label className="grid gap-1">
-            <span className="font-bold uppercase tracking-[0.14em] text-slate-400">Spacing</span>
-            <input type="range" min="0" max="18" value={layout.buttonGap} onChange={(event) => updateHudLayout(panelId, { buttonGap: Number(event.target.value) })} />
-          </label>
-          <label className="grid gap-1">
-            <span className="font-bold uppercase tracking-[0.14em] text-slate-400">Button size</span>
-            <input type="range" min="75" max="150" value={Math.round(layout.buttonScale * 100)} onChange={(event) => updateHudLayout(panelId, { buttonScale: Number(event.target.value) / 100 })} />
-          </label>
         </div>
 
         <div
@@ -1583,12 +1501,12 @@ export default function CodingWorkspace() {
                 moveHudButton(panelId, binding.id);
               }}
               onDragEnd={() => setDraggingHudButton(null)}
-              className={`grid min-w-0 grid-cols-[1fr_auto] items-stretch overflow-hidden rounded border border-white/10 bg-black/25 hover:border-emerald-300 ${activeZoneId === binding.id ? "bg-emerald-400/20" : ""} ${editingShortcutId === binding.id ? "border-amber-300 ring-1 ring-amber-300/50" : ""}`}
+              className={`grid min-w-0 items-stretch overflow-hidden rounded border border-white/10 bg-black/25 hover:border-emerald-300 ${activeZoneId === binding.id ? "bg-emerald-400/20" : ""} ${editingShortcutId === binding.id ? "border-amber-300 ring-1 ring-amber-300/50" : ""}`}
               style={{ minHeight: Math.round(34 * layout.buttonScale) }}
             >
               <button
                 type="button"
-                title="Click to code or set zone. Shift-click to assign a key."
+                title="Click to code or set zone. Shift-click assigns a key. Option-click opens settings."
                 onClick={(event) => handleHudButtonClick(event, binding)}
                 className="grid min-w-0 grid-cols-[auto_1fr] items-center text-left"
                 style={{
@@ -1614,17 +1532,6 @@ export default function CodingWorkspace() {
                     </span>
                   ) : null}
                 </span>
-              </button>
-              <button
-                type="button"
-                title={`Edit ${displayEventLabel(binding)} settings`}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  openQuickEdit(binding);
-                }}
-                className="border-l border-white/10 px-2 text-[10px] font-black uppercase tracking-[0.08em] text-slate-400 hover:bg-white/10 hover:text-white"
-              >
-                Edit
               </button>
             </div>
           ))}
@@ -1675,70 +1582,11 @@ export default function CodingWorkspace() {
         </div>
 
         <section className="space-y-5">
-          <section
-            className="rounded-xl border border-slate-800 bg-slate-900 p-4"
-            data-design-id="coding-workspace-layout-block"
-            data-design-label="Workspace layout block"
-            data-design-priority="10"
-            data-coding-layout-container="true"
-          >
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h2 className="font-bold">Workspace layout</h2>
-                <p className="text-xs text-slate-500">Design the coding surface for the way you review rugby: home/away columns, zone keys, density and drag order are saved in this browser.</p>
-              </div>
-              <button type="button" onClick={resetCodingLayout} className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-bold">Reset layout</button>
-            </div>
-            <div className="grid gap-3 lg:grid-cols-4">
-              <div className="rounded-lg border border-slate-800 bg-slate-950 p-3">
-                <p className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Quick code columns</p>
-                <div className="flex rounded-lg border border-slate-700 p-1 text-sm">
-                  {([2, 3, 4] as LayoutColumnCount[]).map((count) => (
-                    <button key={count} type="button" onClick={() => updateCodingLayout({ quickColumns: count })} className={`flex-1 rounded-md px-3 py-1.5 ${codingLayout.quickColumns === count ? "bg-emerald-400 font-bold text-slate-950" : "text-slate-300"}`}>{count}</button>
-                  ))}
-                </div>
-              </div>
-              <div className="rounded-lg border border-slate-800 bg-slate-950 p-3">
-                <p className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Mapping columns</p>
-                <div className="flex rounded-lg border border-slate-700 p-1 text-sm">
-                  {([2, 3, 4] as LayoutColumnCount[]).map((count) => (
-                    <button key={count} type="button" onClick={() => updateCodingLayout({ mappingColumns: count })} className={`flex-1 rounded-md px-3 py-1.5 ${codingLayout.mappingColumns === count ? "bg-emerald-400 font-bold text-slate-950" : "text-slate-300"}`}>{count}</button>
-                  ))}
-                </div>
-              </div>
-              <div className="rounded-lg border border-slate-800 bg-slate-950 p-3">
-                <p className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Density</p>
-                <div className="flex rounded-lg border border-slate-700 p-1 text-sm">
-                  {(["comfortable", "compact"] as LayoutDensity[]).map((density) => (
-                    <button key={density} type="button" onClick={() => updateCodingLayout({ density })} className={`flex-1 rounded-md px-3 py-1.5 capitalize ${codingLayout.density === density ? "bg-emerald-400 font-bold text-slate-950" : "text-slate-300"}`}>{density}</button>
-                  ))}
-                </div>
-              </div>
-              <div className="rounded-lg border border-slate-800 bg-slate-950 p-3">
-                <p className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Drag mode</p>
-                <p className="text-sm text-slate-300">Drag column headers or event buttons to reshape the home and away coding matrix.</p>
-              </div>
-            </div>
-          </section>
-
           <div className="rounded-xl border border-slate-800 bg-slate-900 p-4" data-design-id="coding-playback-block" data-design-label="Playback block" data-design-priority="12" data-coding-layout-container="true">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="font-bold">Playback</h2>
                 <p className="text-xs text-slate-500">Centered video workspace for live coding.</p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <button type="button" onClick={() => setHudVisibility(!(hudLayouts.home.visible || hudLayouts.away.visible))} className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-bold">
-                  {hudLayouts.home.visible || hudLayouts.away.visible ? "Hide key overlays" : "Show key overlays"}
-                </button>
-                <button type="button" onClick={() => resetHudLayout()} className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-bold">
-                  Reset overlays
-                </button>
-                <div className="flex rounded-lg border border-slate-700 p-1 text-sm">
-                  {(["standard", "large", "theatre"] as VideoLayoutMode[]).map((mode) => (
-                    <button key={mode} type="button" onClick={() => setVideoLayout(mode)} className={`rounded-md px-3 py-1.5 capitalize ${videoLayout === mode ? "bg-emerald-400 font-bold text-slate-950" : "text-slate-300"}`}>{mode}</button>
-                  ))}
-                </div>
               </div>
             </div>
             <div className={`${videoShellClass} relative overflow-hidden rounded-xl border border-slate-800 bg-black`} data-design-id="coding-video-shell-block" data-design-label="Video player shell" data-design-priority="13" data-coding-layout-container="true">
@@ -1759,17 +1607,28 @@ export default function CodingWorkspace() {
               {renderHudPanel("home")}
               {renderHudPanel("away")}
 
-              {lastCodedEvent ? (
-                <div className="absolute right-3 top-3 z-30 max-w-sm rounded-lg border border-emerald-300/40 bg-slate-950/85 p-3 text-white shadow-2xl backdrop-blur" data-design-id="coding-last-code-toast" data-design-label="Last coded event toast" data-coding-layout-container="true">
+              {lastCodedEvent && lastCodedHudVisible ? (
+                <div
+                  className="absolute right-3 top-3 z-40 w-[min(92%,340px)] rounded-lg border border-emerald-300/40 bg-slate-950/90 p-3 text-white shadow-2xl backdrop-blur"
+                  onClick={(event) => event.stopPropagation()}
+                  onMouseDown={(event) => event.stopPropagation()}
+                >
                   <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-emerald-300">Code saved</p>
                   <p className="mt-1 text-sm font-black">{lastCodedEvent.teamLabel} {lastCodedEvent.label}</p>
-                  <p className="mt-1 text-xs text-slate-300">
-                    {formatTime(lastCodedEvent.event.start_seconds)}
-                    {lastCodedEvent.event.field_zone ? ` - ${lastCodedEvent.event.field_zone}` : ""}
-                  </p>
+                  <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-slate-300">
+                    <span>{formatTime(lastCodedEvent.event.start_seconds)} to {formatTime(lastCodedEvent.event.end_seconds)}</span>
+                    <span className="text-right">{Math.max(0, lastCodedEvent.event.end_seconds - lastCodedEvent.event.start_seconds).toFixed(1)}s</span>
+                    <span>{lastCodedEvent.event.field_zone || "No zone"}</span>
+                    <span className="text-right">{lastCodedEvent.shortcut ? shortcutLabel(lastCodedEvent.shortcut) : "Manual"}</span>
+                  </div>
                   <div className="mt-2 flex items-center justify-between gap-2">
                     <span className="text-[11px] text-slate-400">Press Delete to undo</span>
-                    <button type="button" onClick={() => void undoLastCodedEvent()} disabled={undoingEventId === lastCodedEvent.event.id} className="rounded border border-white/20 px-2 py-1 text-xs font-bold disabled:opacity-40">
+                    <button
+                      type="button"
+                      onClick={(event) => { event.stopPropagation(); void undoLastCodedEvent(); }}
+                      disabled={undoingEventId === lastCodedEvent.event.id}
+                      className="rounded border border-white/20 px-2 py-1 text-xs font-bold hover:border-rose-300 hover:text-rose-200 disabled:opacity-40"
+                    >
                       {undoingEventId === lastCodedEvent.event.id ? "Undoing" : "Undo"}
                     </button>
                   </div>
@@ -1788,7 +1647,7 @@ export default function CodingWorkspace() {
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="font-bold">Quick coding matrix</h2>
-                <p className="text-xs text-slate-500">Home and away stay side by side. Click to code. Shift-click a button to assign a key. Use Edit for full settings.</p>
+                <p className="text-xs text-slate-500">Home and away stay side by side. Click to code. Shift-click assigns a key. Option-click opens full settings.</p>
               </div>
               <div className="flex flex-wrap gap-2 text-sm">
                 <button type="button" onClick={() => setQuickAddPanel((current) => current === "event" ? null : "event")} className="rounded-lg bg-emerald-400 px-3 py-2 font-bold text-slate-950">
@@ -1889,15 +1748,19 @@ export default function CodingWorkspace() {
                             >
                               <button
                                 type="button"
-                                title="Click to code. Shift-click to assign a key."
+                                title="Click to code. Shift-click assigns a key. Option-click opens settings."
                                 aria-disabled={busy || !selectedVideoId || !binding.eventType}
                                 onClick={(event) => {
+                                  if (event.altKey) {
+                                    openQuickEdit(binding);
+                                    return;
+                                  }
                                   if (event.shiftKey) {
                                     startShortcutRecording(binding);
                                     return;
                                   }
                                   if (busy || !selectedVideoId || !binding.eventType) {
-                                    setNotice("Select a source video before coding events. Use Shift-click to assign a key or Edit for settings.");
+                                    setNotice("Select a source video before coding events. Use Shift-click to assign a key or Option-click for settings.");
                                     return;
                                   }
                                   createEventFromBinding(binding);
@@ -1911,14 +1774,6 @@ export default function CodingWorkspace() {
                                   <span className="block truncate text-sm font-bold">{displayEventLabel(binding)}</span>
                                   <span className="block truncate text-[11px] uppercase tracking-[0.12em] text-slate-500">{binding.fieldZone || categoryLabel(binding.category)}</span>
                                 </span>
-                              </button>
-                              <button
-                                type="button"
-                                title={`Edit ${displayEventLabel(binding)} settings`}
-                                onClick={() => openQuickEdit(binding)}
-                                className="border-l border-slate-800 px-2 text-[10px] font-black uppercase tracking-[0.08em] text-slate-500 hover:bg-slate-800 hover:text-white"
-                              >
-                                Edit
                               </button>
                             </div>
                           ))}

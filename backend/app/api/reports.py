@@ -3,9 +3,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import EventTeam, Match, TimelineEvent
+from app.models import EventTeam, Match, SportType, TimelineEvent
 from app.rugby_analysis import score_timeline, scoring_points
 from app.rugby_taxonomy import taxonomy_category, taxonomy_event_id
+from app.sports import sport_rule_pack
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
 
@@ -81,6 +82,84 @@ def _team_counts(events: list[TimelineEvent], team: EventTeam) -> dict[str, int]
     }
 
 
+def _text(event: TimelineEvent) -> str:
+    return " ".join([event.event_type.value, event.outcome or "", event.notes or "", event.field_zone or ""]).replace("_", " ").lower()
+
+
+def _count_terms(events: list[TimelineEvent], team: EventTeam, terms: set[str]) -> int:
+    return sum(event.team == team and any(term in _text(event) for term in terms) for event in events)
+
+
+def _sport_points(events: list[TimelineEvent], team: EventTeam, sport_type: SportType) -> int:
+    team_events = [event for event in events if event.team == team]
+    if sport_type == SportType.rugby_league:
+        return (
+            _count_terms(team_events, team, {"try"}) * 4
+            + _count_terms(team_events, team, {"conversion", "penalty goal"}) * 2
+            + _count_terms(team_events, team, {"field goal"}) * 1
+        )
+    if sport_type == SportType.afl:
+        return _count_terms(team_events, team, {"goal"}) * 6 + _count_terms(team_events, team, {"behind"}) * 1
+    return sum(scoring_points(event) for event in team_events)
+
+
+def _league_counts(events: list[TimelineEvent], team: EventTeam) -> dict[str, int]:
+    return {
+        "events": sum(event.team == team for event in events),
+        "points": _sport_points(events, team, SportType.rugby_league),
+        "hit_ups": _count_terms(events, team, {"hit up", "carry"}),
+        "tackles": _count_terms(events, team, {"tackle"}),
+        "missed_tackles": _count_terms(events, team, {"missed tackle"}),
+        "tackle_breaks": _count_terms(events, team, {"tackle break"}),
+        "line_breaks": _count_terms(events, team, {"line break"}),
+        "offloads": _count_terms(events, team, {"offload"}),
+        "play_the_balls": _count_terms(events, team, {"play the ball"}),
+        "set_starts": _count_terms(events, team, {"set start"}),
+        "set_ends": _count_terms(events, team, {"set end"}),
+        "six_agains": _count_terms(events, team, {"six again"}),
+        "kicks": _count_terms(events, team, {"kick", "40/20"}),
+        "forced_dropouts": _count_terms(events, team, {"goal line dropout", "forced dropout"}),
+        "errors": _count_terms(events, team, {"error", "knock on", "forward pass"}),
+        "penalties": _count_terms(events, team, {"penalty"}),
+        "tries": _count_terms(events, team, {"try"}),
+        "goals": _count_terms(events, team, {"conversion", "penalty goal"}),
+        "field_goals": _count_terms(events, team, {"field goal"}),
+    }
+
+
+def _afl_counts(events: list[TimelineEvent], team: EventTeam) -> dict[str, int]:
+    return {
+        "events": sum(event.team == team for event in events),
+        "points": _sport_points(events, team, SportType.afl),
+        "goals": _count_terms(events, team, {"goal"}),
+        "behinds": _count_terms(events, team, {"behind"}),
+        "disposals": _count_terms(events, team, {"kick", "handball", "disposal"}),
+        "kicks": _count_terms(events, team, {"kick"}),
+        "handballs": _count_terms(events, team, {"handball"}),
+        "marks": _count_terms(events, team, {"mark"}),
+        "contested_marks": _count_terms(events, team, {"contested mark"}),
+        "intercept_marks": _count_terms(events, team, {"intercept mark"}),
+        "tackles": _count_terms(events, team, {"tackle"}),
+        "pressure_acts": _count_terms(events, team, {"pressure act"}),
+        "inside_50s": _count_terms(events, team, {"inside 50"}),
+        "rebound_50s": _count_terms(events, team, {"rebound 50"}),
+        "clearances": _count_terms(events, team, {"clearance"}),
+        "turnovers": _count_terms(events, team, {"turnover"}),
+        "contested_possessions": _count_terms(events, team, {"contested possession"}),
+        "uncontested_possessions": _count_terms(events, team, {"uncontested possession"}),
+        "free_kicks": _count_terms(events, team, {"free kick"}),
+        "scoring_shots": _count_terms(events, team, {"shot at goal", "goal", "behind"}),
+    }
+
+
+def _team_counts_for_sport(events: list[TimelineEvent], team: EventTeam, sport_type: SportType) -> dict[str, int]:
+    if sport_type == SportType.rugby_league:
+        return _league_counts(events, team)
+    if sport_type == SportType.afl:
+        return _afl_counts(events, team)
+    return _team_counts(events, team)
+
+
 def _quality_flags(events: list[TimelineEvent]) -> list[dict[str, object]]:
     flags: list[dict[str, object]] = []
     for event in events:
@@ -112,16 +191,27 @@ def match_report_metrics(
     video_asset_id: int | None = None,
     db: Session = Depends(get_db),
 ) -> dict:
+    match = db.get(Match, match_id)
+    if match is None:
+        raise HTTPException(status_code=404, detail="Match not found.")
+    rule_pack = sport_rule_pack(match.sport_type)
     events = _events_for_match(match_id, video_asset_id, db)
-    scoring = score_timeline(events)
+    scoring = score_timeline(events) if match.sport_type == SportType.rugby_union else {
+        "home_score": _sport_points(events, EventTeam.home, match.sport_type),
+        "away_score": _sport_points(events, EventTeam.away, match.sport_type),
+        "scoring_flow": [],
+    }
     return {
         **scoring,
+        "sport_type": match.sport_type.value,
+        "sport_display_name": rule_pack.display_name,
+        "report_template_id": rule_pack.report_template_id,
         "event_count": len(events),
         "confirmed_event_count": sum(getattr(event, "trust_status", "confirmed") == "confirmed" for event in events),
         "unconfirmed_event_count": sum(getattr(event, "trust_status", "confirmed") != "confirmed" for event in events),
         "inferred_event_count": sum(getattr(event, "event_source", "") in {"inferred", "linked_logic"} for event in events),
         "report_note": "High-confidence inferred events are included and labelled for review." if any(getattr(event, "event_source", "") in {"inferred", "linked_logic"} for event in events) else None,
-        "home": _team_counts(events, EventTeam.home),
-        "away": _team_counts(events, EventTeam.away),
+        "home": _team_counts_for_sport(events, EventTeam.home, match.sport_type),
+        "away": _team_counts_for_sport(events, EventTeam.away, match.sport_type),
         "quality_flags": _quality_flags(events),
     }

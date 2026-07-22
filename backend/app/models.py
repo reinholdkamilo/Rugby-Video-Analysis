@@ -62,6 +62,12 @@ class EvidenceType(str, enum.Enum):
     other = "other"
 
 
+class SportType(str, enum.Enum):
+    rugby_union = "rugby_union"
+    rugby_league = "rugby_league"
+    afl = "afl"
+
+
 class Organisation(Base):
     __tablename__ = "organisations"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -87,6 +93,7 @@ class Match(Base):
     home_team_id: Mapped[int] = mapped_column(ForeignKey("teams.id"), index=True)
     away_team_id: Mapped[int] = mapped_column(ForeignKey("teams.id"), index=True)
     match_date: Mapped[date] = mapped_column(Date)
+    sport_type: Mapped[SportType] = mapped_column(Enum(SportType), default=SportType.rugby_union, index=True)
     competition: Mapped[str | None] = mapped_column(String(150), nullable=True)
     venue: Mapped[str | None] = mapped_column(String(200), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
@@ -101,6 +108,7 @@ class VideoAsset(Base):
     __tablename__ = "video_assets"
     id: Mapped[int] = mapped_column(primary_key=True)
     match_id: Mapped[int] = mapped_column(ForeignKey("matches.id", ondelete="CASCADE"), index=True)
+    sport_type: Mapped[SportType] = mapped_column(Enum(SportType), default=SportType.rugby_union, index=True)
     original_filename: Mapped[str] = mapped_column(String(255))
     stored_filename: Mapped[str] = mapped_column(String(255), unique=True)
     content_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -240,6 +248,7 @@ class EvidenceItem(Base):
     __tablename__ = "evidence_items"
     id: Mapped[int] = mapped_column(primary_key=True)
     match_id: Mapped[int] = mapped_column(ForeignKey("matches.id", ondelete="CASCADE"), index=True)
+    sport_type: Mapped[SportType] = mapped_column(Enum(SportType), default=SportType.rugby_union, index=True)
     video_asset_id: Mapped[int | None] = mapped_column(ForeignKey("video_assets.id", ondelete="SET NULL"), nullable=True, index=True)
     timeline_event_id: Mapped[int | None] = mapped_column(ForeignKey("timeline_events.id", ondelete="SET NULL"), nullable=True, index=True)
     evidence_type: Mapped[EvidenceType] = mapped_column(Enum(EvidenceType), default=EvidenceType.note, index=True)

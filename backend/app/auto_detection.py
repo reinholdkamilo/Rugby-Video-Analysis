@@ -5,7 +5,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.runtime_limits import ffmpeg_thread_count, heavy_operation
-from app.models import EventType
+from app.models import EventType, SportType
+from app.sports import normalise_sport_type, sport_rule_pack
 
 PTS_TIME_PATTERN = re.compile(r"pts_time:([0-9]+(?:\.[0-9]+)?)")
 DEFAULT_SAMPLE_FPS = float(os.getenv("AUTO_DETECTION_SAMPLE_FPS", "0.5"))
@@ -99,19 +100,36 @@ def detect_scene_changes(
     return parse_scene_times(completed.stderr)
 
 
-def build_candidates(duration_seconds: float, scene_times: list[float]) -> list[DetectionCandidate]:
-    """Convert visual transitions into conservative, reviewable rugby timeline suggestions."""
+def build_candidates(duration_seconds: float, scene_times: list[float], sport_type: SportType | str = SportType.rugby_union) -> list[DetectionCandidate]:
+    """Convert visual transitions into conservative, reviewable sport-specific timeline suggestions."""
     if duration_seconds <= 0:
         return []
+    sport = normalise_sport_type(sport_type)
+    rule_pack = sport_rule_pack(sport)
+    opening_event = EventType.kickoff
+    opening_label = "Opening restart candidate"
+    opening_reason = f"The beginning of uploaded {rule_pack.display_name} footage is commonly a restart. Confirm before accepting. {rule_pack.auto_analysis_context}"
+    transition_label = "Phase or camera transition"
+    transition_reason = f"A strong visual scene change was detected. Review the surrounding footage and assign the correct {rule_pack.display_name} event."
+    reset_label = "Possible stoppage or set-piece reset"
+    if sport == SportType.afl:
+        opening_event = EventType.custom
+        opening_label = "Opening bounce or kick-in candidate"
+        reset_label = "Possible stoppage or score reset"
+        transition_label = "Possession or camera transition"
+    elif sport == SportType.rugby_league:
+        opening_label = "Opening kickoff or set-start candidate"
+        reset_label = "Possible set restart or play-the-ball reset"
+        transition_label = "Set or camera transition"
 
     candidates: list[DetectionCandidate] = [
         DetectionCandidate(
-            event_type=EventType.kickoff,
+            event_type=opening_event,
             start_seconds=0.0,
             end_seconds=min(10.0, duration_seconds),
             confidence=0.58,
-            label="Opening restart candidate",
-            reason="The beginning of uploaded match footage is commonly a kick-off or restart. Confirm before accepting.",
+            label=opening_label,
+            reason=opening_reason,
         )
     ]
 
@@ -125,14 +143,14 @@ def build_candidates(duration_seconds: float, scene_times: list[float]) -> list[
 
         if gap >= 18.0:
             event_type = EventType.stoppage
-            label = "Possible stoppage or set-piece reset"
+            label = reset_label
             confidence = min(0.82, 0.55 + min(gap, 60.0) / 240.0)
-            reason = f"A major camera transition followed approximately {gap:.1f} seconds after the previous transition."
+            reason = f"A major {rule_pack.display_name} camera transition followed approximately {gap:.1f} seconds after the previous transition."
         else:
             event_type = EventType.custom
-            label = "Phase or camera transition"
+            label = transition_label
             confidence = 0.48
-            reason = "A strong visual scene change was detected. Review the surrounding footage and assign the correct rugby event."
+            reason = transition_reason
 
         candidates.append(
             DetectionCandidate(

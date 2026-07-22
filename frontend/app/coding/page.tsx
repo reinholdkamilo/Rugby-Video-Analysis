@@ -5,7 +5,7 @@ import { FormEvent, MouseEvent as ReactMouseEvent, useCallback, useEffect, useMe
 
 import { EventTeam, EventType, Match, Team, TimelineEvent, VideoAsset } from "@/lib/api";
 import { codingApi, sourceVideoUrl } from "@/lib/coding-api";
-import { CATEGORY_LABELS, EVENT_TYPES, REPORT_DRIVEN_RUGBY_TAXONOMY, type EventCategory, inferEventTypeFromLabel } from "@/lib/rugby-events";
+import { CATEGORY_LABELS, EVENT_TYPES, type EventCategory, type SportType, inferEventTypeFromLabel, normaliseSportType, sportRulePack } from "@/lib/rugby-events";
 
 type VideoCommand =
   | "play_pause"
@@ -34,7 +34,7 @@ type LayoutColumnCount = 2 | 3 | 4;
 type QuickColumnId = "home" | "away";
 type HudPanelId = QuickColumnId;
 type HudButtonColumns = 1 | 2 | 3 | 4;
-type QuickEventSectionId = "attack" | "defence" | "set_piece" | "breakdown_ruck" | "kicking" | "discipline" | "scoring" | "transition_turnover" | "restart" | "error" | "zone_territory" | "other";
+type QuickEventSectionId = EventCategory;
 type QuickAddPanel = "event" | "zone" | null;
 
 type HudLayout = {
@@ -153,23 +153,16 @@ const EVENT_LIBRARY_CATEGORIES: { value: EventCategory; label: string }[] = [
   { value: "restart", label: CATEGORY_LABELS.restart },
   { value: "error", label: CATEGORY_LABELS.error },
   { value: "zone_territory", label: CATEGORY_LABELS.zone_territory },
+  { value: "set_tackle_count", label: CATEGORY_LABELS.set_tackle_count },
+  { value: "disposal", label: CATEGORY_LABELS.disposal },
+  { value: "contest", label: CATEGORY_LABELS.contest },
+  { value: "pressure", label: CATEGORY_LABELS.pressure },
+  { value: "territory", label: CATEGORY_LABELS.territory },
+  { value: "stoppage", label: CATEGORY_LABELS.stoppage },
   { value: "other", label: CATEGORY_LABELS.other },
 ];
 
-const QUICK_EVENT_SECTIONS: { id: QuickEventSectionId; title: string }[] = [
-  { id: "attack", title: CATEGORY_LABELS.attack },
-  { id: "defence", title: CATEGORY_LABELS.defence },
-  { id: "set_piece", title: CATEGORY_LABELS.set_piece },
-  { id: "breakdown_ruck", title: CATEGORY_LABELS.breakdown_ruck },
-  { id: "kicking", title: CATEGORY_LABELS.kicking },
-  { id: "discipline", title: CATEGORY_LABELS.discipline },
-  { id: "scoring", title: CATEGORY_LABELS.scoring },
-  { id: "transition_turnover", title: CATEGORY_LABELS.transition_turnover },
-  { id: "restart", title: CATEGORY_LABELS.restart },
-  { id: "error", title: CATEGORY_LABELS.error },
-  { id: "zone_territory", title: CATEGORY_LABELS.zone_territory },
-  { id: "other", title: CATEGORY_LABELS.other },
-];
+const QUICK_EVENT_SECTIONS: { id: QuickEventSectionId; title: string }[] = EVENT_LIBRARY_CATEGORIES.map((category) => ({ id: category.value, title: category.label }));
 
 const REVIEW_STATUSES: { value: ReviewStatus; label: string }[] = [
   { value: "unreviewed", label: "Unreviewed" },
@@ -191,8 +184,9 @@ const EVENT_SOURCES: { value: EventSource; label: string }[] = [
 
 const ZONE_KEYS = ["KeyA", "KeyS", "KeyD", "KeyF", "KeyG", "KeyH", "KeyJ", "KeyK"];
 
-const DEFAULT_SHORTCUTS: ShortcutBinding[] = [
-  ...REPORT_DRIVEN_RUGBY_TAXONOMY.flatMap((item) => ([
+function taxonomyShortcutsForSport(sportType: SportType): ShortcutBinding[] {
+  const rulePack = sportRulePack(sportType);
+  return rulePack.taxonomy.flatMap((item) => ([
     {
       id: `taxonomy_home_${item.id}`,
       label: item.displayName,
@@ -203,7 +197,7 @@ const DEFAULT_SHORTCUTS: ShortcutBinding[] = [
       duration: QUICK_CODE_CAPTURE_SECONDS,
       category: item.category,
       outcome: item.defaultOutcome,
-      notes: `Report taxonomy v1: ${item.displayName}`,
+      notes: `${rulePack.displayName} taxonomy: ${item.displayName}`,
     },
     {
       id: `taxonomy_away_${item.id}`,
@@ -215,9 +209,14 @@ const DEFAULT_SHORTCUTS: ShortcutBinding[] = [
       duration: QUICK_CODE_CAPTURE_SECONDS,
       category: item.category,
       outcome: item.defaultOutcome,
-      notes: `Report taxonomy v1: ${item.displayName}`,
+      notes: `${rulePack.displayName} taxonomy: ${item.displayName}`,
     },
-  ])),
+  ]));
+}
+
+function buildDefaultShortcuts(sportType: SportType): ShortcutBinding[] {
+  return [
+  ...taxonomyShortcutsForSport(sportType),
   { id: "zone_own_22", label: "Own 22m", group: "zone", shortcut: ZONE_KEYS[0], fieldZone: "Own 22m", zoneLength: "Inside defensive 22m" },
   { id: "zone_own_half", label: "Own half", group: "zone", shortcut: ZONE_KEYS[1], fieldZone: "Own half", zoneLength: "Outside own 22m to halfway" },
   { id: "zone_outside_50m", label: "Outside 50m", group: "zone", shortcut: ZONE_KEYS[2], fieldZone: "Outside 50m", zoneLength: "Outside 50m/halfway line" },
@@ -243,7 +242,10 @@ const DEFAULT_SHORTCUTS: ShortcutBinding[] = [
   { id: "video_speed_half", label: "Set speed 0.5x", group: "video", shortcut: "Alt+Digit2", command: "speed_half" },
   { id: "video_speed_normal", label: "Set speed 1x", group: "video", shortcut: "Alt+Digit3", command: "speed_normal" },
   { id: "video_speed_double", label: "Set speed 2x", group: "video", shortcut: "Alt+Digit4", command: "speed_double" },
-];
+  ];
+}
+
+const DEFAULT_SHORTCUTS = buildDefaultShortcuts("rugby_union");
 
 const inputClass = "w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-emerald-400";
 
@@ -430,6 +432,10 @@ function resetLegacyCodingUiConfiguration() {
   return true;
 }
 
+function shortcutStorageKey(sportType: SportType) {
+  return sportType === "rugby_union" ? SHORTCUT_STORAGE_KEY : `${SHORTCUT_STORAGE_KEY}:${sportType}`;
+}
+
 function displayEventLabel(binding: ShortcutBinding) {
   return binding.label.replace(/^Home\s+/i, "").replace(/^Away\s+/i, "");
 }
@@ -497,13 +503,14 @@ function homePairIdForAway(binding: ShortcutBinding) {
   return binding.id.replace(/^tag_away_/, "tag_home_");
 }
 
-function loadShortcutBindings() {
-  if (typeof window === "undefined") return DEFAULT_SHORTCUTS;
-  const saved = window.localStorage.getItem(SHORTCUT_STORAGE_KEY);
-  if (!saved) return DEFAULT_SHORTCUTS;
+function loadShortcutBindings(sportType: SportType = "rugby_union") {
+  const defaultShortcuts = buildDefaultShortcuts(sportType);
+  if (typeof window === "undefined") return defaultShortcuts;
+  const saved = window.localStorage.getItem(shortcutStorageKey(sportType));
+  if (!saved) return defaultShortcuts;
   try {
     const parsed = JSON.parse(saved) as Partial<ShortcutBinding>[];
-    const defaults = DEFAULT_SHORTCUTS.map((binding) => {
+    const defaults = defaultShortcuts.map((binding) => {
       const savedBinding = parsed.find((item) => item.id === binding.id);
       const savedLabel = savedBinding?.label ? displayEventLabel({ label: String(savedBinding.label) } as ShortcutBinding) : binding.label;
       return {
@@ -546,7 +553,7 @@ function loadShortcutBindings() {
       .map(mirrorHomeBindingToAway);
     return [...mirroredDefaults, ...custom, ...mirroredCustomAway];
   } catch {
-    return DEFAULT_SHORTCUTS;
+    return defaultShortcuts;
   }
 }
 
@@ -668,10 +675,17 @@ export default function CodingWorkspace() {
   const [undoingEventId, setUndoingEventId] = useState<number | null>(null);
   const [notice, setNotice] = useState("Loading coding workspace...");
   const [busy, setBusy] = useState(false);
+  const selectedMatch = matches.find((match) => match.id === selectedMatchId) ?? null;
+  const activeSport = normaliseSportType(selectedMatch?.sport_type);
+  const activeRulePack = sportRulePack(activeSport);
+  const homeTeam = teams.find((team) => team.id === selectedMatch?.home_team_id);
+  const awayTeam = teams.find((team) => team.id === selectedMatch?.away_team_id);
+  const selectedVideo = videos.find((video) => video.id === selectedVideoId) ?? null;
+  const selectedEvent = events.find((event) => event.id === selectedEventId) ?? null;
 
   useEffect(() => {
     const resetApplied = resetLegacyCodingUiConfiguration();
-    setShortcuts(loadShortcutBindings());
+    setShortcuts(loadShortcutBindings("rugby_union"));
     setReviewMeta(loadReviewMeta());
     setVideoLayout(loadVideoLayoutMode());
     setCodingLayout(loadCodingLayout());
@@ -683,10 +697,17 @@ export default function CodingWorkspace() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    window.localStorage.setItem(SHORTCUT_STORAGE_KEY, JSON.stringify(shortcuts.map(({ id, shortcut, custom, label, group, duration, category, eventType, outcome, team, fieldZone, notes, variant, zoneLength }) => (
+    window.localStorage.setItem(shortcutStorageKey(activeSport), JSON.stringify(shortcuts.map(({ id, shortcut, custom, label, group, duration, category, eventType, outcome, team, fieldZone, notes, variant, zoneLength }) => (
       { id, shortcut: normaliseShortcut(shortcut), custom, label, group, duration, category, eventType, outcome, team, fieldZone, notes, variant, zoneLength }
     ))));
-  }, [shortcuts]);
+  }, [activeSport, shortcuts]);
+
+  useEffect(() => {
+    setShortcuts(loadShortcutBindings(activeSport));
+    setEditingShortcutId(null);
+    setQuickEditBindingId(null);
+    setActiveZoneId(null);
+  }, [activeSport]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -803,11 +824,6 @@ export default function CodingWorkspace() {
     });
   }, [selectedMatchId, selectedVideoId]);
 
-  const selectedMatch = matches.find((match) => match.id === selectedMatchId) ?? null;
-  const homeTeam = teams.find((team) => team.id === selectedMatch?.home_team_id);
-  const awayTeam = teams.find((team) => team.id === selectedMatch?.away_team_id);
-  const selectedVideo = videos.find((video) => video.id === selectedVideoId) ?? null;
-  const selectedEvent = events.find((event) => event.id === selectedEventId) ?? null;
   const teamLabel = useCallback((team?: EventTeam | "selected") => {
     if (!team || team === "selected") return "Selected team";
     if (team === "home") return homeTeam?.name ?? "Home";
@@ -1148,11 +1164,11 @@ export default function CodingWorkspace() {
   }, [editingShortcutId, updateShortcut]);
 
   function resetShortcuts() {
-    setShortcuts(DEFAULT_SHORTCUTS);
+    setShortcuts(buildDefaultShortcuts(activeSport));
     setEditingShortcutId(null);
     setActiveZoneId(null);
     setQuickEditBindingId(null);
-    setNotice("Keyboard shortcuts reset to clean Rugby Taxonomy v1 buttons. Event buttons are unassigned by default.");
+    setNotice(`Keyboard shortcuts reset to clean ${activeRulePack.displayName} taxonomy buttons. Event buttons are unassigned by default.`);
   }
 
   function unassignAllEventButtons() {
@@ -1450,7 +1466,7 @@ export default function CodingWorkspace() {
 
   async function runInference() {
     if (!selectedMatchId || !selectedVideoId) {
-      setNotice("Select a match and video before running rugby inference.");
+      setNotice("Select a match and video before running inference.");
       return;
     }
     setBusy(true);
@@ -1458,7 +1474,7 @@ export default function CodingWorkspace() {
       const result = await codingApi.runInference(selectedMatchId, selectedVideoId);
       const refreshedEvents = await codingApi.events(selectedMatchId, selectedVideoId);
       setEvents(refreshedEvents);
-      setNotice(`Inference complete: ${result.created_count} inferred, ${result.stale_count} stale, ${result.skipped_count} skipped. Inferred events stay reviewable.`);
+      setNotice(`${activeRulePack.displayName} inference complete (${result.inference_rule_set_id ?? activeRulePack.inferenceRuleSetId}): ${result.created_count} inferred, ${result.stale_count} stale, ${result.skipped_count} skipped. Inferred events stay reviewable.`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Unable to run rugby inference");
     } finally {
@@ -1633,6 +1649,9 @@ export default function CodingWorkspace() {
             {videos.map((video) => <option key={video.id} value={video.id}>{video.original_filename}</option>)}
           </select>
           <div className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-300" data-design-id="coding-video-time-counter" data-design-label="Video time and event counter">{formatTime(currentTime)} · {events.length} events</div>
+          <div className="lg:col-span-3 rounded-lg border border-emerald-900 bg-emerald-950/30 px-4 py-2 text-sm text-emerald-100" data-design-id="coding-sport-context" data-design-label="Sport coding context">
+            <strong>{activeRulePack.displayName}</strong> · {activeRulePack.taxonomyId} · {activeRulePack.reportTemplateId}
+          </div>
         </div>
 
         <div className="mb-5 grid gap-3 md:grid-cols-[1fr_auto]">

@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import { AnalysisJob, Match, Organisation, PipelineStatus, Team, api, apiUrl, uploadVideoInChunks } from "@/lib/api";
+import { AnalysisJob, Match, Organisation, PipelineStatus, Team, type SportType, api, apiUrl, uploadVideoInChunks } from "@/lib/api";
+import { sportRulePack } from "@/lib/rugby-events";
 
 const fieldClass = "workspace-field";
 const buttonClass = "button button--primary";
@@ -146,6 +147,7 @@ export default function Home() {
         home_team_id: Number(form.get("home_team_id")),
         away_team_id: Number(form.get("away_team_id")),
         match_date: String(form.get("match_date")),
+        sport_type: String(form.get("sport_type") || "rugby_union") as SportType,
         competition: String(form.get("competition") || "").trim() || undefined,
         venue: String(form.get("venue") || "").trim() || undefined,
       });
@@ -289,7 +291,7 @@ export default function Home() {
 
             <form id="step-2" onSubmit={createTeam} className="setup-card"><div className="setup-card__head"><span>02</span><div><small>Squads</small><h3>Teams</h3></div></div><p>Select the organisation and add the squads involved.</p><select className={fieldClass} value={selectedOrganisationId ?? ""} onChange={(event) => setSelectedOrganisationId(event.target.value ? Number(event.target.value) : null)}><option value="">Select organisation</option>{organisations.map((organisation) => <option key={organisation.id} value={organisation.id}>{organisation.name}</option>)}</select>{selectedOrganisation && <button type="button" disabled={busy} onClick={() => void deleteSelectedOrganisation()} className="button button--danger">Delete selected organisation</button>}<div className="field-pair"><input name="name" required minLength={2} placeholder="Team name" className={fieldClass}/><input name="age_group" placeholder="Age group" className={fieldClass}/></div><button type="submit" disabled={busy || !selectedOrganisationId} className={buttonClass}>Add team</button>{filteredTeams.length > 0 && <div className="management-list">{filteredTeams.map((team) => <div key={team.id} className="management-row"><div><strong>{team.name}</strong><small>{team.age_group || "Age group not set"}</small></div><button type="button" disabled={busy} onClick={() => void deleteTeamRecord(team)} className="button button--danger button--compact">Delete</button></div>)}</div>}</form>
 
-            <form id="step-3" onSubmit={createMatch} className="setup-card setup-card--wide"><div className="setup-card__head"><span>03</span><div><small>Fixture</small><h3>Create match</h3></div></div><p>Add match context before attaching footage.</p><div className="match-form-grid"><select name="home_team_id" required className={fieldClass}><option value="">Home team</option>{filteredTeams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}</select><select name="away_team_id" required className={fieldClass}><option value="">Away team</option>{filteredTeams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}</select><input name="match_date" type="date" required className={fieldClass}/><input name="competition" placeholder="Competition" className={fieldClass}/><input name="venue" placeholder="Venue" className={`${fieldClass} match-form-grid__wide`}/></div><button type="submit" disabled={busy || filteredTeams.length < 2} className={buttonClass}>Create match</button></form>
+            <form id="step-3" onSubmit={createMatch} className="setup-card setup-card--wide"><div className="setup-card__head"><span>03</span><div><small>Fixture</small><h3>Create match</h3></div></div><p>Add match context before attaching footage.</p><div className="match-form-grid"><select name="home_team_id" required className={fieldClass}><option value="">Home team</option>{filteredTeams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}</select><select name="away_team_id" required className={fieldClass}><option value="">Away team</option>{filteredTeams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}</select><select name="sport_type" required defaultValue="rugby_union" className={fieldClass}><option value="rugby_union">Rugby Union</option><option value="rugby_league">Rugby League</option><option value="afl">AFL</option></select><input name="match_date" type="date" required className={fieldClass}/><input name="competition" placeholder="Competition" className={fieldClass}/><input name="venue" placeholder="Venue" className={`${fieldClass} match-form-grid__wide`}/></div><button type="submit" disabled={busy || filteredTeams.length < 2} className={buttonClass}>Create match</button></form>
           </div>
 
           <section id="step-4" className="footage-section"><div className="footage-section__head"><div><span className="eyebrow eyebrow--dark">Step 04 · Footage</span><h3>Matches ready for analysis</h3><p>Upload a short clip, monitor processing and continue into the analyst tools.</p></div><Link href="/catalog" className="button button--secondary">Programme manager</Link></div>
@@ -301,7 +303,7 @@ export default function Home() {
               return (
                 <article key={match.id} className="match-card">
                   <div className="match-card__content">
-                    <div className="match-meta"><span>{match.match_date}</span><span>{match.competition || "Competition not set"}</span></div>
+                    <div className="match-meta"><span>{match.match_date}</span><span>{sportRulePack(match.sport_type).displayName}</span><span>{match.competition || "Competition not set"}</span></div>
                     <h4>{teamName(match.home_team_id)} <em>vs</em> {teamName(match.away_team_id)}</h4>
                     <p>{match.venue || "Venue not set"}</p>
                     {job && <div className="job-progress"><div><span>{job.status}</span><strong>{job.progress_percent}%</strong></div><div className="progress-track"><i style={{ width: `${job.progress_percent}%` }}/></div><small>{job.message}</small></div>}

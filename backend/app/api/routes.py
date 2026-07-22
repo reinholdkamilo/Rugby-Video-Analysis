@@ -240,7 +240,8 @@ def upload_match_video(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ) -> VideoAsset:
-    if db.get(Match, match_id) is None:
+    match = db.get(Match, match_id)
+    if match is None:
         raise HTTPException(status_code=404, detail="Match not found.")
     try:
         stored_filename, storage_path, size_bytes = save_video_upload(file)
@@ -248,6 +249,7 @@ def upload_match_video(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     video = VideoAsset(
         match_id=match_id,
+        sport_type=match.sport_type,
         original_filename=file.filename or "match-video",
         stored_filename=stored_filename,
         content_type=file.content_type,
@@ -321,7 +323,11 @@ def _validate_evidence_references(
 @router.post("/evidence-items", response_model=EvidenceItemRead, status_code=status.HTTP_201_CREATED)
 def create_evidence_item(payload: EvidenceItemCreate, db: Session = Depends(get_db)) -> EvidenceItem:
     _validate_evidence_references(payload.match_id, db, payload.video_asset_id, payload.timeline_event_id)
-    item = EvidenceItem(**payload.model_dump())
+    values = payload.model_dump()
+    if values.get("sport_type") is None:
+        match = db.get(Match, payload.match_id)
+        values["sport_type"] = match.sport_type if match is not None else "rugby_union"
+    item = EvidenceItem(**values)
     db.add(item)
     db.commit()
     db.refresh(item)

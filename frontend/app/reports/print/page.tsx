@@ -22,6 +22,7 @@ import {
   semanticScoringPoints,
   semanticTypeCount,
   semanticTypesCount,
+  sportRulePack,
 } from "@/lib/rugby-events";
 
 type ReportTone = "home" | "away" | "neutral";
@@ -130,8 +131,29 @@ function attackingActions(events: TimelineEvent[], team: EventTeam) {
   return typeCount(events, team, ATTACK_TYPES) + impliedCarryCount(events, team);
 }
 
-function metricRows(events: TimelineEvent[], homeName: string, awayName: string) {
-  return [
+function metricRows(events: TimelineEvent[], homeName: string, awayName: string, sportType?: string) {
+  const sport = sportRulePack(sportType);
+  const rows = sportType === "rugby_league" ? [
+    ["Carries / hit ups", eventTypeCount(events, "home", "carry"), eventTypeCount(events, "away", "carry")],
+    ["Carries implied from tackles", impliedCarryCount(events, "home"), impliedCarryCount(events, "away")],
+    ["Tackles made", eventTypeCount(events, "home", "tackle"), eventTypeCount(events, "away", "tackle")],
+    ["Passes / offloads", eventTypeCount(events, "home", "pass"), eventTypeCount(events, "away", "pass")],
+    ["Kicks", typeCount(events, "home", KICKING_TYPES), typeCount(events, "away", KICKING_TYPES)],
+    ["Line breaks", eventsFor(events, "home").filter(isLineBreakEvent).length, eventsFor(events, "away").filter(isLineBreakEvent).length],
+    ["Turnovers conceded", eventTypeCount(events, "home", "turnover"), eventTypeCount(events, "away", "turnover")],
+    ["Penalties / six-again", eventTypeCount(events, "home", "penalty"), eventTypeCount(events, "away", "penalty")],
+    ["Scrums", eventTypeCount(events, "home", "scrum"), eventTypeCount(events, "away", "scrum")],
+  ] : sportType === "afl" ? [
+    ["Disposals", typeCount(events, "home", ["kick", "pass", "carry"]), typeCount(events, "away", ["kick", "pass", "carry"])],
+    ["Kicks", eventTypeCount(events, "home", "kick"), eventTypeCount(events, "away", "kick")],
+    ["Handballs", countText(events, "home", /handball/i), countText(events, "away", /handball/i)],
+    ["Marks", countText(events, "home", /mark/i), countText(events, "away", /mark/i)],
+    ["Tackles", eventTypeCount(events, "home", "tackle"), eventTypeCount(events, "away", "tackle")],
+    ["Inside 50s", countText(events, "home", /inside 50/i), countText(events, "away", /inside 50/i)],
+    ["Clearances", countText(events, "home", /clearance/i), countText(events, "away", /clearance/i)],
+    ["Turnovers conceded", eventTypeCount(events, "home", "turnover"), eventTypeCount(events, "away", "turnover")],
+    ["Stoppages", eventTypeCount(events, "home", "stoppage"), eventTypeCount(events, "away", "stoppage")],
+  ] : [
     ["Carries coded", eventTypeCount(events, "home", "carry"), eventTypeCount(events, "away", "carry")],
     ["Carries implied from tackles", impliedCarryCount(events, "home"), impliedCarryCount(events, "away")],
     ["Passes", eventTypeCount(events, "home", "pass"), eventTypeCount(events, "away", "pass")],
@@ -143,7 +165,8 @@ function metricRows(events: TimelineEvent[], homeName: string, awayName: string)
     ["Rucks", eventTypeCount(events, "home", "ruck"), eventTypeCount(events, "away", "ruck")],
     ["Scrums", eventTypeCount(events, "home", "scrum"), eventTypeCount(events, "away", "scrum")],
     ["Lineouts", eventTypeCount(events, "home", "lineout"), eventTypeCount(events, "away", "lineout")],
-  ].map(([label, home, away]) => ({ label: String(label), home: Number(home), away: Number(away), homeName, awayName }));
+  ];
+  return rows.map(([label, home, away]) => ({ label: String(label), home: Number(home), away: Number(away), homeName, awayName, sportName: sport.displayName }));
 }
 
 function teamSummaryRows(events: TimelineEvent[], team: EventTeam, limit = 4): [string, number][] {
@@ -194,6 +217,7 @@ export default function PrintableReportPage() {
   const selectedVideo = useMemo(() => videos.find((video) => video.id === selectedVideoId) ?? null, [videos, selectedVideoId]);
   const homeName = selectedMatch ? teamName(selectedMatch.home_team_id) : "Home Team";
   const awayName = selectedMatch ? teamName(selectedMatch.away_team_id) : "Away Team";
+  const reportRulePack = sportRulePack(selectedMatch?.sport_type);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -238,7 +262,7 @@ export default function PrintableReportPage() {
 
   const homeScore = useMemo(() => scoreFor(events, "home"), [events]);
   const awayScore = useMemo(() => scoreFor(events, "away"), [events]);
-  const dashboardRows = useMemo(() => metricRows(events, homeName, awayName), [awayName, events, homeName]);
+  const dashboardRows = useMemo(() => metricRows(events, homeName, awayName, selectedMatch?.sport_type), [awayName, events, homeName, selectedMatch?.sport_type]);
   const categoryRows = useMemo(() => sortedEntries(countBy(events, semanticCategory)), [events]);
   const zoneRows = useMemo(() => sortedEntries(countBy(events.filter((event) => event.field_zone), (event) => event.field_zone ?? "Unknown")), [events]);
   const outcomeRows = useMemo(() => sortedEntries(countBySemanticLabel(events)), [events]);
@@ -281,6 +305,7 @@ export default function PrintableReportPage() {
             <p>{selectedMatch?.competition ?? "Competition Name"}</p>
             <p>{selectedMatch?.match_date ?? "Day, DD/MM/YYYY"}</p>
             <p>{selectedMatch?.venue ?? "Venue"}</p>
+            <p>{reportRulePack.displayName} · {reportRulePack.reportTemplateId}</p>
           </div>
           <div className="cover-scoreboard">
             <CoverTeam name={homeName} score={homeScore} tone="home" />

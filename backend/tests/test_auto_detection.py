@@ -3,7 +3,7 @@ import subprocess
 from types import SimpleNamespace
 
 from app.auto_detection import build_candidates, build_scene_detection_command, detect_scene_changes, parse_scene_times
-from app.models import EventType
+from app.models import EventType, SportType
 
 
 def test_parse_scene_times_deduplicates_close_transitions() -> None:
@@ -88,3 +88,13 @@ def test_build_candidates_creates_opening_restart_and_review_items() -> None:
     assert any(candidate.event_type == EventType.stoppage for candidate in candidates)
     assert all(candidate.end_seconds <= 60.0 for candidate in candidates)
     assert all(0 <= candidate.confidence <= 1 for candidate in candidates)
+
+
+def test_build_candidates_uses_sport_context_labels() -> None:
+    afl_candidates = build_candidates(90.0, [30.0], SportType.afl)
+    league_candidates = build_candidates(90.0, [30.0], SportType.rugby_league)
+
+    assert afl_candidates[0].label == "Opening bounce or kick-in candidate"
+    assert "AFL" in afl_candidates[0].reason
+    assert league_candidates[0].label == "Opening kickoff or set-start candidate"
+    assert "Rugby League" in league_candidates[0].reason

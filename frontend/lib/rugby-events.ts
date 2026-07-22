@@ -12,12 +12,19 @@ export type EventCategory =
   | "restart"
   | "error"
   | "zone_territory"
+  | "set_tackle_count"
+  | "disposal"
+  | "contest"
+  | "pressure"
+  | "territory"
+  | "stoppage"
   | "other"
   | "core"
   | "transition"
   | "possession";
 export type SemanticEventType = EventType | "line_break";
 export type TeamAssignmentBehaviour = "home_away" | "selected" | "neutral_allowed";
+export type SportType = "rugby_union" | "rugby_league" | "afl";
 
 export type RugbyTaxonomyItem = {
   id: string;
@@ -45,6 +52,12 @@ export const CATEGORY_LABELS: Record<EventCategory, string> = {
   restart: "Restart",
   error: "Error",
   zone_territory: "Zone / Territory",
+  set_tackle_count: "Set / Tackle Count",
+  disposal: "Disposal",
+  contest: "Contest",
+  pressure: "Pressure",
+  territory: "Territory",
+  stoppage: "Stoppage",
   other: "Other",
   core: "Core",
   transition: "Transition",
@@ -110,6 +123,95 @@ export const REPORT_DRIVEN_RUGBY_TAXONOMY: RugbyTaxonomyItem[] = [
   { id: "card", displayName: "Card", category: "discipline", defaultEventType: "card", defaultOutcome: "card", teamAssignment: "home_away", affectsScore: false, scorePoints: 0, createsEvidence: true, inferable: false, appearsInReports: true },
   { id: "stoppage", displayName: "Stoppage", category: "other", defaultEventType: "stoppage", defaultOutcome: "stoppage", teamAssignment: "neutral_allowed", affectsScore: false, scorePoints: 0, createsEvidence: true, inferable: false, appearsInReports: true },
 ];
+
+export const RUGBY_LEAGUE_TAXONOMY: RugbyTaxonomyItem[] = [
+  ["carry_hit_up", "Carry / Hit Up", "attack", "carry", "hit up"],
+  ["tackle", "Tackle", "defence", "tackle", "tackle"],
+  ["missed_tackle", "Missed Tackle", "defence", "tackle", "missed tackle"],
+  ["tackle_break", "Tackle Break", "attack", "carry", "tackle break"],
+  ["line_break", "Line Break", "attack", "carry", "line break"],
+  ["offload", "Offload", "attack", "pass", "offload"],
+  ["pass", "Pass", "attack", "pass", "pass"],
+  ["play_the_ball", "Play The Ball", "set_tackle_count", "custom", "play the ball"],
+  ["marker_defence", "Marker Defence", "defence", "tackle", "marker defence"],
+  ["dummy_half_run", "Dummy Half Run", "attack", "carry", "dummy half run"],
+  ["kick", "Kick", "kicking", "kick", "kick"],
+  ["kick_chase", "Kick Chase", "kicking", "kick", "kick chase"],
+  ["kick_return", "Kick Return", "transition_turnover", "carry", "kick return"],
+  ["set_start", "Set Start", "set_tackle_count", "custom", "set start"],
+  ["set_end", "Set End", "set_tackle_count", "custom", "set end"],
+  ["tackle_1", "Tackle 1", "set_tackle_count", "tackle", "tackle 1"],
+  ["tackle_2", "Tackle 2", "set_tackle_count", "tackle", "tackle 2"],
+  ["tackle_3", "Tackle 3", "set_tackle_count", "tackle", "tackle 3"],
+  ["tackle_4", "Tackle 4", "set_tackle_count", "tackle", "tackle 4"],
+  ["tackle_5", "Tackle 5", "set_tackle_count", "tackle", "tackle 5"],
+  ["last_tackle", "Last Tackle", "set_tackle_count", "tackle", "last tackle"],
+  ["six_again", "Six Again", "discipline", "penalty", "six again"],
+  ["penalty_won", "Penalty Won", "discipline", "penalty", "penalty won"],
+  ["penalty_conceded", "Penalty Conceded", "discipline", "penalty", "penalty conceded"],
+  ["error", "Error", "error", "custom", "error"],
+  ["knock_on", "Knock On", "error", "custom", "knock on"],
+  ["forward_pass", "Forward Pass", "error", "pass", "forward pass"],
+  ["scrum", "Scrum", "set_piece", "scrum", "scrum"],
+  ["try", "Try", "scoring", "try", "try", true, 4],
+  ["conversion", "Conversion", "scoring", "conversion", "conversion", true, 2],
+  ["penalty_goal", "Penalty Goal", "scoring", "penalty", "penalty goal", true, 2],
+  ["field_goal", "Field Goal", "scoring", "kick", "field goal", true, 1],
+  ["goal_line_dropout", "Goal Line Dropout", "restart", "kickoff", "goal line dropout"],
+  ["restart_20m", "20m Restart", "restart", "kickoff", "20m restart"],
+  ["forty_twenty", "40/20", "kicking", "kick", "40/20"],
+  ["captains_challenge", "Captain's Challenge", "other", "custom", "captain's challenge"],
+].map(([id, displayName, category, defaultEventType, defaultOutcome, affectsScore = false, scorePoints = 0]) => ({
+  id, displayName, category, defaultEventType, defaultOutcome, teamAssignment: "home_away", affectsScore, scorePoints, createsEvidence: true, inferable: true, appearsInReports: true,
+} as RugbyTaxonomyItem));
+
+export const AFL_TAXONOMY: RugbyTaxonomyItem[] = [
+  ["kick", "Kick", "disposal", "kick", "kick"],
+  ["handball", "Handball", "disposal", "pass", "handball"],
+  ["mark", "Mark", "possession", "custom", "mark"],
+  ["contested_mark", "Contested Mark", "contest", "custom", "contested mark"],
+  ["intercept_mark", "Intercept Mark", "defence", "custom", "intercept mark"],
+  ["spoil", "Spoil", "defence", "custom", "spoil"],
+  ["tackle", "Tackle", "defence", "tackle", "tackle"],
+  ["missed_tackle", "Missed Tackle", "defence", "tackle", "missed tackle"],
+  ["pressure_act", "Pressure Act", "pressure", "custom", "pressure act"],
+  ["clearance", "Clearance", "stoppage", "turnover", "clearance"],
+  ["centre_clearance", "Centre Clearance", "stoppage", "turnover", "centre clearance"],
+  ["stoppage_clearance", "Stoppage Clearance", "stoppage", "turnover", "stoppage clearance"],
+  ["inside_50", "Inside 50", "territory", "kick", "inside 50"],
+  ["rebound_50", "Rebound 50", "territory", "kick", "rebound 50"],
+  ["contested_possession", "Contested Possession", "possession", "carry", "contested possession"],
+  ["uncontested_possession", "Uncontested Possession", "possession", "carry", "uncontested possession"],
+  ["ground_ball_get", "Ground Ball Get", "contest", "carry", "ground ball get"],
+  ["turnover_won", "Turnover Won", "transition_turnover", "turnover", "turnover won"],
+  ["turnover_conceded", "Turnover Conceded", "transition_turnover", "turnover", "turnover conceded"],
+  ["free_kick_for", "Free Kick For", "discipline", "penalty", "free kick for"],
+  ["free_kick_against", "Free Kick Against", "discipline", "penalty", "free kick against"],
+  ["goal", "Goal", "scoring", "try", "goal", true, 6],
+  ["behind", "Behind", "scoring", "custom", "behind", true, 1],
+  ["score_involvement", "Score Involvement", "scoring", "custom", "score involvement"],
+  ["shot_at_goal", "Shot At Goal", "scoring", "kick", "shot at goal"],
+  ["kick_in", "Kick In", "restart", "kickoff", "kick in"],
+  ["ball_up", "Ball Up", "stoppage", "custom", "ball up"],
+  ["throw_in", "Throw In", "stoppage", "lineout", "throw in"],
+  ["stoppage", "Stoppage", "stoppage", "stoppage", "stoppage"],
+].map(([id, displayName, category, defaultEventType, defaultOutcome, affectsScore = false, scorePoints = 0]) => ({
+  id, displayName, category, defaultEventType, defaultOutcome, teamAssignment: "home_away", affectsScore, scorePoints, createsEvidence: true, inferable: true, appearsInReports: true,
+} as RugbyTaxonomyItem));
+
+export const SPORT_RULE_PACKS: Record<SportType, { displayName: string; taxonomyId: string; inferenceRuleSetId: string; reportTemplateId: string; taxonomy: RugbyTaxonomyItem[] }> = {
+  rugby_union: { displayName: "Rugby Union", taxonomyId: "rugby_union_taxonomy_v1", inferenceRuleSetId: "rugby_union_inference_v1", reportTemplateId: "rugby_union_report_v1", taxonomy: REPORT_DRIVEN_RUGBY_TAXONOMY },
+  rugby_league: { displayName: "Rugby League", taxonomyId: "rugby_league_taxonomy_v1", inferenceRuleSetId: "rugby_league_inference_stub_v1", reportTemplateId: "rugby_league_report_v1", taxonomy: RUGBY_LEAGUE_TAXONOMY },
+  afl: { displayName: "AFL", taxonomyId: "afl_taxonomy_v1", inferenceRuleSetId: "afl_inference_stub_v1", reportTemplateId: "afl_report_v1", taxonomy: AFL_TAXONOMY },
+};
+
+export function normaliseSportType(value?: string | null): SportType {
+  return value === "rugby_league" || value === "afl" ? value : "rugby_union";
+}
+
+export function sportRulePack(value?: string | null) {
+  return SPORT_RULE_PACKS[normaliseSportType(value)];
+}
 
 export const EVENT_TYPES: EventType[] = [
   "kickoff", "scrum", "lineout", "carry", "tackle", "ruck", "maul", "pass",

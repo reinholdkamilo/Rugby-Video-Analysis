@@ -12,6 +12,7 @@ import {
   VideoAsset,
   api,
 } from "@/lib/api";
+import { sportRulePack } from "@/lib/rugby-events";
 
 const EVENT_TYPES: EventType[] = [
   "kickoff", "scrum", "lineout", "carry", "tackle", "ruck", "maul", "pass",
@@ -83,7 +84,7 @@ export default function SuggestionsPage() {
   async function detect() {
     if (!videoId) return;
     setBusy(true);
-    setNotice("Analysing visual transitions. Keep this page open; longer videos can take several minutes.");
+    setNotice(`Analysing ${selectedMatch ? sportRulePack(selectedMatch.sport_type).displayName : "match"} visual transitions. Keep this page open; longer videos can take several minutes.`);
     try {
       const detected = await api.suggestions.detect(videoId);
       setSuggestions(detected);
@@ -143,7 +144,7 @@ export default function SuggestionsPage() {
           <label className="text-sm text-slate-400">Match
             <select value={matchId ?? ""} onChange={(event) => setMatchId(event.target.value ? Number(event.target.value) : null)} className={`${fieldClass} mt-2 block w-full`}>
               <option value="">Select match</option>
-              {matches.map((match) => <option key={match.id} value={match.id}>{teamName(match.home_team_id)} vs {teamName(match.away_team_id)} · {match.match_date}</option>)}
+              {matches.map((match) => <option key={match.id} value={match.id}>{teamName(match.home_team_id)} vs {teamName(match.away_team_id)} · {sportRulePack(match.sport_type).displayName} · {match.match_date}</option>)}
             </select>
           </label>
           <label className="text-sm text-slate-400">Processed video
@@ -157,7 +158,7 @@ export default function SuggestionsPage() {
           </button>
         </section>
 
-        {selectedMatch && <p className="mt-4 text-sm text-slate-500">{teamName(selectedMatch.home_team_id)} vs {teamName(selectedMatch.away_team_id)}</p>}
+        {selectedMatch && <p className="mt-4 text-sm text-slate-500">{teamName(selectedMatch.home_team_id)} vs {teamName(selectedMatch.away_team_id)} · {sportRulePack(selectedMatch.sport_type).displayName}</p>}
 
         <section className="mt-6 grid grid-cols-3 gap-3">
           <div className="rounded-xl border border-slate-800 bg-slate-900 p-4"><p className="text-sm text-slate-500">Pending</p><p className="mt-1 text-2xl font-bold">{pendingCount}</p></div>

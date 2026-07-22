@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { EvidenceItem, EvidenceType, Match, Team, TimelineEvent, VideoAsset, api, clipUrl, evidenceClipUrl } from "@/lib/api";
+import { sportRulePack } from "@/lib/rugby-events";
 import { sourceVideoUrl } from "@/lib/coding-api";
 
 const EVIDENCE_TYPES: { value: EvidenceType; label: string }[] = [
@@ -150,6 +151,7 @@ export default function EvidenceLibraryPage() {
     try {
       const created = await api.evidence.create({
         match_id: selectedMatchId,
+        sport_type: selectedMatch?.sport_type ?? "rugby_union",
         video_asset_id: selectedVideoId,
         timeline_event_id: eventId,
         evidence_type: String(form.get("evidence_type") || "note") as EvidenceType,
@@ -324,7 +326,7 @@ export default function EvidenceLibraryPage() {
             <h1 className="mt-1 text-3xl font-bold">Evidence Library</h1>
           </div>
           <div className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-300">
-            {items.length} items · {approvedCount} approved
+            {items.length} items · {approvedCount} approved{selectedMatch ? ` · ${sportRulePack(selectedMatch.sport_type).displayName}` : ""}
           </div>
         </div>
       </header>
@@ -335,7 +337,7 @@ export default function EvidenceLibraryPage() {
             <option value="">Select match</option>
             {matches.map((match) => (
               <option key={match.id} value={match.id}>
-                {match.match_date} · {teamName(match.home_team_id)} vs {teamName(match.away_team_id)}
+                {match.match_date} · {teamName(match.home_team_id)} vs {teamName(match.away_team_id)} · {sportRulePack(match.sport_type).displayName}
               </option>
             ))}
           </select>
@@ -352,7 +354,7 @@ export default function EvidenceLibraryPage() {
           <form onSubmit={submitEvidence} className="space-y-4 rounded-xl border border-slate-300 bg-white p-5 shadow-sm">
             <div>
               <h2 className="text-lg font-bold">Add evidence</h2>
-              <p className="mt-1 text-sm text-slate-500">{selectedMatch ? `${teamName(selectedMatch.home_team_id)} vs ${teamName(selectedMatch.away_team_id)}` : "Select a match first."}</p>
+              <p className="mt-1 text-sm text-slate-500">{selectedMatch ? `${teamName(selectedMatch.home_team_id)} vs ${teamName(selectedMatch.away_team_id)} · ${sportRulePack(selectedMatch.sport_type).displayName}` : "Select a match first."}</p>
             </div>
 
             <div className="grid gap-3 md:grid-cols-2">

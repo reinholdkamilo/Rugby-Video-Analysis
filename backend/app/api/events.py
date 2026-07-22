@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.clips import generate_event_clip
 from app.database import get_db
 from app.event_schemas import EventClipRead, TimelineEventCreate, TimelineEventRead, TimelineEventUpdate
-from app.models import AutomaticEventSuggestion, EventClip, EvidenceItem, Match, TimelineEvent, VideoAsset, VideoProcessingResult
+from app.models import AutomaticEventSuggestion, EventClip, EvidenceItem, Match, SportType, TimelineEvent, VideoAsset, VideoProcessingResult
 from app.object_storage import delete_object, is_object_uri
 from app.rugby_analysis import (
     EVENT_SOURCE_LINKED,
@@ -20,6 +20,7 @@ from app.rugby_analysis import (
     evidence_for_event,
 )
 from app.rugby_inference import EVENT_SOURCE_INFERRED, TRUST_STALE, immediate_inference_candidates, infer_events
+from app.sports import sport_rule_pack
 from app.storage import delete_stored_file
 
 router = APIRouter(prefix="/api", tags=["timeline"])
@@ -35,6 +36,8 @@ class InferenceRunRequest(BaseModel):
 class InferenceRunRead(BaseModel):
     match_id: int
     video_asset_id: int | None = None
+    sport_type: str
+    inference_rule_set_id: str
     source_event_count: int
     created_count: int
     stale_count: int
@@ -74,7 +77,8 @@ def create_clip_for_event(event: TimelineEvent, video: VideoAsset, db: Session) 
 
 
 def add_event_evidence(event: TimelineEvent, db: Session, *, status: str | None = None, source: str | None = None) -> None:
-    db.add(evidence_for_event(event, status=status, source=source))
+    match = db.get(Match, event.match_id)
+    db.add(evidence_for_event(event, status=status, source=source, sport_type=(match.sport_type.value if match else "rugby_union")))
 
 
 def _candidate_exists(candidate, events: list[TimelineEvent]) -> bool:
@@ -175,8 +179,10 @@ def list_timeline_events(
 
 @router.post("/timeline-events/infer", response_model=InferenceRunRead)
 def run_timeline_inference(payload: InferenceRunRequest, db: Session = Depends(get_db)) -> InferenceRunRead:
-    if db.get(Match, payload.match_id) is None:
+    match = db.get(Match, payload.match_id)
+    if match is None:
         raise HTTPException(status_code=404, detail="Match not found.")
+    rule_pack = sport_rule_pack(match.sport_type)
     statement = select(TimelineEvent).where(TimelineEvent.match_id == payload.match_id).order_by(
         TimelineEvent.start_seconds,
         TimelineEvent.id,
@@ -186,6 +192,18 @@ def run_timeline_inference(payload: InferenceRunRequest, db: Session = Depends(g
             raise HTTPException(status_code=404, detail="Video not found.")
         statement = statement.where(TimelineEvent.video_asset_id == payload.video_asset_id)
     events = list(db.scalars(statement))
+    if match.sport_type != SportType.rugby_union:
+        return InferenceRunRead(
+            match_id=payload.match_id,
+            video_asset_id=payload.video_asset_id,
+            sport_type=match.sport_type.value,
+            inference_rule_set_id=rule_pack.inference_rule_set_id,
+            source_event_count=sum(event.event_source not in {EVENT_SOURCE_INFERRED, EVENT_SOURCE_LINKED} for event in events),
+            created_count=0,
+            stale_count=0,
+            skipped_count=0,
+            inferred_event_count=sum(event.event_source in {EVENT_SOURCE_INFERRED, EVENT_SOURCE_LINKED} and event.trust_status != TRUST_STALE for event in events),
+        )
 
     stale_count = 0
     if payload.replace_unconfirmed:
@@ -226,6 +244,8 @@ def run_timeline_inference(payload: InferenceRunRequest, db: Session = Depends(g
     return InferenceRunRead(
         match_id=payload.match_id,
         video_asset_id=payload.video_asset_id,
+        sport_type=match.sport_type.value,
+        inference_rule_set_id=rule_pack.inference_rule_set_id,
         source_event_count=sum(event.event_source not in {EVENT_SOURCE_INFERRED, EVENT_SOURCE_LINKED} for event in events),
         created_count=created_count,
         stale_count=stale_count,

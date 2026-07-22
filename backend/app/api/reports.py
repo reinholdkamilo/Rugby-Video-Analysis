@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import EventTeam, Match, TimelineEvent
 from app.rugby_analysis import score_timeline, scoring_points
+from app.rugby_taxonomy import taxonomy_category, taxonomy_event_id
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
 
@@ -23,15 +24,30 @@ def _events_for_match(match_id: int, video_asset_id: int | None, db: Session) ->
 
 def _team_counts(events: list[TimelineEvent], team: EventTeam) -> dict[str, int]:
     team_events = [event for event in events if event.team == team]
+    taxonomy_ids = [taxonomy_event_id(event) for event in team_events]
+    taxonomy_categories = [taxonomy_category(event) for event in team_events]
     return {
         "events": len(team_events),
-        "carries": sum(event.event_type.value == "carry" for event in team_events),
-        "tackles": sum(event.event_type.value == "tackle" for event in team_events),
-        "rucks": sum(event.event_type.value == "ruck" for event in team_events),
-        "kicks": sum(event.event_type.value in {"kick", "kickoff", "conversion"} for event in team_events),
-        "set_piece": sum(event.event_type.value in {"scrum", "lineout", "maul"} for event in team_events),
-        "penalties": sum(event.event_type.value == "penalty" for event in team_events),
-        "turnovers": sum(event.event_type.value == "turnover" for event in team_events),
+        "carries": sum(item in {"carry", "dominant_carry"} for item in taxonomy_ids),
+        "dominant_carries": sum(item == "dominant_carry" for item in taxonomy_ids),
+        "tackles": sum(item in {"tackle", "dominant_tackle"} for item in taxonomy_ids),
+        "dominant_tackles": sum(item == "dominant_tackle" for item in taxonomy_ids),
+        "missed_tackles": sum(item == "missed_tackle" for item in taxonomy_ids),
+        "line_breaks": sum(item == "line_break" for item in taxonomy_ids),
+        "passes": sum(item == "pass" for item in taxonomy_ids),
+        "rucks": sum(category == "breakdown_ruck" for category in taxonomy_categories),
+        "kicks": sum(item in {"kick", "exit", "drop_goal"} or category == "kicking" for item, category in zip(taxonomy_ids, taxonomy_categories, strict=False)),
+        "set_piece": sum(category == "set_piece" for category in taxonomy_categories),
+        "scrums": sum(item.startswith("scrum") for item in taxonomy_ids),
+        "lineouts": sum(item.startswith("lineout") for item in taxonomy_ids),
+        "mauls": sum(item.startswith("maul") for item in taxonomy_ids),
+        "penalties": sum(item.startswith("penalty") for item in taxonomy_ids),
+        "penalties_won": sum(item == "penalty_won" for item in taxonomy_ids),
+        "penalties_conceded": sum(item == "penalty_conceded" for item in taxonomy_ids),
+        "turnovers": sum(item.startswith("turnover") for item in taxonomy_ids),
+        "turnovers_won": sum(item == "turnover_won" for item in taxonomy_ids),
+        "turnovers_conceded": sum(item == "turnover_conceded" for item in taxonomy_ids),
+        "errors": sum(category == "error" for category in taxonomy_categories),
         "points": sum(scoring_points(event) for event in team_events),
     }
 

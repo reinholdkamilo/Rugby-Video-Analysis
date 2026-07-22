@@ -16,6 +16,7 @@ from app.api.events import router as events_router
 from app.api.intelligence import router as intelligence_router
 from app.api.media import router as media_router
 from app.api.multipart_uploads import router as multipart_uploads_router
+from app.api.pipeline import router as pipeline_router
 from app.api.public_media import router as public_media_router
 from app.api.reports import router as reports_router
 from app.api.routes import router as api_router
@@ -203,6 +204,7 @@ app.include_router(events_router)
 app.include_router(media_router)
 app.include_router(uploads_router)
 app.include_router(multipart_uploads_router)
+app.include_router(pipeline_router)
 app.include_router(suggestions_router)
 app.include_router(vision_router)
 app.include_router(understanding_router)

@@ -2,11 +2,18 @@
 
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import { AnalysisJob, Match, Organisation, Team, api, apiUrl, uploadVideoInChunks } from "@/lib/api";
+import { AnalysisJob, Match, Organisation, PipelineStatus, Team, api, apiUrl, uploadVideoInChunks } from "@/lib/api";
 
 const fieldClass = "workspace-field";
 const buttonClass = "button button--primary";
 type UploadProgress = { percent: number; message: string };
+const pipelineStageClass: Record<PipelineStatus["stages"][number]["status"], string> = {
+  done: "pipeline-stage pipeline-stage--done",
+  running: "pipeline-stage pipeline-stage--running",
+  failed: "pipeline-stage pipeline-stage--failed",
+  blocked: "pipeline-stage pipeline-stage--blocked",
+  pending: "pipeline-stage",
+};
 
 async function waitForBackendWake() {
   let lastError: unknown;
@@ -31,6 +38,7 @@ export default function Home() {
   const [notice, setNotice] = useState("Loading workspace...");
   const [busy, setBusy] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<Record<number, UploadProgress>>({});
+  const [pipelines, setPipelines] = useState<Record<number, PipelineStatus>>({});
 
   const loadData = useCallback(async () => {
     try {
@@ -44,6 +52,14 @@ export default function Home() {
       setTeams(teamData);
       setMatches(matchData);
       setJobs(jobData);
+      const pipelineData = await Promise.all(matchData.map(async (match) => {
+        try {
+          return [match.id, await api.pipeline.status(match.id)] as const;
+        } catch {
+          return [match.id, null] as const;
+        }
+      }));
+      setPipelines(Object.fromEntries(pipelineData.filter((item): item is readonly [number, PipelineStatus] => item[1] !== null)));
       setSelectedOrganisationId((current) => current && organisationData.some((item) => item.id === current) ? current : organisationData[0]?.id ?? null);
       setNotice("Workspace ready");
     } catch (error) {
@@ -60,12 +76,20 @@ export default function Home() {
       try {
         const refreshed = await Promise.all(activeJobs.map((job) => api.jobs.get(job.id)));
         setJobs((current) => current.map((job) => refreshed.find((item) => item.id === job.id) ?? job));
+        const pipelineData = await Promise.all(matches.map(async (match) => {
+          try {
+            return [match.id, await api.pipeline.status(match.id)] as const;
+          } catch {
+            return [match.id, null] as const;
+          }
+        }));
+        setPipelines(Object.fromEntries(pipelineData.filter((item): item is readonly [number, PipelineStatus] => item[1] !== null)));
       } catch (error) {
         setNotice(error instanceof Error ? error.message : "Unable to refresh jobs");
       }
     }, 3000);
     return () => window.clearInterval(timer);
-  }, [jobs]);
+  }, [jobs, matches]);
 
   const filteredTeams = useMemo(() => teams.filter((team) => team.organisation_id === selectedOrganisationId), [teams, selectedOrganisationId]);
   const selectedOrganisation = useMemo(
@@ -171,13 +195,15 @@ export default function Home() {
     setBusy(true);
     setUploadProgress((current) => ({ ...current, [matchId]: { percent: 0, message: "Starting resumable upload" } }));
     try {
-      await uploadVideoInChunks(matchId, file, (percent, message) => {
+      const session = await uploadVideoInChunks(matchId, file, (percent, message) => {
         setUploadProgress((current) => ({ ...current, [matchId]: { percent, message } }));
         setNotice(`${file.name}: ${message}`);
       });
+      const pipeline = await api.pipeline.run(matchId, session.video_asset_id ?? undefined);
+      setPipelines((current) => ({ ...current, [matchId]: pipeline }));
       formElement.reset();
       setJobs(await api.jobs.list());
-      setNotice("Video uploaded successfully and processing has started");
+      setNotice("Video uploaded successfully. The automatic pipeline has started.");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Upload failed";
       setUploadProgress((current) => ({ ...current, [matchId]: { percent: 0, message } }));
@@ -185,6 +211,40 @@ export default function Home() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function runMatchPipeline(matchId: number, videoAssetId?: number | null) {
+    await run(async () => {
+      const pipeline = await api.pipeline.run(matchId, videoAssetId ?? undefined);
+      setPipelines((current) => ({ ...current, [matchId]: pipeline }));
+      setJobs(await api.jobs.list());
+      setNotice(pipeline.message);
+    });
+  }
+
+  function renderPipeline(pipeline: PipelineStatus | undefined) {
+    if (!pipeline) return null;
+    return (
+      <div className="pipeline-card">
+        <div className="pipeline-card__head">
+          <div>
+            <span>Auto-analysis pipeline</span>
+            <strong>{pipeline.message}</strong>
+          </div>
+          <b>{pipeline.progress_percent}%</b>
+        </div>
+        <div className="progress-track"><i style={{ width: `${pipeline.progress_percent}%` }}/></div>
+        <div className="pipeline-stage-grid">
+          {pipeline.stages.map((stage) => (
+            <div key={stage.key} className={pipelineStageClass[stage.status]}>
+              <span>{stage.label}</span>
+              <strong>{stage.status}</strong>
+              <small>{stage.detail}</small>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -234,7 +294,37 @@ export default function Home() {
 
           <section id="step-4" className="footage-section"><div className="footage-section__head"><div><span className="eyebrow eyebrow--dark">Step 04 · Footage</span><h3>Matches ready for analysis</h3><p>Upload a short clip, monitor processing and continue into the analyst tools.</p></div><Link href="/catalog" className="button button--secondary">Programme manager</Link></div>
             {!matches.length && <div className="empty-state"><span>◌</span><strong>No matches yet</strong><p>Complete the setup above to create your first fixture.</p></div>}
-            <div className="match-list">{matches.map((match) => { const job = jobs.find((item) => item.match_id === match.id); const progress = uploadProgress[match.id]; return <article key={match.id} className="match-card"><div className="match-card__content"><div className="match-meta"><span>{match.match_date}</span><span>{match.competition || "Competition not set"}</span></div><h4>{teamName(match.home_team_id)} <em>vs</em> {teamName(match.away_team_id)}</h4><p>{match.venue || "Venue not set"}</p>{job && <div className="job-progress"><div><span>{job.status}</span><strong>{job.progress_percent}%</strong></div><div className="progress-track"><i style={{ width: `${job.progress_percent}%` }}/></div><small>{job.message}</small></div>}<div className="match-actions"><Link href="/coding" className="button button--secondary">Open coding</Link><Link href="/timeline" className="button button--secondary">View timeline</Link><button type="button" disabled={busy} onClick={() => void deleteMatchRecord(match)} className="button button--danger">Delete match</button></div></div><form onSubmit={(event) => uploadAndAnalyse(event, match.id)} className="upload-card"><span className="upload-card__icon">↑</span><strong>Upload match footage</strong><p>Full-match uploads use persistent R2 storage.</p><input name="video" type="file" accept="video/mp4,video/quicktime,video/x-msvideo,video/x-matroska,video/x-m4v" required/>{progress && <div className="job-progress"><div><span>{progress.message}</span><strong>{progress.percent}%</strong></div><div className="progress-track"><i style={{ width: `${progress.percent}%` }}/></div></div>}<button type="submit" disabled={busy} className={buttonClass}>{busy && progress ? "Uploading…" : "Upload and start analysis"}</button></form></article>; })}</div>
+            <div className="match-list">{matches.map((match) => {
+              const job = jobs.find((item) => item.match_id === match.id);
+              const progress = uploadProgress[match.id];
+              const pipeline = pipelines[match.id];
+              return (
+                <article key={match.id} className="match-card">
+                  <div className="match-card__content">
+                    <div className="match-meta"><span>{match.match_date}</span><span>{match.competition || "Competition not set"}</span></div>
+                    <h4>{teamName(match.home_team_id)} <em>vs</em> {teamName(match.away_team_id)}</h4>
+                    <p>{match.venue || "Venue not set"}</p>
+                    {job && <div className="job-progress"><div><span>{job.status}</span><strong>{job.progress_percent}%</strong></div><div className="progress-track"><i style={{ width: `${job.progress_percent}%` }}/></div><small>{job.message}</small></div>}
+                    {renderPipeline(pipeline)}
+                    <div className="match-actions">
+                      <button type="button" disabled={busy || pipeline?.status === "running"} onClick={() => void runMatchPipeline(match.id, pipeline?.video_asset_id)} className="button button--primary">Run auto pipeline</button>
+                      <Link href="/coding" className="button button--secondary">Open coding</Link>
+                      <Link href="/suggestions" className="button button--secondary">Review suggestions</Link>
+                      <Link href="/reports" className="button button--secondary">Reports</Link>
+                      <button type="button" disabled={busy} onClick={() => void deleteMatchRecord(match)} className="button button--danger">Delete match</button>
+                    </div>
+                  </div>
+                  <form onSubmit={(event) => uploadAndAnalyse(event, match.id)} className="upload-card">
+                    <span className="upload-card__icon">↑</span>
+                    <strong>Upload match footage</strong>
+                    <p>Full-match uploads use persistent R2 storage. Uploading now starts video processing, vision and suggestions.</p>
+                    <input name="video" type="file" accept="video/mp4,video/quicktime,video/x-msvideo,video/x-matroska,video/x-m4v" required/>
+                    {progress && <div className="job-progress"><div><span>{progress.message}</span><strong>{progress.percent}%</strong></div><div className="progress-track"><i style={{ width: `${progress.percent}%` }}/></div></div>}
+                    <button type="submit" disabled={busy} className={buttonClass}>{busy && progress ? "Uploading…" : "Upload and run pipeline"}</button>
+                  </form>
+                </article>
+              );
+            })}</div>
           </section></div></div></div></section>
 
       <section className="tools-section"><div className="site-container"><div className="section-heading section-heading--center"><span className="eyebrow">Connected analysis tools</span><h2>Everything stays linked to the match.</h2></div><div className="tool-grid">{[["Coding","Tag rugby events quickly and consistently.","/coding"],["Timeline","Review every coded moment chronologically.","/timeline"],["Suggestions","Compare automated candidates with analyst judgement.","/suggestions"],["Intelligence","Turn coded evidence into a coaching report.","/intelligence"]].map(([title,text,href]) => <Link href={href} key={title} className="tool-card"><span>↗</span><h3>{title}</h3><p>{text}</p></Link>)}</div></div></section>

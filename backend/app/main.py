@@ -14,6 +14,7 @@ from app import models  # noqa: F401
 from app.api.catalog import router as catalog_router
 from app.api.events import router as events_router
 from app.api.intelligence import router as intelligence_router
+from app.api.library import router as library_router
 from app.api.media import router as media_router
 from app.api.multipart_uploads import router as multipart_uploads_router
 from app.api.pipeline import router as pipeline_router
@@ -225,6 +226,7 @@ app.include_router(suggestions_router)
 app.include_router(vision_router)
 app.include_router(understanding_router)
 app.include_router(intelligence_router)
+app.include_router(library_router)
 app.include_router(workspace_router)
 app.include_router(system_router)
 app.include_router(public_media_router)

@@ -27,6 +27,37 @@ export type RugbyUnderstandingObservation = { id: number; match_id: number; vide
 export type EvidenceType = "video" | "clip" | "frame" | "audio" | "referee_audio" | "scoreboard" | "commentary" | "note" | "other";
 export type EvidenceItem = { id: number; match_id: number; sport_type: SportType; video_asset_id: number | null; timeline_event_id: number | null; evidence_type: EvidenceType; label: string; rugby_element: string | null; source_uri: string | null; timestamp_seconds: number | null; confidence_label: string | null; notes: string | null; approved_for_training: boolean; status: string; source: string; trust_notes: string | null; created_at: string; updated_at: string };
 export type EvidenceItemPayload = Omit<EvidenceItem, "id" | "created_at" | "updated_at" | "status" | "source" | "trust_notes"> & Partial<Pick<EvidenceItem, "status" | "source" | "trust_notes">>;
+export type LibraryItemType = "game" | "clip" | "playlist" | "report" | "evidence" | "coach_review";
+export type LibraryItem = {
+  id: string;
+  item_type: LibraryItemType;
+  title: string;
+  sport_type: SportType | null;
+  sport_display_name: string | null;
+  match_id: number | null;
+  video_asset_id: number | null;
+  timeline_event_id: number | null;
+  collection_id: number | null;
+  evidence_item_id: number | null;
+  home_team: string | null;
+  away_team: string | null;
+  match_date: string | null;
+  competition: string | null;
+  venue: string | null;
+  duration_seconds: number | null;
+  clip_count: number;
+  event_count: number;
+  status: string;
+  labels: string[];
+  thumbnail_path: string | null;
+  created_at: string | null;
+};
+export type LibraryCollectionRef = { ref_type: "timeline_event" | "clip" | "evidence" | "video"; ref_id: number; label?: string | null };
+export type LibraryCollection = { id: number; collection_type: "playlist" | "coach_review" | string; title: string; description: string | null; sport_type: SportType; match_id: number | null; video_asset_id: number | null; labels: string[]; item_refs: LibraryCollectionRef[]; archived_at: string | null; created_at: string; updated_at: string };
+export type LibraryComment = { id: number; collection_id: number | null; match_id: number | null; video_asset_id: number | null; timeline_event_id: number | null; timestamp_seconds: number | null; body: string; tags: string[]; created_at: string; updated_at: string };
+export type LibraryAnnotation = { id: number; collection_id: number | null; match_id: number | null; video_asset_id: number | null; timeline_event_id: number | null; comment_id: number | null; timestamp_seconds: number | null; shape_type: "arrow" | "circle" | "line" | "text" | string; colour: string; coordinates: Record<string, unknown>; label: string | null; created_at: string };
+export type TimelineLaneEvent = { id: number; lane: string; label: string; team: string; start_seconds: number; end_seconds: number; duration_seconds: number; category: string; source: string; trust_status: string; field_zone: string | null };
+export type TimelineLanes = { match_id: number; sport_type: SportType; lanes: string[]; events: TimelineLaneEvent[] };
 
 async function errorMessage(response: Response, fallback: string) {
   const contentType = response.headers.get("content-type") ?? "";
@@ -57,6 +88,7 @@ async function directUploadRequest<T>(path: string, init?: RequestInit): Promise
 }
 
 export const thumbnailUrl = (result: VideoProcessingResult) => `${apiUrl}/media/thumbnails/${result.thumbnail_path.split("/").pop()}`;
+export const thumbnailPathUrl = (thumbnailPath: string) => `${apiUrl}/media/thumbnails/${thumbnailPath.split("/").pop()}`;
 export const clipUrl = (clip: EventClip) => `${apiUrl}/media/clips/${clip.file_path.split("/").pop()}`;
 export const evidenceClipUrl = (sourceUri: string) => {
   if (/^https?:\/\//i.test(sourceUri)) return sourceUri;
@@ -271,4 +303,38 @@ export const api = {
   suggestions: { detect: async (videoAssetId: number, sceneThreshold = 0.28) => { const job = await request<AnalysisJob>("/api/automatic-suggestions/detect-jobs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ video_asset_id: videoAssetId, replace_pending: true, scene_threshold: sceneThreshold }) }); return waitForDetectionJob(job.id, videoAssetId); }, list: (videoAssetId?: number, status?: SuggestionStatus) => { const query = new URLSearchParams(); if (videoAssetId) query.set("video_asset_id", String(videoAssetId)); if (status) query.set("suggestion_status", status); return request<AutomaticSuggestion[]>(`/api/automatic-suggestions${query.size ? `?${query}` : ""}`); }, update: (suggestionId: number, payload: Partial<Pick<AutomaticSuggestion, "event_type" | "team" | "start_seconds" | "end_seconds" | "label">>) => request<AutomaticSuggestion>(`/api/automatic-suggestions/${suggestionId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }), accept: (suggestionId: number) => request<AutomaticSuggestion>(`/api/automatic-suggestions/${suggestionId}/accept`, { method: "POST" }), reject: (suggestionId: number) => request<AutomaticSuggestion>(`/api/automatic-suggestions/${suggestionId}/reject`, { method: "POST" }) },
   vision: { run: (videoAssetId: number, intervalSeconds = 30) => request<VisionObservation[]>("/api/vision/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ video_asset_id: videoAssetId, interval_seconds: intervalSeconds, max_frames: 12, replace_existing: true }) }), list: (videoAssetId: number) => request<VisionObservation[]>(`/api/vision/observations?video_asset_id=${videoAssetId}`) },
   understanding: { run: (videoAssetId: number) => request<RugbyUnderstandingObservation[]>(`/api/understanding/run/${videoAssetId}`, { method: "POST" }), list: (videoAssetId: number) => request<RugbyUnderstandingObservation[]>(`/api/understanding/${videoAssetId}`) },
+  library: {
+    items: (filters?: { search?: string; item_type?: LibraryItemType | "all"; sport_type?: SportType | "all"; match_id?: number; limit?: number }) => {
+      const query = new URLSearchParams();
+      if (filters?.search) query.set("search", filters.search);
+      if (filters?.item_type && filters.item_type !== "all") query.set("item_type", filters.item_type);
+      if (filters?.sport_type && filters.sport_type !== "all") query.set("sport_type", filters.sport_type);
+      if (filters?.match_id) query.set("match_id", String(filters.match_id));
+      if (filters?.limit) query.set("limit", String(filters.limit));
+      return request<LibraryItem[]>(`/api/library/items${query.size ? `?${query}` : ""}`);
+    },
+    collections: () => request<LibraryCollection[]>("/api/library/collections"),
+    collection: (collectionId: number) => request<LibraryCollection>(`/api/library/collections/${collectionId}`),
+    createCollection: (payload: { collection_type?: "playlist" | "coach_review"; title: string; description?: string | null; sport_type?: SportType; match_id?: number | null; video_asset_id?: number | null; labels?: string[]; items?: LibraryCollectionRef[] }) =>
+      request<LibraryCollection>("/api/library/collections", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+    comments: (filters?: { collection_id?: number; match_id?: number; timeline_event_id?: number }) => {
+      const query = new URLSearchParams();
+      if (filters?.collection_id) query.set("collection_id", String(filters.collection_id));
+      if (filters?.match_id) query.set("match_id", String(filters.match_id));
+      if (filters?.timeline_event_id) query.set("timeline_event_id", String(filters.timeline_event_id));
+      return request<LibraryComment[]>(`/api/library/comments${query.size ? `?${query}` : ""}`);
+    },
+    createComment: (payload: Omit<LibraryComment, "id" | "created_at" | "updated_at">) =>
+      request<LibraryComment>("/api/library/comments", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+    annotations: (filters?: { collection_id?: number; match_id?: number; timeline_event_id?: number }) => {
+      const query = new URLSearchParams();
+      if (filters?.collection_id) query.set("collection_id", String(filters.collection_id));
+      if (filters?.match_id) query.set("match_id", String(filters.match_id));
+      if (filters?.timeline_event_id) query.set("timeline_event_id", String(filters.timeline_event_id));
+      return request<LibraryAnnotation[]>(`/api/library/annotations${query.size ? `?${query}` : ""}`);
+    },
+    createAnnotation: (payload: Omit<LibraryAnnotation, "id" | "created_at">) =>
+      request<LibraryAnnotation>("/api/library/annotations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+    timelineLanes: (matchId: number, videoAssetId?: number) => request<TimelineLanes>(`/api/library/timeline-lanes?match_id=${matchId}${videoAssetId ? `&video_asset_id=${videoAssetId}` : ""}`),
+  },
 };

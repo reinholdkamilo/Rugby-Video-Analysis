@@ -1382,3 +1382,109 @@ def test_multipart_upload_session_is_reused_and_records_parts(monkeypatch) -> No
         assert resumed.json()["object_key"] == session["object_key"]
         assert resumed.json()["uploaded_parts"] == [{"part_number": 1, "etag": '"etag-1"'}]
         assert upload_ids == [f"upload-{unique}-1"]
+
+
+def test_library_items_collections_comments_annotations_and_timeline_lanes() -> None:
+    unique = uuid4().hex[:8]
+    with TestClient(app) as client:
+        organisation_id = client.post(
+            "/api/organisations", json={"name": f"Library Foundation {unique}"}
+        ).json()["id"]
+        home_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"Library Home {unique}"},
+        ).json()["id"]
+        away_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"Library Away {unique}"},
+        ).json()["id"]
+        match_id = client.post(
+            "/api/matches",
+            json={
+                "organisation_id": organisation_id,
+                "home_team_id": home_id,
+                "away_team_id": away_id,
+                "match_date": "2026-07-12",
+                "sport_type": "rugby_league",
+                "competition": "Library Cup",
+                "venue": "Review Park",
+            },
+        ).json()["id"]
+        video = client.post(
+            f"/api/matches/{match_id}/videos",
+            files={"file": ("library-source.mp4", b"not a real video", "video/mp4")},
+        ).json()
+        event = client.post(
+            "/api/timeline-events",
+            json={
+                "match_id": match_id,
+                "video_asset_id": video["id"],
+                "event_type": "carry",
+                "team": "home",
+                "start_seconds": 12,
+                "end_seconds": 27,
+                "outcome": "hit up",
+                "field_zone": "own 40m",
+                "clip_requested": False,
+            },
+        ).json()
+
+        items = client.get(f"/api/library/items?match_id={match_id}").json()
+        item_types = {item["item_type"] for item in items}
+        assert {"game", "report", "evidence"}.issubset(item_types)
+        assert any(item["title"].startswith(f"Library Home {unique}") for item in items)
+
+        collection = client.post(
+            "/api/library/collections",
+            json={
+                "collection_type": "coach_review",
+                "title": "Round review",
+                "sport_type": "rugby_league",
+                "match_id": match_id,
+                "video_asset_id": video["id"],
+                "labels": ["coach", "round"],
+                "items": [{"ref_type": "timeline_event", "ref_id": event["id"], "label": "Hit up"}],
+            },
+        )
+        assert collection.status_code == 201
+        collection_body = collection.json()
+        assert collection_body["item_refs"][0]["ref_id"] == event["id"]
+
+        comment = client.post(
+            "/api/library/comments",
+            json={
+                "collection_id": collection_body["id"],
+                "match_id": match_id,
+                "video_asset_id": video["id"],
+                "timeline_event_id": event["id"],
+                "timestamp_seconds": 13,
+                "body": "Good first contact review moment.",
+                "tags": ["carry", "coach"],
+            },
+        )
+        assert comment.status_code == 201
+        assert comment.json()["tags"] == ["carry", "coach"]
+
+        annotation = client.post(
+            "/api/library/annotations",
+            json={
+                "collection_id": collection_body["id"],
+                "match_id": match_id,
+                "video_asset_id": video["id"],
+                "timeline_event_id": event["id"],
+                "timestamp_seconds": 13,
+                "shape_type": "text",
+                "colour": "#f5b400",
+                "coordinates": {"x": 50, "y": 50},
+                "label": "Support line",
+            },
+        )
+        assert annotation.status_code == 201
+        assert annotation.json()["coordinates"]["x"] == 50
+
+        lanes = client.get(f"/api/library/timeline-lanes?match_id={match_id}&video_asset_id={video['id']}")
+        assert lanes.status_code == 200
+        lanes_body = lanes.json()
+        assert lanes_body["sport_type"] == "rugby_league"
+        assert "Carries / Hit Ups" in lanes_body["lanes"]
+        assert any(item["id"] == event["id"] and item["lane"] == "Carries / Hit Ups" for item in lanes_body["events"])

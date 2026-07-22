@@ -343,3 +343,93 @@ class MatchContext(Base):
     round_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+
+class LibraryCollection(Base):
+    __tablename__ = "library_collections"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    collection_type: Mapped[str] = mapped_column(String(40), default="playlist", index=True)
+    title: Mapped[str] = mapped_column(String(200), index=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sport_type: Mapped[SportType] = mapped_column(Enum(SportType), default=SportType.rugby_union, index=True)
+    match_id: Mapped[int | None] = mapped_column(ForeignKey("matches.id", ondelete="SET NULL"), nullable=True, index=True)
+    video_asset_id: Mapped[int | None] = mapped_column(ForeignKey("video_assets.id", ondelete="SET NULL"), nullable=True, index=True)
+    labels_json: Mapped[str] = mapped_column(Text, default="[]")
+    item_refs_json: Mapped[str] = mapped_column(Text, default="[]")
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+    @property
+    def labels(self) -> list[str]:
+        try:
+            parsed = json.loads(self.labels_json or "[]")
+        except json.JSONDecodeError:
+            return []
+        return [str(item) for item in parsed] if isinstance(parsed, list) else []
+
+    @property
+    def item_refs(self) -> list[dict[str, object]]:
+        try:
+            parsed = json.loads(self.item_refs_json or "[]")
+        except json.JSONDecodeError:
+            return []
+        return [item for item in parsed if isinstance(item, dict)] if isinstance(parsed, list) else []
+
+    def set_labels(self, labels: list[str]) -> None:
+        self.labels_json = json.dumps([label.strip() for label in labels if label.strip()])
+
+    def set_item_refs(self, refs: list[dict[str, object]]) -> None:
+        self.item_refs_json = json.dumps(refs)
+
+
+class LibraryComment(Base):
+    __tablename__ = "library_comments"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    collection_id: Mapped[int | None] = mapped_column(ForeignKey("library_collections.id", ondelete="CASCADE"), nullable=True, index=True)
+    match_id: Mapped[int | None] = mapped_column(ForeignKey("matches.id", ondelete="SET NULL"), nullable=True, index=True)
+    video_asset_id: Mapped[int | None] = mapped_column(ForeignKey("video_assets.id", ondelete="SET NULL"), nullable=True, index=True)
+    timeline_event_id: Mapped[int | None] = mapped_column(ForeignKey("timeline_events.id", ondelete="SET NULL"), nullable=True, index=True)
+    timestamp_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    body: Mapped[str] = mapped_column(Text)
+    tags_json: Mapped[str] = mapped_column(Text, default="[]")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+    @property
+    def tags(self) -> list[str]:
+        try:
+            parsed = json.loads(self.tags_json or "[]")
+        except json.JSONDecodeError:
+            return []
+        return [str(item) for item in parsed] if isinstance(parsed, list) else []
+
+    def set_tags(self, tags: list[str]) -> None:
+        self.tags_json = json.dumps([tag.strip() for tag in tags if tag.strip()])
+
+
+class LibraryAnnotation(Base):
+    __tablename__ = "library_annotations"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    collection_id: Mapped[int | None] = mapped_column(ForeignKey("library_collections.id", ondelete="CASCADE"), nullable=True, index=True)
+    match_id: Mapped[int | None] = mapped_column(ForeignKey("matches.id", ondelete="SET NULL"), nullable=True, index=True)
+    video_asset_id: Mapped[int | None] = mapped_column(ForeignKey("video_assets.id", ondelete="SET NULL"), nullable=True, index=True)
+    timeline_event_id: Mapped[int | None] = mapped_column(ForeignKey("timeline_events.id", ondelete="SET NULL"), nullable=True, index=True)
+    comment_id: Mapped[int | None] = mapped_column(ForeignKey("library_comments.id", ondelete="SET NULL"), nullable=True, index=True)
+    timestamp_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    shape_type: Mapped[str] = mapped_column(String(40), default="text")
+    colour: Mapped[str] = mapped_column(String(40), default="#f5b400")
+    coordinates_json: Mapped[str] = mapped_column(Text, default="{}")
+    label: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    @property
+    def coordinates(self) -> dict[str, object]:
+        try:
+            parsed = json.loads(self.coordinates_json or "{}")
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+
+    def set_coordinates(self, coordinates: dict[str, object]) -> None:
+        self.coordinates_json = json.dumps(coordinates)

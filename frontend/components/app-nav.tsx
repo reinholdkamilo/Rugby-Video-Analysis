@@ -5,10 +5,12 @@ import { usePathname } from "next/navigation";
 
 const links = [
   ["/", "Home"],
-  ["/upload", "Upload Match"],
+  ["/library", "Library"],
+  ["/upload", "Upload"],
   ["/coding", "Coding"],
-  ["/evidence", "Evidence"],
   ["/reports", "Reports"],
+  ["/evidence", "Evidence"],
+  ["/intelligence", "Intelligence"],
 ] as const;
 
 export function AppNav() {

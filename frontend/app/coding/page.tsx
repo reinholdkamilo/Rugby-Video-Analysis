@@ -982,7 +982,7 @@ export default function CodingWorkspace() {
 
   const createEventFromBinding = useCallback((binding: ShortcutBinding) => {
     if (!binding.eventType) {
-      setNotice("This coding button has no rugby event type assigned. Shift-click it to edit the event type.");
+      setNotice("This coding button has no rugby event type assigned. Use Edit to set the event type.");
       return;
     }
     void createEvent(binding.eventType, binding.duration || QUICK_CODE_CAPTURE_SECONDS, {
@@ -1080,6 +1080,17 @@ export default function CodingWorkspace() {
     setEditingShortcutId(null);
     setNotice(duplicate ? `${shortcutLabel(normalisedShortcut)} is mapped to more than one action.` : "Keyboard shortcut updated.");
   }, [shortcuts]);
+
+  function startShortcutRecording(binding: ShortcutBinding) {
+    setQuickEditBindingId(null);
+    setEditingShortcutId(binding.id);
+    setNotice(`Press the new shortcut for ${displayEventLabel(binding)}. Escape cancels.`);
+  }
+
+  function openQuickEdit(binding: ShortcutBinding) {
+    setEditingShortcutId(null);
+    setQuickEditBindingId(binding.id);
+  }
 
   useEffect(() => {
     if (!editingShortcutId) return;
@@ -1267,8 +1278,7 @@ export default function CodingWorkspace() {
 
   function handleHudButtonClick(event: ReactMouseEvent<HTMLButtonElement>, binding: ShortcutBinding) {
     if (event.shiftKey) {
-      setQuickEditBindingId(binding.id);
-      setEditingShortcutId(null);
+      startShortcutRecording(binding);
       return;
     }
     if (binding.group === "event") {
@@ -1562,12 +1572,9 @@ export default function CodingWorkspace() {
           style={{ gridTemplateColumns, gap: layout.buttonGap }}
         >
           {overlayItems.map((binding) => (
-            <button
+            <div
               key={binding.id}
-              type="button"
               draggable
-              title="Click to code or set zone. Shift-click to edit. Drag to move."
-              onClick={(event) => handleHudButtonClick(event, binding)}
               onDragStart={() => setDraggingHudButton({ panelId, bindingId: binding.id })}
               onDragOver={(event) => event.preventDefault()}
               onDrop={(event) => {
@@ -1575,32 +1582,50 @@ export default function CodingWorkspace() {
                 moveHudButton(panelId, binding.id);
               }}
               onDragEnd={() => setDraggingHudButton(null)}
-              className={`grid min-w-0 grid-cols-[auto_1fr] items-center rounded border border-white/10 bg-black/25 text-left hover:border-emerald-300 ${activeZoneId === binding.id ? "bg-emerald-400/20" : ""}`}
-              style={{
-                gap: Math.max(4, Math.round(8 * layout.buttonScale)),
-                padding: `${Math.round(5 * layout.buttonScale)}px ${Math.round(7 * layout.buttonScale)}px`,
-                minHeight: Math.round(34 * layout.buttonScale),
-              }}
+              className={`grid min-w-0 grid-cols-[1fr_auto] items-stretch overflow-hidden rounded border border-white/10 bg-black/25 hover:border-emerald-300 ${activeZoneId === binding.id ? "bg-emerald-400/20" : ""} ${editingShortcutId === binding.id ? "border-amber-300 ring-1 ring-amber-300/50" : ""}`}
+              style={{ minHeight: Math.round(34 * layout.buttonScale) }}
             >
-              <kbd
-                className="rounded border border-emerald-400/40 text-center font-black text-emerald-300"
+              <button
+                type="button"
+                title="Click to code or set zone. Shift-click to assign a key."
+                onClick={(event) => handleHudButtonClick(event, binding)}
+                className="grid min-w-0 grid-cols-[auto_1fr] items-center text-left"
                 style={{
-                  minWidth: Math.round(34 * layout.buttonScale),
-                  padding: `${Math.round(2 * layout.buttonScale)}px ${Math.round(5 * layout.buttonScale)}px`,
-                  fontSize: Math.round(11 * layout.buttonScale),
+                  gap: Math.max(4, Math.round(8 * layout.buttonScale)),
+                  padding: `${Math.round(5 * layout.buttonScale)}px ${Math.round(7 * layout.buttonScale)}px`,
                 }}
               >
-                {shortcutLabel(binding.shortcut)}
-              </kbd>
-              <span className="min-w-0">
-                <span className="block truncate font-semibold" style={{ fontSize: Math.round(12 * layout.buttonScale) }}>{displayEventLabel(binding)}</span>
-                {!layout.compact ? (
-                  <span className="block truncate uppercase tracking-[0.12em] text-slate-400" style={{ fontSize: Math.round(9 * layout.buttonScale) }}>
-                    {binding.group === "zone" ? "zone" : categoryLabel(binding.category)}
-                  </span>
-                ) : null}
-              </span>
-            </button>
+                <kbd
+                  className={`rounded border text-center font-black ${editingShortcutId === binding.id ? "border-amber-300 text-amber-200" : "border-emerald-400/40 text-emerald-300"}`}
+                  style={{
+                    minWidth: Math.round(34 * layout.buttonScale),
+                    padding: `${Math.round(2 * layout.buttonScale)}px ${Math.round(5 * layout.buttonScale)}px`,
+                    fontSize: Math.round(11 * layout.buttonScale),
+                  }}
+                >
+                  {editingShortcutId === binding.id ? "Press key..." : shortcutLabel(binding.shortcut)}
+                </kbd>
+                <span className="min-w-0">
+                  <span className="block truncate font-semibold" style={{ fontSize: Math.round(12 * layout.buttonScale) }}>{displayEventLabel(binding)}</span>
+                  {!layout.compact ? (
+                    <span className="block truncate uppercase tracking-[0.12em] text-slate-400" style={{ fontSize: Math.round(9 * layout.buttonScale) }}>
+                      {binding.group === "zone" ? "zone" : categoryLabel(binding.category)}
+                    </span>
+                  ) : null}
+                </span>
+              </button>
+              <button
+                type="button"
+                title={`Edit ${displayEventLabel(binding)} settings`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  openQuickEdit(binding);
+                }}
+                className="border-l border-white/10 px-2 text-[10px] font-black uppercase tracking-[0.08em] text-slate-400 hover:bg-white/10 hover:text-white"
+              >
+                Edit
+              </button>
+            </div>
           ))}
         </div>
       </div>
@@ -1754,7 +1779,7 @@ export default function CodingWorkspace() {
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="font-bold">Quick coding matrix</h2>
-                <p className="text-xs text-slate-500">Home and away stay side by side. Click to code. Shift-click a button to edit its name, key, team, outcome or zone.</p>
+                <p className="text-xs text-slate-500">Home and away stay side by side. Click to code. Shift-click a button to assign a key. Use Edit for full settings.</p>
               </div>
               <div className="flex flex-wrap gap-2 text-sm">
                 <button type="button" onClick={() => setQuickAddPanel((current) => current === "event" ? null : "event")} className="rounded-lg bg-emerald-400 px-3 py-2 font-bold text-slate-950">
@@ -1838,14 +1863,11 @@ export default function CodingWorkspace() {
                         </div>
                         <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>
                           {section.items.map((binding) => (
-                            <button
+                            <div
                               key={binding.id}
-                              type="button"
-                              title="Click to code. Shift-click to edit."
                               data-design-id={`coding-quick-${designId(binding.id)}-button`}
                               data-design-label={`${binding.label} quick button`}
                               draggable
-                              aria-disabled={busy || !selectedVideoId || !binding.eventType}
                               onDragStart={() => setDraggingShortcutId(binding.id)}
                               onDragOver={(event) => event.preventDefault()}
                               onDrop={(event) => {
@@ -1853,26 +1875,42 @@ export default function CodingWorkspace() {
                                 moveShortcutToColumn(column.id, binding.id);
                               }}
                               onDragEnd={() => setDraggingShortcutId(null)}
-                              onClick={(event) => {
-                                if (event.shiftKey) {
-                                  setQuickEditBindingId(binding.id);
-                                  setEditingShortcutId(null);
-                                  return;
-                                }
-                                if (busy || !selectedVideoId || !binding.eventType) {
-                                  setNotice("Select a source video before coding events. Shift-click a button to edit it without coding.");
-                                  return;
-                                }
-                                createEventFromBinding(binding);
-                              }}
-                              className={`${quickButtonClass} min-h-12 cursor-pointer overflow-hidden ${busy || !selectedVideoId || !binding.eventType ? "opacity-50" : ""} ${draggingShortcutId === binding.id ? "border-emerald-400 opacity-70" : ""}`}
+                              className={`grid min-h-12 grid-cols-[1fr_auto] overflow-hidden rounded-lg border border-slate-800 bg-slate-900 hover:border-emerald-400 ${busy || !selectedVideoId || !binding.eventType ? "opacity-50" : ""} ${draggingShortcutId === binding.id ? "border-emerald-400 opacity-70" : ""} ${editingShortcutId === binding.id ? "border-amber-300 ring-1 ring-amber-300/50" : ""}`}
                             >
-                              <kbd data-design-id={`coding-quick-${designId(binding.id)}-key`} data-design-label={`${binding.label} key badge`} className={`min-w-14 rounded border px-2 py-1 text-center text-xs font-bold ${shortcutConflict(binding.shortcut) ? "border-rose-400 text-rose-400" : "border-slate-700 text-emerald-400"}`}>{shortcutLabel(binding.shortcut)}</kbd>
-                              <span data-design-id={`coding-quick-${designId(binding.id)}-text`} data-design-label={`${binding.label} quick text`} className="min-w-0">
-                                <span className="block truncate text-sm font-bold">{displayEventLabel(binding)}</span>
-                                <span className="block truncate text-[11px] uppercase tracking-[0.12em] text-slate-500">{binding.fieldZone || categoryLabel(binding.category)}</span>
-                              </span>
-                            </button>
+                              <button
+                                type="button"
+                                title="Click to code. Shift-click to assign a key."
+                                aria-disabled={busy || !selectedVideoId || !binding.eventType}
+                                onClick={(event) => {
+                                  if (event.shiftKey) {
+                                    startShortcutRecording(binding);
+                                    return;
+                                  }
+                                  if (busy || !selectedVideoId || !binding.eventType) {
+                                    setNotice("Select a source video before coding events. Use Shift-click to assign a key or Edit for settings.");
+                                    return;
+                                  }
+                                  createEventFromBinding(binding);
+                                }}
+                                className={`${quickButtonClass} min-h-12 cursor-pointer overflow-hidden border-0 bg-transparent hover:border-transparent ${codingLayout.density === "compact" ? "rounded-none" : "rounded-none"}`}
+                              >
+                                <kbd data-design-id={`coding-quick-${designId(binding.id)}-key`} data-design-label={`${binding.label} key badge`} className={`min-w-14 rounded border px-2 py-1 text-center text-xs font-bold ${editingShortcutId === binding.id ? "border-amber-300 text-amber-200" : shortcutConflict(binding.shortcut) ? "border-rose-400 text-rose-400" : "border-slate-700 text-emerald-400"}`}>
+                                  {editingShortcutId === binding.id ? "Press key..." : shortcutLabel(binding.shortcut)}
+                                </kbd>
+                                <span data-design-id={`coding-quick-${designId(binding.id)}-text`} data-design-label={`${binding.label} quick text`} className="min-w-0">
+                                  <span className="block truncate text-sm font-bold">{displayEventLabel(binding)}</span>
+                                  <span className="block truncate text-[11px] uppercase tracking-[0.12em] text-slate-500">{binding.fieldZone || categoryLabel(binding.category)}</span>
+                                </span>
+                              </button>
+                              <button
+                                type="button"
+                                title={`Edit ${displayEventLabel(binding)} settings`}
+                                onClick={() => openQuickEdit(binding)}
+                                className="border-l border-slate-800 px-2 text-[10px] font-black uppercase tracking-[0.08em] text-slate-500 hover:bg-slate-800 hover:text-white"
+                              >
+                                Edit
+                              </button>
+                            </div>
                           ))}
                           {!section.items.length ? <div className="rounded-lg border border-dashed border-slate-800 px-3 py-2 text-xs text-slate-600">Add an event to this group</div> : null}
                         </div>
@@ -1904,7 +1942,7 @@ export default function CodingWorkspace() {
                 <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <h2 className="text-lg font-black">Edit quick code</h2>
-                    <p className="text-xs text-slate-500">Changes save immediately. Press Change key, then hold modifiers and press the final key.</p>
+                    <p className="text-xs text-slate-500">Changes save immediately. Shift-click a quick button for fast key assignment, or use Change key here.</p>
                   </div>
                   <button type="button" onClick={() => { setQuickEditBindingId(null); setEditingShortcutId(null); }} className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-bold">Close</button>
                 </div>

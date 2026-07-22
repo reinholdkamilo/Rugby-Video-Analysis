@@ -1,7 +1,6 @@
 "use client";
 
 import { MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createPortal } from "react-dom";
 
@@ -82,6 +81,8 @@ type DesignStore = {
 type DragState =
   | { mode: "move"; id: string; startX: number; startY: number; baseX: number; baseY: number }
   | { mode: "resize"; id: string; startX: number; startY: number; baseWidth: number; baseHeight: number };
+
+type LiveRect = { left: number; top: number; width: number; height: number };
 
 const STORAGE_KEY = "rugby-video-analysis:blank-canvas-design:v3";
 const SUPPORTED_PAGES: PageKey[] = ["home", "upload", "library", "coding", "reports", "evidence", "intelligence"];
@@ -363,6 +364,10 @@ function liveStaticNodeStyle(node: CanvasNode): React.CSSProperties {
   };
 }
 
+function nodeLabel(node: CanvasNode) {
+  return componentFor(node.componentId)?.label ?? node.text ?? readable(node.staticKind ?? node.type);
+}
+
 function LiveStaticLayout({ layout, page }: { layout: PageLayout; page: PageKey }) {
   const [mainElement, setMainElement] = useState<HTMLElement | null>(null);
   const staticNodes = useMemo(() => (
@@ -380,7 +385,7 @@ function LiveStaticLayout({ layout, page }: { layout: PageLayout; page: PageKey 
   return createPortal(
     <div className="design-live-static-layer" aria-hidden="true">
       {staticNodes.map((node) => (
-        <div key={node.id} className={`design-live-static design-live-static--${node.staticKind ?? node.type}`} style={liveStaticNodeStyle(node)}>
+        <div key={node.id} data-design-live-node-id={node.id} className={`design-live-static design-live-static--${node.staticKind ?? node.type}`} style={liveStaticNodeStyle(node)}>
           {node.staticKind === "divider" || node.staticKind === "spacer" ? null : <span>{node.text || readable(node.staticKind ?? node.type)}</span>}
         </div>
       ))}
@@ -399,6 +404,7 @@ export function AppDesignStudio() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [templateName, setTemplateName] = useState("");
   const [notice, setNotice] = useState("Design Engine ready.");
+  const [, setMeasureTick] = useState(0);
 
   const layout = useMemo(() => normalizeLayout(store.layouts[page] ?? defaultLayout(page)), [page, store.layouts]);
   const selected = layout.nodes.find((node) => node.id === selectedId) ?? null;
@@ -438,6 +444,18 @@ export function AppDesignStudio() {
   useEffect(() => {
     document.body.classList.toggle("design-engine-editing", open);
     return () => document.body.classList.remove("design-engine-editing");
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const refresh = () => setMeasureTick((tick) => tick + 1);
+    refresh();
+    window.addEventListener("resize", refresh);
+    window.addEventListener("scroll", refresh, true);
+    return () => {
+      window.removeEventListener("resize", refresh);
+      window.removeEventListener("scroll", refresh, true);
+    };
   }, [open]);
 
   useEffect(() => {
@@ -498,6 +516,14 @@ export function AppDesignStudio() {
     dragRef.current = mode === "move"
       ? { mode, id: node.id, startX: event.clientX, startY: event.clientY, baseX: node.x, baseY: node.y }
       : { mode, id: node.id, startX: event.clientX, startY: event.clientY, baseWidth: node.width, baseHeight: node.height };
+  }
+
+  function liveRectForNode(node: CanvasNode): LiveRect {
+    if (typeof document === "undefined") return { left: node.x, top: node.y, width: node.width, height: node.height };
+    const main = document.querySelector<HTMLElement>("main");
+    if (!main) return { left: node.x, top: node.y, width: node.width, height: node.height };
+    const rect = main.getBoundingClientRect();
+    return { left: rect.left + node.x, top: rect.top + node.y, width: node.width, height: node.height };
   }
 
   function addNode(type: NodeType = "container", staticKind?: StaticKind) {
@@ -609,12 +635,6 @@ export function AppDesignStudio() {
     setNotice(`Container split into ${direction}.`);
   }
 
-  function moveIntoParent(parentId: string | null) {
-    if (!selected) return;
-    updateNode(selected.id, { parentId });
-    setNotice(parentId ? "Node moved into selected parent." : "Node moved out to page canvas.");
-  }
-
   function resetToBlank() {
     const next = makeEmptyLayout(page, "blank");
     updateStore((current) => ({ ...current, layouts: { ...current.layouts, [page]: next } }));
@@ -682,59 +702,149 @@ export function AppDesignStudio() {
     updateNode(selected.id, updates);
   }
 
-  function renderSlot(node: CanvasNode) {
-    const definition = componentFor(node.componentId);
-    if (!definition) return <span>Empty component slot</span>;
-    return (
-      <div className="design-engine-slot">
-        <strong>{definition.label}</strong>
-        <span>{definition.description}</span>
-        <small>{definition.stateful ? "One active instance per page" : "Static-safe"}</small>
-        {definition.href ? <Link href={definition.href}>Open live component</Link> : null}
-      </div>
-    );
-  }
-
-  function renderNode(node: CanvasNode) {
-    const childCount = layout.nodes.filter((item) => item.parentId === node.id).length;
-    const style = {
-      left: node.x,
-      top: node.y,
-      width: node.width,
-      height: node.height,
-      minWidth: node.minWidth,
-      minHeight: node.minHeight,
-      padding: node.padding,
-      gap: node.gap,
-      margin: node.margin,
-      background: node.background,
-      color: node.color,
-      borderColor: node.borderColor,
-      borderWidth: node.borderWidth,
-      borderRadius: node.radius,
-      opacity: node.opacity,
-      zIndex: node.zIndex,
-      overflow: node.overflow,
-    } as React.CSSProperties;
+  function renderLiveOverlay(node: CanvasNode) {
+    const rect = liveRectForNode(node);
+    const selectedClass = selectedId === node.id ? " is-selected" : "";
     return (
       <div
         key={node.id}
-        className={`design-engine-node design-engine-node--${node.type} ${selectedId === node.id ? "is-selected" : ""} ${node.locked ? "is-locked" : ""}`}
-        style={style}
+        className={`design-live-outline${selectedClass}${node.locked ? " is-locked" : ""}`}
+        style={{ left: rect.left, top: rect.top, width: rect.width, height: rect.height, zIndex: 700 + node.zIndex }}
         onClick={(event) => {
+          event.preventDefault();
           event.stopPropagation();
           setSelectedId(node.id);
         }}
       >
-        <button type="button" className="design-engine-node__handle" onMouseDown={(event) => startDrag("move", node, event)}>{node.locked ? "Locked" : "Move"}</button>
-        <button type="button" className="design-engine-node__resize" onMouseDown={(event) => startDrag("resize", node, event)} aria-label="Resize selected block" />
-        {node.type === "slot" ? renderSlot(node) : (
-          <div className={`design-engine-static design-engine-static--${node.staticKind ?? node.type}`}>
-            {node.staticKind === "divider" || node.staticKind === "spacer" ? null : <strong>{node.text || readable(node.staticKind ?? node.type)}</strong>}
-            {childCount ? <small>{childCount} child block{childCount === 1 ? "" : "s"}</small> : null}
-          </div>
-        )}
+        <button type="button" className="design-live-outline__handle" onMouseDown={(event) => startDrag("move", node, event)}>
+          {node.locked ? "Locked" : nodeLabel(node)}
+        </button>
+        <button type="button" className="design-live-outline__resize" onMouseDown={(event) => startDrag("resize", node, event)} aria-label={`Resize ${nodeLabel(node)}`} />
       </div>
+    );
+  }
+
+  function renderInlineInspector() {
+    return (
+      <aside className="design-live-panel design-engine-panel">
+        <section>
+          <h2>Layers</h2>
+          <div className="design-engine-layer-list">
+            {layout.nodes.map((node) => (
+              <button key={node.id} type="button" className={selectedId === node.id ? "is-active" : ""} onClick={() => setSelectedId(node.id)}>
+                <span>{nodeLabel(node)}</span>
+                <small>{node.type}{node.hidden ? " · hidden" : ""}</small>
+              </button>
+            ))}
+            {!layout.nodes.length ? <p>No visible layout nodes yet.</p> : null}
+          </div>
+        </section>
+
+        <section>
+          <h2>Add</h2>
+          <div className="design-engine-grid-buttons">
+            <button type="button" onClick={() => addNode("section")}>Section</button>
+            <button type="button" onClick={() => addNode("row")}>Row</button>
+            <button type="button" onClick={() => addNode("column")}>Column</button>
+            <button type="button" onClick={() => addNode("container")}>Container</button>
+            {STATIC_BLOCKS.slice(1, 7).map((block) => <button key={block.kind} type="button" onClick={() => addNode("static", block.kind)}>{block.label}</button>)}
+          </div>
+        </section>
+
+        <section>
+          <h2>Components</h2>
+          <div className="design-engine-component-list">
+            {pageComponents.map((component) => {
+              const used = usedComponents.has(component.id);
+              return (
+                <button key={component.id} type="button" onClick={() => insertComponent(component.id)} className={used ? "is-used" : ""}>
+                  <strong>{component.label}</strong>
+                  <span>{used && component.stateful ? "Already on page" : component.description}</span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        <section>
+          <h2>Inspector</h2>
+          {selected ? (
+            <div className="design-engine-form">
+              <label>Text <input value={selected.text ?? ""} onChange={(event) => updateSelected({ text: event.target.value })} /></label>
+              <label>Content <select value={selected.componentId ?? ""} onChange={(event) => event.target.value ? insertComponent(event.target.value) : updateSelected({ type: "container", componentId: null })}>
+                <option value="">No component</option>
+                {pageComponents.map((component) => <option key={component.id} value={component.id}>{component.label}</option>)}
+              </select></label>
+              <div className="design-engine-form-grid">
+                <label>X <input type="number" value={selected.x} onChange={(event) => updateSelected({ x: Number(event.target.value) })} /></label>
+                <label>Y <input type="number" value={selected.y} onChange={(event) => updateSelected({ y: Number(event.target.value) })} /></label>
+                <label>W <input type="number" value={selected.width} onChange={(event) => updateSelected({ width: Number(event.target.value) })} /></label>
+                <label>H <input type="number" value={selected.height} onChange={(event) => updateSelected({ height: Number(event.target.value) })} /></label>
+              </div>
+              <div className="design-engine-form-grid">
+                <label>Padding <input type="number" min="0" value={selected.padding} onChange={(event) => updateSelected({ padding: Number(event.target.value) })} /></label>
+                <label>Gap <input type="number" min="0" value={selected.gap} onChange={(event) => updateSelected({ gap: Number(event.target.value) })} /></label>
+                <label>Radius <input type="number" min="0" max="80" value={selected.radius} onChange={(event) => updateSelected({ radius: Number(event.target.value) })} /></label>
+                <label>Layer <input type="number" min="0" max="200" value={selected.zIndex} onChange={(event) => updateSelected({ zIndex: Number(event.target.value) })} /></label>
+              </div>
+              <div className="design-engine-form-grid">
+                <label>BG <input type="color" value={selected.background} onChange={(event) => updateSelected({ background: event.target.value })} /></label>
+                <label>Text <input type="color" value={selected.color} onChange={(event) => updateSelected({ color: event.target.value })} /></label>
+                <label>Border <input type="color" value={selected.borderColor} onChange={(event) => updateSelected({ borderColor: event.target.value })} /></label>
+                <label>Opacity <input type="number" min="0" max="1" step="0.05" value={selected.opacity} onChange={(event) => updateSelected({ opacity: Number(event.target.value) })} /></label>
+              </div>
+              <div className="design-engine-button-row">
+                <button type="button" onClick={() => splitSelected("columns")}>Split columns</button>
+                <button type="button" onClick={() => splitSelected("rows")}>Split rows</button>
+              </div>
+              <div className="design-engine-button-row">
+                <button type="button" onClick={() => updateSelected({ locked: !selected.locked })}>{selected.locked ? "Unlock" : "Lock"}</button>
+                <button type="button" onClick={() => updateSelected({ hidden: !selected.hidden })}>{selected.hidden ? "Show" : "Hide"}</button>
+                <button type="button" onClick={duplicateSelected}>Duplicate</button>
+                <button type="button" onClick={resetSelected}>Reset</button>
+                <button type="button" className="design-engine-danger" onClick={deleteSelected}>Delete</button>
+              </div>
+            </div>
+          ) : <p>Click a highlighted page block to edit it here.</p>}
+        </section>
+
+        <section>
+          <h2>Templates</h2>
+          <div className="design-engine-form">
+            <input value={templateName} onChange={(event) => setTemplateName(event.target.value)} placeholder="Template name" />
+            <button type="button" onClick={saveTemplate}>Save template</button>
+            <select value="" onChange={(event) => event.target.value && loadTemplate(event.target.value)}>
+              <option value="">Load saved template</option>
+              {pageTemplates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}
+            </select>
+          </div>
+        </section>
+      </aside>
+    );
+  }
+
+  function renderLiveDesignMode() {
+    if (typeof document === "undefined") return null;
+    return createPortal(
+      <>
+        <div className="design-live-topbar">
+          <div>
+            <strong>{readable(page)} Live Design</strong>
+            <span>{wiredStatus} · {layout.mode} layout · {layout.nodes.length} node{layout.nodes.length === 1 ? "" : "s"}</span>
+          </div>
+          <div className="design-engine-toolbar__actions">
+            <label><input type="checkbox" checked={layout.snapEnabled} onChange={(event) => updateLayout((current) => ({ ...current, snapEnabled: event.target.checked }))} /> Snap</label>
+            <label>Grid <input type="number" min="4" max="40" value={layout.gridSize} onChange={(event) => updateLayout((current) => ({ ...current, gridSize: Number(event.target.value || 12) }))} /></label>
+            <button type="button" onClick={resetToBlank}>Blank</button>
+            <button type="button" onClick={resetToDefault}>Default</button>
+            <button type="button" onClick={() => setOpen(false)}>Done</button>
+          </div>
+        </div>
+        <div className="design-live-notice">{notice}</div>
+        <div className="design-live-overlays">{sortedNodes.map(renderLiveOverlay)}</div>
+        {renderInlineInspector()}
+      </>,
+      document.body,
     );
   }
 
@@ -744,176 +854,10 @@ export function AppDesignStudio() {
     <>
       {appliedLayoutCss ? <style id="rugby-live-design-layout">{appliedLayoutCss}</style> : null}
       <LiveStaticLayout layout={layout} page={page} />
-      <button type="button" className="design-studio-toggle" onClick={() => setOpen(true)} aria-expanded={open}>
-        Design
+      <button type="button" className="design-studio-toggle" onClick={() => setOpen((current) => !current)} aria-expanded={open}>
+        {open ? "Done" : "Design"}
       </button>
-      {open ? (
-        <div className="design-engine" role="dialog" aria-modal="true" aria-label="Blank canvas design engine">
-          <header className="design-engine-toolbar">
-            <div>
-              <strong>{readable(page)} Design Engine</strong>
-              <span>{wiredStatus} · {layout.mode} layout · {layout.nodes.length} node{layout.nodes.length === 1 ? "" : "s"}</span>
-            </div>
-            <div className="design-engine-toolbar__actions">
-              <button type="button" onClick={resetToBlank}>Start blank</button>
-              <button type="button" onClick={resetToDefault}>Reset default</button>
-              <button type="button" onClick={() => setOpen(false)}>Exit Design</button>
-            </div>
-          </header>
-
-          <aside className="design-engine-panel design-engine-panel--left">
-            <section>
-              <h2>Layers</h2>
-              <div className="design-engine-layer-list">
-                {layout.nodes.map((node) => (
-                  <button key={node.id} type="button" className={selectedId === node.id ? "is-active" : ""} onClick={() => setSelectedId(node.id)}>
-                    <span>{componentFor(node.componentId)?.label ?? node.text ?? readable(node.staticKind ?? node.type)}</span>
-                    <small>{node.type}{node.hidden ? " · hidden" : ""}</small>
-                  </button>
-                ))}
-                {!layout.nodes.length ? <p>Blank canvas. Add a container or component.</p> : null}
-              </div>
-            </section>
-
-            <section>
-              <h2>Add Containers</h2>
-              <div className="design-engine-grid-buttons">
-                <button type="button" onClick={() => addNode("section")}>Section</button>
-                <button type="button" onClick={() => addNode("row")}>Row</button>
-                <button type="button" onClick={() => addNode("column")}>Column</button>
-                <button type="button" onClick={() => addNode("container")}>Container</button>
-                <button type="button" onClick={() => addNode("group")}>Group</button>
-              </div>
-            </section>
-
-            <section>
-              <h2>Static Blocks</h2>
-              <div className="design-engine-grid-buttons">
-                {STATIC_BLOCKS.map((block) => <button key={block.kind} type="button" onClick={() => addNode("static", block.kind)}>{block.label}</button>)}
-              </div>
-            </section>
-          </aside>
-
-          <main className="design-engine-canvas-shell">
-            <div className="design-engine-canvas-head">
-              <span>{notice}</span>
-              <label><input type="checkbox" checked={layout.snapEnabled} onChange={(event) => updateLayout((current) => ({ ...current, snapEnabled: event.target.checked }))} /> Snap</label>
-              <label>Grid <input type="number" min="4" max="40" value={layout.gridSize} onChange={(event) => updateLayout((current) => ({ ...current, gridSize: Number(event.target.value || 12) }))} /></label>
-            </div>
-            <div
-              className="design-engine-canvas"
-              style={{ "--design-engine-grid": `${layout.gridSize}px` } as React.CSSProperties}
-              onClick={() => setSelectedId(null)}
-            >
-              {sortedNodes.map(renderNode)}
-              {!layout.nodes.length ? (
-                <div className="design-engine-empty">
-                  <h2>Blank {readable(page)} Canvas</h2>
-                  <p>Add containers first, split them into rows or columns, then insert app components into the spaces.</p>
-                  <button type="button" onClick={() => addNode("container")}>Add first container</button>
-                </div>
-              ) : null}
-            </div>
-          </main>
-
-          <aside className="design-engine-panel design-engine-panel--right">
-            <section>
-              <h2>Component Registry</h2>
-              <div className="design-engine-component-list">
-                {pageComponents.map((component) => {
-                  const used = usedComponents.has(component.id);
-                  return (
-                    <button key={component.id} type="button" onClick={() => insertComponent(component.id)} className={used ? "is-used" : ""}>
-                      <strong>{component.label}</strong>
-                      <span>{used && component.stateful ? "Already on page" : component.description}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </section>
-
-            <section>
-              <h2>Inspector</h2>
-              {selected ? (
-                <div className="design-engine-form">
-                  <label>Text <input value={selected.text ?? ""} onChange={(event) => updateSelected({ text: event.target.value })} /></label>
-                  <label>Content <select value={selected.componentId ?? ""} onChange={(event) => event.target.value ? insertComponent(event.target.value) : updateSelected({ type: "container", componentId: null })}>
-                    <option value="">No component</option>
-                    {pageComponents.map((component) => <option key={component.id} value={component.id}>{component.label}</option>)}
-                  </select></label>
-                  <div className="design-engine-form-grid">
-                    <label>X <input type="number" value={selected.x} onChange={(event) => updateSelected({ x: Number(event.target.value) })} /></label>
-                    <label>Y <input type="number" value={selected.y} onChange={(event) => updateSelected({ y: Number(event.target.value) })} /></label>
-                    <label>W <input type="number" value={selected.width} onChange={(event) => updateSelected({ width: Number(event.target.value) })} /></label>
-                    <label>H <input type="number" value={selected.height} onChange={(event) => updateSelected({ height: Number(event.target.value) })} /></label>
-                  </div>
-                  <label>Layout <select value={selected.layout} onChange={(event) => updateSelected({ layout: event.target.value as LayoutMode })}>
-                    <option value="free">Free</option>
-                    <option value="stack">Stack</option>
-                    <option value="row">Row</option>
-                    <option value="grid">Grid</option>
-                  </select></label>
-                  <div className="design-engine-form-grid">
-                    <label>Columns <input type="number" min="1" max="12" value={selected.columns ?? 1} onChange={(event) => updateSelected({ columns: Number(event.target.value) })} /></label>
-                    <label>Rows <input type="number" min="1" max="12" value={selected.rows ?? 1} onChange={(event) => updateSelected({ rows: Number(event.target.value) })} /></label>
-                    <label>Padding <input type="number" min="0" value={selected.padding} onChange={(event) => updateSelected({ padding: Number(event.target.value) })} /></label>
-                    <label>Gap <input type="number" min="0" value={selected.gap} onChange={(event) => updateSelected({ gap: Number(event.target.value) })} /></label>
-                  </div>
-                  <div className="design-engine-form-grid">
-                    <label>BG <input type="color" value={selected.background} onChange={(event) => updateSelected({ background: event.target.value })} /></label>
-                    <label>Text <input type="color" value={selected.color} onChange={(event) => updateSelected({ color: event.target.value })} /></label>
-                    <label>Border <input type="color" value={selected.borderColor} onChange={(event) => updateSelected({ borderColor: event.target.value })} /></label>
-                    <label>Radius <input type="number" min="0" max="80" value={selected.radius} onChange={(event) => updateSelected({ radius: Number(event.target.value) })} /></label>
-                  </div>
-                  <div className="design-engine-form-grid">
-                    <label>Border W <input type="number" min="0" max="12" value={selected.borderWidth} onChange={(event) => updateSelected({ borderWidth: Number(event.target.value) })} /></label>
-                    <label>Opacity <input type="number" min="0" max="1" step="0.05" value={selected.opacity} onChange={(event) => updateSelected({ opacity: Number(event.target.value) })} /></label>
-                    <label>Layer <input type="number" min="0" max="200" value={selected.zIndex} onChange={(event) => updateSelected({ zIndex: Number(event.target.value) })} /></label>
-                    <label>Overflow <select value={selected.overflow} onChange={(event) => updateSelected({ overflow: event.target.value as CanvasNode["overflow"] })}><option value="visible">Visible</option><option value="hidden">Hidden</option><option value="auto">Auto</option></select></label>
-                  </div>
-                  <label>Move into <select value={selected.parentId ?? ""} onChange={(event) => moveIntoParent(event.target.value || null)}>
-                    <option value="">Page canvas</option>
-                    {layout.nodes.filter((node) => node.id !== selected.id && ["section", "row", "column", "container", "group"].includes(node.type)).map((node) => <option key={node.id} value={node.id}>{node.text || componentFor(node.componentId)?.label || readable(node.type)}</option>)}
-                  </select></label>
-                  <div className="design-engine-button-row">
-                    <button type="button" onClick={() => splitSelected("columns")}>Split columns</button>
-                    <button type="button" onClick={() => splitSelected("rows")}>Split rows</button>
-                  </div>
-                  <div className="design-engine-button-row">
-                    <button type="button" onClick={() => updateSelected({ componentId: null, type: "container" })}>Remove component</button>
-                    <button type="button" onClick={() => updateSelected({ locked: !selected.locked })}>{selected.locked ? "Unlock" : "Lock"}</button>
-                    <button type="button" onClick={() => updateSelected({ hidden: !selected.hidden })}>{selected.hidden ? "Show" : "Hide"}</button>
-                  </div>
-                  <div className="design-engine-button-row">
-                    <button type="button" onClick={duplicateSelected}>Duplicate</button>
-                    <button type="button" onClick={resetSelected}>Reset selected</button>
-                    <button type="button" className="design-engine-danger" onClick={deleteSelected}>Delete</button>
-                  </div>
-                </div>
-              ) : <p>Select a canvas node to edit width, height, grid, colours, split controls and component assignment.</p>}
-            </section>
-
-            <section>
-              <h2>Templates</h2>
-              <div className="design-engine-form">
-                <input value={templateName} onChange={(event) => setTemplateName(event.target.value)} placeholder="Template name" />
-                <button type="button" onClick={saveTemplate}>Save custom template</button>
-                <select value="" onChange={(event) => event.target.value && loadTemplate(event.target.value)}>
-                  <option value="">Load saved template</option>
-                  {pageTemplates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}
-                </select>
-              </div>
-            </section>
-
-            {!FULLY_WIRED_PAGES.has(page) ? (
-              <section className="design-engine-note">
-                <h2>Support Level</h2>
-                <p>This page is registered with safe placeholder/default templates. Coding, Library and Reports are the first fully enabled v1 pages.</p>
-              </section>
-            ) : null}
-          </aside>
-        </div>
-      ) : null}
+      {open ? renderLiveDesignMode() : null}
     </>
   );
 }

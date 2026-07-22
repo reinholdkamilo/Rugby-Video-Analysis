@@ -32,6 +32,12 @@ export const codingApi = {
     if (videoAssetId) query.set("video_asset_id", String(videoAssetId));
     return withBackendWakeRetry(() => request<TimelineEvent[]>(`/api/timeline-events?${query}`));
   },
+  runInference: (matchId: number, videoAssetId?: number) =>
+    request<{ match_id: number; video_asset_id: number | null; source_event_count: number; created_count: number; stale_count: number; skipped_count: number; inferred_event_count: number }>("/api/timeline-events/infer", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ match_id: matchId, video_asset_id: videoAssetId ?? null, replace_unconfirmed: true }),
+    }),
   createEvent: (payload: {
     match_id: number;
     video_asset_id: number;

@@ -26,6 +26,9 @@ class TimelineEventCreate(BaseModel):
     trust_status: str = Field(default="confirmed", max_length=40)
     linked_event_id: int | None = None
     linked_reason: str | None = Field(default=None, max_length=2000)
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    inference_rule: str | None = Field(default=None, max_length=120)
+    created_from_event_ids: str | None = Field(default=None, max_length=2000)
 
     @model_validator(mode="after")
     def validate_timestamps(self):
@@ -51,6 +54,9 @@ class TimelineEventUpdate(BaseModel):
     trust_status: str | None = Field(default=None, max_length=40)
     linked_event_id: int | None = None
     linked_reason: str | None = Field(default=None, max_length=2000)
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    inference_rule: str | None = Field(default=None, max_length=120)
+    created_from_event_ids: str | None = Field(default=None, max_length=2000)
 
 
 class EventClipRead(ORMModel):
@@ -79,6 +85,9 @@ class TimelineEventRead(ORMModel):
     trust_status: str
     linked_event_id: int | None
     linked_reason: str | None
+    confidence: float | None
+    inference_rule: str | None
+    created_from_event_ids: str | None
     created_at: datetime
     updated_at: datetime
     clip: EventClipRead | None = None

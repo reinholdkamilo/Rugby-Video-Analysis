@@ -108,7 +108,7 @@ def build_candidates(duration_seconds: float, scene_times: list[float]) -> list[
         DetectionCandidate(
             event_type=EventType.kickoff,
             start_seconds=0.0,
-            end_seconds=min(8.0, duration_seconds),
+            end_seconds=min(10.0, duration_seconds),
             confidence=0.58,
             label="Opening restart candidate",
             reason="The beginning of uploaded match footage is commonly a kick-off or restart. Confirm before accepting.",

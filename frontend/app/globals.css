@@ -561,6 +561,22 @@ body main :is(section, article, form, aside, header, .rounded-xl, .rounded-2xl) 
 .progress-track { overflow:hidden; height:8px; margin-top:7px; border-radius:99px; background:#e5ebe8; }
 .progress-track i { display:block; height:100%; border-radius:99px; background:var(--forest); }
 .job-progress small { display:block; margin-top:6px; color:var(--muted); font-size:.65rem; }
+.pipeline-card { margin-top:16px; border:1px solid var(--line); border-radius:14px; background:#f7f9f8; padding:14px; }
+.pipeline-card__head { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; }
+.pipeline-card__head span,.pipeline-stage span { display:block; color:var(--muted); font-size:.6rem; font-weight:950; letter-spacing:.11em; text-transform:uppercase; }
+.pipeline-card__head strong { display:block; margin-top:4px; color:var(--ink); font-size:.78rem; line-height:1.35; }
+.pipeline-card__head b { border-radius:999px; background:var(--forest); padding:5px 9px; color:#fff; font-size:.7rem; }
+.pipeline-stage-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:12px; }
+.pipeline-stage { min-width:0; border:1px solid var(--line); border-radius:10px; background:#fff; padding:10px; }
+.pipeline-stage strong { display:block; margin-top:4px; color:var(--muted); font-size:.68rem; text-transform:capitalize; }
+.pipeline-stage small { display:block; margin-top:6px; color:var(--muted); font-size:.66rem; line-height:1.35; }
+.pipeline-stage--done { border-color:#b9dccb; background:#edf8f2; }
+.pipeline-stage--done strong { color:var(--forest); }
+.pipeline-stage--running { border-color:#f4d675; background:#fff8df; }
+.pipeline-stage--running strong { color:#8a6400; }
+.pipeline-stage--blocked { background:#f3f5f4; }
+.pipeline-stage--failed { border-color:#ffc6c6; background:#fff0f0; }
+.pipeline-stage--failed strong { color:#9f1d1d; }
 
 /* Tools + footer */
 .tools-section { background:var(--forest-deep); padding:88px 0; color:#fff; }
@@ -652,4 +668,5 @@ td,th { border-bottom:1px solid var(--line); padding:12px 14px; text-align:left;
   .field-pair,.match-form-grid { grid-template-columns:1fr; }
   .match-form-grid__wide { grid-column:auto; }
   .match-card { padding:18px; }
+  .pipeline-stage-grid { grid-template-columns:1fr; }
 }

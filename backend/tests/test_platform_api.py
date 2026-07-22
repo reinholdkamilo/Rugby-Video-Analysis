@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from app.database import SessionLocal
 from app.main import app
-from app.models import EventClip, VideoAsset
+from app.models import EventClip, VideoAsset, VideoProcessingResult
 
 
 def test_create_match_and_analysis_job() -> None:
@@ -974,6 +974,94 @@ def test_detection_job_completes_and_creates_suggestions(monkeypatch) -> None:
     assert job["status"] == "completed"
     assert job["progress_percent"] == 100
     assert len(suggestions) == 2
+
+
+def test_match_pipeline_reports_blocked_until_video_uploaded() -> None:
+    unique = uuid4().hex[:8]
+    with TestClient(app) as client:
+        organisation_id = client.post(
+            "/api/organisations", json={"name": f"Pipeline Empty {unique}"}
+        ).json()["id"]
+        home_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"Home {unique}"},
+        ).json()["id"]
+        away_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"Away {unique}"},
+        ).json()["id"]
+        match_id = client.post(
+            "/api/matches",
+            json={
+                "organisation_id": organisation_id,
+                "home_team_id": home_id,
+                "away_team_id": away_id,
+                "match_date": "2026-07-12",
+            },
+        ).json()["id"]
+
+        status_response = client.get(f"/api/matches/{match_id}/pipeline")
+        run_response = client.post(f"/api/matches/{match_id}/pipeline/run", json={})
+
+    assert status_response.status_code == 200
+    assert status_response.json()["video_asset_id"] is None
+    assert status_response.json()["stages"][0]["key"] == "upload"
+    assert run_response.status_code == 409
+
+
+def test_match_pipeline_status_counts_existing_analysis_data() -> None:
+    unique = uuid4().hex[:8]
+    with TestClient(app) as client:
+        organisation_id = client.post(
+            "/api/organisations", json={"name": f"Pipeline Status {unique}"}
+        ).json()["id"]
+        home_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"Home {unique}"},
+        ).json()["id"]
+        away_id = client.post(
+            "/api/teams",
+            json={"organisation_id": organisation_id, "name": f"Away {unique}"},
+        ).json()["id"]
+        match_id = client.post(
+            "/api/matches",
+            json={
+                "organisation_id": organisation_id,
+                "home_team_id": home_id,
+                "away_team_id": away_id,
+                "match_date": "2026-07-12",
+            },
+        ).json()["id"]
+        video = client.post(
+            f"/api/matches/{match_id}/videos",
+            files={"file": ("pipeline.mp4", b"not a real video", "video/mp4")},
+        ).json()
+
+        with SessionLocal() as db:
+            job_id = client.post("/api/analysis-jobs", json={"match_id": match_id, "video_asset_id": video["id"]}).json()["id"]
+            db.add(
+                VideoProcessingResult(
+                    analysis_job_id=job_id,
+                    video_asset_id=video["id"],
+                    duration_seconds=60,
+                    width=1280,
+                    height=720,
+                    frame_rate=25,
+                    video_codec="h264",
+                    audio_codec="aac",
+                    thumbnail_path="thumbnails/test.jpg",
+                )
+            )
+            db.commit()
+
+        response = client.get(f"/api/matches/{match_id}/pipeline")
+
+    assert response.status_code == 200
+    stages = {stage["key"]: stage for stage in response.json()["stages"]}
+    assert stages["upload"]["status"] == "done"
+    assert stages["processing"]["status"] == "done"
+    assert stages["vision"]["status"] == "pending"
+    assert stages["suggestions"]["status"] == "pending"
 
 
 def test_accept_suggestion_uses_video_storage_reference_for_clip(monkeypatch) -> None:

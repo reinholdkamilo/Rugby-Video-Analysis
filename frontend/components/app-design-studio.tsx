@@ -339,6 +339,25 @@ function selectorForElement(element: HTMLElement) {
   return parts.join(" > ");
 }
 
+function isDesignChromeElement(element: HTMLElement) {
+  return Boolean(element.closest(".design-live-topbar, .design-live-panel, .design-studio-toggle"));
+}
+
+function selectableElementFromPoint(target: HTMLElement, clientX: number, clientY: number) {
+  if (isDesignChromeElement(target)) return null;
+  const fromTarget = target.closest<HTMLElement>("main *");
+  if (fromTarget && !fromTarget.closest(".design-live-overlays")) return fromTarget;
+
+  for (const element of document.elementsFromPoint(clientX, clientY)) {
+    if (!(element instanceof HTMLElement)) continue;
+    if (isDesignChromeElement(element)) return null;
+    if (element.closest(".design-live-overlays")) continue;
+    const candidate = element.closest<HTMLElement>("main *");
+    if (candidate) return candidate;
+  }
+  return null;
+}
+
 function liveNodeStyles(node: CanvasNode) {
   return [
     "position:absolute!important",
@@ -613,8 +632,8 @@ export function AppDesignStudio() {
     if (!open || !elementPickMode) return;
     const onClick = (event: MouseEvent) => {
       const target = event.target as HTMLElement | null;
-      if (!target || target.closest(".design-live-topbar, .design-live-panel, .design-studio-toggle, .design-live-overlays")) return;
-      const candidate = target.closest<HTMLElement>("main *");
+      if (!target) return;
+      const candidate = selectableElementFromPoint(target, event.clientX, event.clientY);
       if (!candidate) return;
       event.preventDefault();
       event.stopPropagation();

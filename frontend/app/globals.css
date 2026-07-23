@@ -612,6 +612,11 @@ body main :is(section, article, form, aside, header, .rounded-xl, .rounded-2xl) 
   background: rgba(255,255,255,.12);
 }
 
+.design-live-panel button.is-active {
+  border-color: #32d583;
+  background: rgba(50,213,131,.16);
+}
+
 .design-live-notice {
   left: 18px;
   bottom: 18px;
@@ -700,6 +705,22 @@ body main :is(section, article, form, aside, header, .rounded-xl, .rounded-2xl) 
   height: 23px;
   border-radius: 999px;
   cursor: nwse-resize;
+}
+
+.design-live-element-outline {
+  position: fixed;
+  z-index: 815;
+  pointer-events: none;
+  border: 2px solid #f59e0b;
+  border-radius: 8px;
+  background: rgba(245,158,11,.08);
+  color: #fff;
+  font-size: .72rem;
+  font-weight: 950;
+  line-height: 1;
+  padding: 4px 6px;
+  box-shadow: 0 0 0 3px rgba(245,158,11,.18);
+  transform: translateY(-2px);
 }
 
 body.design-engine-editing {

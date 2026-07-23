@@ -358,10 +358,17 @@ function liveNodeSelector(targetId: string) {
 
 function elementLabel(element: HTMLElement) {
   const designLabel = element.getAttribute("data-design-label");
-  if (designLabel) return designLabel;
+  if (designLabel) return cleanElementLabel(designLabel);
   const text = element.innerText?.trim().replace(/\s+/g, " ").slice(0, 42);
   const id = element.id ? `#${element.id}` : "";
   return `${element.tagName.toLowerCase()}${id}${text ? ` · ${text}` : ""}`;
+}
+
+function cleanElementLabel(label: string) {
+  return label
+    .replace(/\b(video player shell|shell|container|box|grid|list|block)\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim() || label;
 }
 
 function selectorForElement(element: HTMLElement) {
@@ -391,6 +398,37 @@ function selectorForElement(element: HTMLElement) {
   return parts.join(" > ");
 }
 
+function designIdFromSelector(selector: string) {
+  const match = selector.match(/^\[data-design-id="(.+)"\]$/);
+  return match ? match[1].replace(/\\([^a-zA-Z0-9_-])/g, "$1") : null;
+}
+
+function isSimplifiedDesignRootId(designId: string) {
+  if (designId.endsWith("-key-overlay") || designId.endsWith("-overlay") || designId.endsWith("-hud")) return true;
+  if (designId.endsWith("-block")) return !(designId.includes("shell") || designId.includes("grid") || designId.includes("list") || designId.includes("box"));
+  if (designId.includes("shell") || designId.includes("grid") || designId.includes("list") || designId.includes("board")) return false;
+  if (designId.includes("box") || designId.includes("card") || designId.includes("row") || designId.includes("section")) return false;
+  if (designId.includes("column") || designId.includes("form") || designId.includes("field") || designId.includes("selector")) return false;
+  if (designId.includes("button") || designId.includes("key") || designId.includes("text") || designId.includes("count")) return false;
+  return false;
+}
+
+function isSimplifiedSelector(selector: string) {
+  const designId = designIdFromSelector(selector);
+  return !designId || isSimplifiedDesignRootId(designId);
+}
+
+function simplifiedDesignElement(element: HTMLElement) {
+  const roots: HTMLElement[] = [];
+  let current: HTMLElement | null = element;
+  while (current && current.tagName.toLowerCase() !== "main") {
+    const designId = current.getAttribute("data-design-id");
+    if (designId && isSimplifiedDesignRootId(designId)) roots.push(current);
+    current = current.parentElement;
+  }
+  return roots[0] ?? element.closest<HTMLElement>("[data-design-id]") ?? element;
+}
+
 function isDesignChromeElement(element: HTMLElement) {
   return Boolean(element.closest(".design-live-topbar, .design-live-panel, .design-studio-toggle"));
 }
@@ -398,14 +436,14 @@ function isDesignChromeElement(element: HTMLElement) {
 function selectableElementFromPoint(target: HTMLElement, clientX: number, clientY: number) {
   if (isDesignChromeElement(target)) return null;
   const fromTarget = target.closest<HTMLElement>("main *");
-  if (fromTarget && !fromTarget.closest(".design-live-overlays")) return fromTarget;
+  if (fromTarget && !fromTarget.closest(".design-live-overlays")) return simplifiedDesignElement(fromTarget);
 
   for (const element of document.elementsFromPoint(clientX, clientY)) {
     if (!(element instanceof HTMLElement)) continue;
     if (isDesignChromeElement(element)) return null;
     if (element.closest(".design-live-overlays")) continue;
     const candidate = element.closest<HTMLElement>("main *");
-    if (candidate) return candidate;
+    if (candidate) return simplifiedDesignElement(candidate);
   }
   return null;
 }
@@ -495,7 +533,7 @@ function elementResetStyles(mode: ElementCssResetMode) {
 
 function elementResetCss(page: PageKey, resets: ElementCssReset[]) {
   return resets
-    .filter((reset) => reset.page === page && reset.mode !== "none")
+    .filter((reset) => reset.page === page && reset.mode !== "none" && isSimplifiedSelector(reset.selector))
     .map((reset) => `${reset.selector}{${elementResetStyles(reset.mode)}}`)
     .join("\n");
 }
@@ -532,7 +570,7 @@ function elementStyleOverrideStyles(override: ElementStyleOverride) {
 
 function elementStyleOverrideCss(page: PageKey, overrides: ElementStyleOverride[]) {
   return overrides
-    .filter((override) => override.page === page)
+    .filter((override) => override.page === page && isSimplifiedSelector(override.selector))
     .map((override) => `${override.selector}{${elementStyleOverrideStyles(override)}}`)
     .join("\n");
 }
@@ -614,8 +652,8 @@ export function AppDesignStudio() {
   const usedComponents = usedStatefulComponents(layout);
   const sortedNodes = [...layout.nodes].filter((node) => !node.hidden).sort((a, b) => a.order - b.order);
   const pageTemplates = store.templates.filter((template) => template.page === page);
-  const pageElementResets = (store.elementCssResets ?? []).filter((reset) => reset.page === page);
-  const pageElementOverrides = (store.elementStyleOverrides ?? []).filter((override) => override.page === page);
+  const pageElementResets = (store.elementCssResets ?? []).filter((reset) => reset.page === page && isSimplifiedSelector(reset.selector));
+  const pageElementOverrides = (store.elementStyleOverrides ?? []).filter((override) => override.page === page && isSimplifiedSelector(override.selector));
   const pageElementEditCount = pageElementResets.length + pageElementOverrides.length;
   const selectedElementOverride = selectedElement ? pageElementOverrides.find((override) => override.selector === selectedElement.selector) : null;
   const wiredStatus = FULLY_WIRED_PAGES.has(page) ? "Canvas-enabled" : "Registered placeholder";

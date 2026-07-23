@@ -724,7 +724,8 @@ body main :is(section, article, form, aside, header, .rounded-xl, .rounded-2xl) 
 }
 
 .design-live-element-outline__handle,
-.design-live-element-outline__resize {
+.design-live-element-outline__resize,
+.design-live-element-outline__edge {
   position: absolute;
   z-index: 2;
   border: 0;
@@ -758,6 +759,44 @@ body main :is(section, article, form, aside, header, .rounded-xl, .rounded-2xl) 
   height: 23px;
   border-radius: 999px;
   cursor: nwse-resize;
+}
+
+.design-live-element-outline__edge {
+  opacity: .9;
+}
+
+.design-live-element-outline__edge--n,
+.design-live-element-outline__edge--s {
+  left: 18px;
+  right: 18px;
+  height: 9px;
+}
+
+.design-live-element-outline__edge--n {
+  top: -5px;
+  cursor: ns-resize;
+}
+
+.design-live-element-outline__edge--s {
+  bottom: -5px;
+  cursor: ns-resize;
+}
+
+.design-live-element-outline__edge--e,
+.design-live-element-outline__edge--w {
+  top: 18px;
+  bottom: 18px;
+  width: 9px;
+}
+
+.design-live-element-outline__edge--e {
+  right: -5px;
+  cursor: ew-resize;
+}
+
+.design-live-element-outline__edge--w {
+  left: -5px;
+  cursor: ew-resize;
 }
 
 body.design-engine-editing {

@@ -99,6 +99,15 @@ type ElementStyleOverride = {
   radius?: number;
   opacity?: number;
   zIndex?: number;
+  display?: "revert" | "block" | "flex" | "grid";
+  flexDirection?: "row" | "column";
+  columns?: number;
+  rows?: number;
+  gap?: number;
+  padding?: number;
+  textAlign?: "left" | "center" | "right";
+  alignItems?: "start" | "center" | "end" | "stretch";
+  justifyContent?: "start" | "center" | "end" | "space-between" | "space-around";
   hidden?: boolean;
   createdAt: string;
   updatedAt: string;
@@ -118,7 +127,17 @@ type DragState =
 
 type ElementDragState =
   | { mode: "move"; selector: string; startX: number; startY: number; baseX: number; baseY: number }
-  | { mode: "resize"; selector: string; startX: number; startY: number; baseWidth: number; baseHeight: number };
+  | {
+    mode: "resize";
+    selector: string;
+    edge: "n" | "e" | "s" | "w" | "se";
+    startX: number;
+    startY: number;
+    baseX: number;
+    baseY: number;
+    baseWidth: number;
+    baseHeight: number;
+  };
 
 type LiveRect = { left: number; top: number; width: number; height: number };
 type SelectedElement = { selector: string; label: string; rect: LiveRect };
@@ -498,6 +517,15 @@ function elementStyleOverrideStyles(override: ElementStyleOverride) {
     typeof override.opacity === "number" ? `opacity:${override.opacity}!important` : "",
     typeof override.zIndex === "number" ? `z-index:${override.zIndex}!important` : "",
     typeof override.zIndex === "number" ? "position:relative!important" : "",
+    override.display && override.display !== "revert" ? `display:${override.display}!important` : "",
+    override.display === "flex" && override.flexDirection ? `flex-direction:${override.flexDirection}!important` : "",
+    override.display === "grid" && override.columns ? `grid-template-columns:repeat(${override.columns}, minmax(0, 1fr))!important` : "",
+    override.display === "grid" && override.rows ? `grid-template-rows:repeat(${override.rows}, minmax(0, auto))!important` : "",
+    typeof override.gap === "number" ? `gap:${override.gap}px!important` : "",
+    typeof override.padding === "number" ? `padding:${override.padding}px!important` : "",
+    override.textAlign ? `text-align:${override.textAlign}!important` : "",
+    override.alignItems ? `align-items:${override.alignItems}!important` : "",
+    override.justifyContent ? `justify-content:${override.justifyContent}!important` : "",
     override.hidden ? "display:none!important" : "",
   ].filter(Boolean).join(";");
 }
@@ -717,9 +745,17 @@ export function AppDesignStudio() {
           y: snap(state.baseY + event.clientY - state.startY, layout.gridSize, layout.snapEnabled),
         });
       } else {
+        const deltaX = event.clientX - state.startX;
+        const deltaY = event.clientY - state.startY;
+        const nextX = state.edge === "w" ? snap(state.baseX + deltaX, layout.gridSize, layout.snapEnabled) : state.baseX;
+        const nextY = state.edge === "n" ? snap(state.baseY + deltaY, layout.gridSize, layout.snapEnabled) : state.baseY;
+        const widthDelta = state.edge === "w" ? -deltaX : state.edge === "e" || state.edge === "se" ? deltaX : 0;
+        const heightDelta = state.edge === "n" ? -deltaY : state.edge === "s" || state.edge === "se" ? deltaY : 0;
         updateElementOverride(state.selector, {
-          width: Math.max(12, snap(state.baseWidth + event.clientX - state.startX, layout.gridSize, layout.snapEnabled)),
-          height: Math.max(12, snap(state.baseHeight + event.clientY - state.startY, layout.gridSize, layout.snapEnabled)),
+          x: nextX,
+          y: nextY,
+          width: Math.max(12, snap(state.baseWidth + widthDelta, layout.gridSize, layout.snapEnabled)),
+          height: Math.max(12, snap(state.baseHeight + heightDelta, layout.gridSize, layout.snapEnabled)),
         });
       }
       setMeasureTick((tick) => tick + 1);
@@ -754,6 +790,30 @@ export function AppDesignStudio() {
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [layout.gridSize, open, selected, updateNode]);
+
+  useEffect(() => {
+    if (!open || !selectedElement || selected) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.target as HTMLElement | null)?.closest(".design-engine-panel")) return;
+      const map: Record<string, [number, number]> = {
+        ArrowLeft: [-1, 0],
+        ArrowRight: [1, 0],
+        ArrowUp: [0, -1],
+        ArrowDown: [0, 1],
+      };
+      const direction = map[event.key];
+      if (!direction) return;
+      event.preventDefault();
+      const step = event.altKey ? 1 : event.shiftKey ? layout.gridSize * 4 : layout.gridSize;
+      updateElementOverride(selectedElement.selector, {
+        x: (selectedElementOverride?.x ?? 0) + direction[0] * step,
+        y: (selectedElementOverride?.y ?? 0) + direction[1] * step,
+      });
+      setMeasureTick((tick) => tick + 1);
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [layout.gridSize, open, selected, selectedElement, selectedElementOverride, updateElementOverride]);
 
   useEffect(() => {
     if (!open || !elementPickMode) return;
@@ -1029,7 +1089,7 @@ export function AppDesignStudio() {
     setNotice(`All element edits cleared for ${readable(page)}.`);
   }
 
-  function startElementDrag(mode: ElementDragState["mode"], event: ReactMouseEvent<HTMLButtonElement>) {
+  function startElementDrag(mode: ElementDragState["mode"], event: ReactMouseEvent<HTMLButtonElement>, edge: "n" | "e" | "s" | "w" | "se" = "se") {
     if (!selectedElement) return;
     event.preventDefault();
     event.stopPropagation();
@@ -1046,8 +1106,11 @@ export function AppDesignStudio() {
       : {
         mode,
         selector: selectedElement.selector,
+        edge,
         startX: event.clientX,
         startY: event.clientY,
+        baseX: current?.x ?? 0,
+        baseY: current?.y ?? 0,
         baseWidth: current?.width ?? selectedElement.rect.width,
         baseHeight: current?.height ?? selectedElement.rect.height,
       };
@@ -1187,6 +1250,47 @@ export function AppDesignStudio() {
                   <label>Layer <input type="number" min="0" max="999" value={selectedElementOverride?.zIndex ?? 1} onChange={(event) => updateSelectedElement({ zIndex: Number(event.target.value) })} /></label>
                   <label>Hidden <input type="checkbox" checked={Boolean(selectedElementOverride?.hidden)} onChange={(event) => updateSelectedElement({ hidden: event.target.checked })} /></label>
                 </div>
+                <div className="design-engine-form-grid">
+                  <label>Layout <select value={selectedElementOverride?.display ?? "revert"} onChange={(event) => updateSelectedElement({ display: event.target.value as ElementStyleOverride["display"] })}>
+                    <option value="revert">Default</option>
+                    <option value="block">Block</option>
+                    <option value="flex">Flex</option>
+                    <option value="grid">Grid</option>
+                  </select></label>
+                  <label>Flow <select value={selectedElementOverride?.flexDirection ?? "row"} onChange={(event) => updateSelectedElement({ flexDirection: event.target.value as ElementStyleOverride["flexDirection"], display: "flex" })}>
+                    <option value="row">Rows</option>
+                    <option value="column">Columns</option>
+                  </select></label>
+                  <label>Columns <input type="number" min="1" max="12" value={selectedElementOverride?.columns ?? 2} onChange={(event) => updateSelectedElement({ columns: Number(event.target.value), display: "grid" })} /></label>
+                  <label>Rows <input type="number" min="1" max="12" value={selectedElementOverride?.rows ?? 1} onChange={(event) => updateSelectedElement({ rows: Number(event.target.value), display: "grid" })} /></label>
+                </div>
+                <div className="design-engine-form-grid">
+                  <label>Gap <input type="number" min="0" max="80" value={selectedElementOverride?.gap ?? 0} onChange={(event) => updateSelectedElement({ gap: Number(event.target.value) })} /></label>
+                  <label>Padding <input type="number" min="0" max="120" value={selectedElementOverride?.padding ?? 0} onChange={(event) => updateSelectedElement({ padding: Number(event.target.value) })} /></label>
+                  <label>Text <select value={selectedElementOverride?.textAlign ?? "left"} onChange={(event) => updateSelectedElement({ textAlign: event.target.value as ElementStyleOverride["textAlign"] })}>
+                    <option value="left">Left</option>
+                    <option value="center">Center</option>
+                    <option value="right">Right</option>
+                  </select></label>
+                  <label>Align <select value={selectedElementOverride?.alignItems ?? "stretch"} onChange={(event) => updateSelectedElement({ alignItems: event.target.value as ElementStyleOverride["alignItems"] })}>
+                    <option value="start">Start</option>
+                    <option value="center">Center</option>
+                    <option value="end">End</option>
+                    <option value="stretch">Stretch</option>
+                  </select></label>
+                </div>
+                <div className="design-engine-form-grid">
+                  <label>Justify <select value={selectedElementOverride?.justifyContent ?? "start"} onChange={(event) => updateSelectedElement({ justifyContent: event.target.value as ElementStyleOverride["justifyContent"] })}>
+                    <option value="start">Start</option>
+                    <option value="center">Center</option>
+                    <option value="end">End</option>
+                    <option value="space-between">Between</option>
+                    <option value="space-around">Around</option>
+                  </select></label>
+                  <button type="button" onClick={() => updateSelectedElement({ display: "flex", flexDirection: "row" })}>Fit in row</button>
+                  <button type="button" onClick={() => updateSelectedElement({ display: "flex", flexDirection: "column" })}>Fit in column</button>
+                  <button type="button" onClick={() => updateSelectedElement({ display: "grid", columns: selectedElementOverride?.columns ?? 2 })}>Fit grid</button>
+                </div>
                 <div className="design-engine-button-row">
                   <button type="button" onClick={() => applyElementReset("all")}>Remove all CSS</button>
                   <button type="button" onClick={() => applyElementReset("colors")}>Remove colours</button>
@@ -1253,7 +1357,11 @@ export function AppDesignStudio() {
             <button type="button" className="design-live-element-outline__handle" onMouseDown={(event) => startElementDrag("move", event)}>
               {selectedElementOverride?.hidden ? "Hidden" : selectedElement.label}
             </button>
-            <button type="button" className="design-live-element-outline__resize" onMouseDown={(event) => startElementDrag("resize", event)} aria-label={`Resize ${selectedElement.label}`} />
+            <button type="button" className="design-live-element-outline__edge design-live-element-outline__edge--n" onMouseDown={(event) => startElementDrag("resize", event, "n")} aria-label={`Resize ${selectedElement.label} from top`} />
+            <button type="button" className="design-live-element-outline__edge design-live-element-outline__edge--e" onMouseDown={(event) => startElementDrag("resize", event, "e")} aria-label={`Resize ${selectedElement.label} from right`} />
+            <button type="button" className="design-live-element-outline__edge design-live-element-outline__edge--s" onMouseDown={(event) => startElementDrag("resize", event, "s")} aria-label={`Resize ${selectedElement.label} from bottom`} />
+            <button type="button" className="design-live-element-outline__edge design-live-element-outline__edge--w" onMouseDown={(event) => startElementDrag("resize", event, "w")} aria-label={`Resize ${selectedElement.label} from left`} />
+            <button type="button" className="design-live-element-outline__resize" onMouseDown={(event) => startElementDrag("resize", event, "se")} aria-label={`Resize ${selectedElement.label} from corner`} />
           </div>
         ) : null}
         {renderInlineInspector()}

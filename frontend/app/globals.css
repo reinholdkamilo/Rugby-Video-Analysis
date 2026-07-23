@@ -710,7 +710,7 @@ body main :is(section, article, form, aside, header, .rounded-xl, .rounded-2xl) 
 .design-live-element-outline {
   position: fixed;
   z-index: 815;
-  pointer-events: none;
+  pointer-events: auto;
   border: 2px solid #f59e0b;
   border-radius: 8px;
   background: rgba(245,158,11,.08);
@@ -721,6 +721,43 @@ body main :is(section, article, form, aside, header, .rounded-xl, .rounded-2xl) 
   padding: 4px 6px;
   box-shadow: 0 0 0 3px rgba(245,158,11,.18);
   transform: translateY(-2px);
+}
+
+.design-live-element-outline__handle,
+.design-live-element-outline__resize {
+  position: absolute;
+  z-index: 2;
+  border: 0;
+  background: #f59e0b;
+  color: #101918;
+  box-shadow: 0 12px 28px rgba(0,0,0,.22);
+}
+
+.design-live-element-outline__handle {
+  left: 8px;
+  top: -34px;
+  max-width: min(280px, calc(100vw - 80px));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 9px;
+  padding: 7px 9px;
+  cursor: grab;
+  font-size: .74rem;
+  font-weight: 950;
+}
+
+.design-live-element-outline__handle:active {
+  cursor: grabbing;
+}
+
+.design-live-element-outline__resize {
+  right: -10px;
+  bottom: -10px;
+  width: 23px;
+  height: 23px;
+  border-radius: 999px;
+  cursor: nwse-resize;
 }
 
 body.design-engine-editing {

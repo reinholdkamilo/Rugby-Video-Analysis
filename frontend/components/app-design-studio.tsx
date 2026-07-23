@@ -83,24 +83,51 @@ type ElementCssReset = {
   createdAt: string;
 };
 
+type ElementStyleOverride = {
+  id: string;
+  page: PageKey;
+  selector: string;
+  label: string;
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  background?: string;
+  color?: string;
+  borderColor?: string;
+  borderWidth?: number;
+  radius?: number;
+  opacity?: number;
+  zIndex?: number;
+  hidden?: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
 type DesignStore = {
   version: 3;
   layouts: Partial<Record<PageKey, PageLayout>>;
   templates: SavedTemplate[];
   elementCssResets?: ElementCssReset[];
+  elementStyleOverrides?: ElementStyleOverride[];
 };
 
 type DragState =
   | { mode: "move"; id: string; startX: number; startY: number; baseX: number; baseY: number }
   | { mode: "resize"; id: string; startX: number; startY: number; baseWidth: number; baseHeight: number };
 
+type ElementDragState =
+  | { mode: "move"; selector: string; startX: number; startY: number; baseX: number; baseY: number }
+  | { mode: "resize"; selector: string; startX: number; startY: number; baseWidth: number; baseHeight: number };
+
 type LiveRect = { left: number; top: number; width: number; height: number };
+type SelectedElement = { selector: string; label: string; rect: LiveRect };
 
 const STORAGE_KEY = "rugby-video-analysis:blank-canvas-design:v3";
 const SUPPORTED_PAGES: PageKey[] = ["home", "upload", "library", "coding", "reports", "evidence", "intelligence"];
 const FULLY_WIRED_PAGES = new Set<PageKey>(["coding", "library", "reports"]);
 
-const DEFAULT_STORE: DesignStore = { version: 3, layouts: {}, templates: [], elementCssResets: [] };
+const DEFAULT_STORE: DesignStore = { version: 3, layouts: {}, templates: [], elementCssResets: [], elementStyleOverrides: [] };
 
 const COMPONENTS: ComponentDefinition[] = [
   { id: "video-player", label: "Video Player", page: "coding", stateful: true, minWidth: 520, minHeight: 300, description: "Video surface with playback, overlays and HUD.", href: "/coding" },
@@ -186,7 +213,13 @@ function readStore(): DesignStore {
     if (!saved) return DEFAULT_STORE;
     const parsed = JSON.parse(saved) as Partial<DesignStore>;
     if (parsed.version !== 3) return DEFAULT_STORE;
-    return { version: 3, layouts: parsed.layouts ?? {}, templates: parsed.templates ?? [], elementCssResets: parsed.elementCssResets ?? [] };
+    return {
+      version: 3,
+      layouts: parsed.layouts ?? {},
+      templates: parsed.templates ?? [],
+      elementCssResets: parsed.elementCssResets ?? [],
+      elementStyleOverrides: parsed.elementStyleOverrides ?? [],
+    };
   } catch {
     return DEFAULT_STORE;
   }
@@ -448,6 +481,34 @@ function elementResetCss(page: PageKey, resets: ElementCssReset[]) {
     .join("\n");
 }
 
+function elementStyleOverrideStyles(override: ElementStyleOverride) {
+  return [
+    override.x || override.y ? `transform:translate(${override.x ?? 0}px, ${override.y ?? 0}px)!important` : "",
+    override.x || override.y ? "position:relative!important" : "",
+    override.width ? `width:${override.width}px!important` : "",
+    override.width ? `max-width:${override.width}px!important` : "",
+    override.height ? `height:${override.height}px!important` : "",
+    override.height ? `min-height:${override.height}px!important` : "",
+    override.background ? `background:${override.background}!important` : "",
+    override.color ? `color:${override.color}!important` : "",
+    override.borderColor ? `border-color:${override.borderColor}!important` : "",
+    typeof override.borderWidth === "number" ? `border-width:${override.borderWidth}px!important` : "",
+    typeof override.borderWidth === "number" ? "border-style:solid!important" : "",
+    typeof override.radius === "number" ? `border-radius:${override.radius}px!important` : "",
+    typeof override.opacity === "number" ? `opacity:${override.opacity}!important` : "",
+    typeof override.zIndex === "number" ? `z-index:${override.zIndex}!important` : "",
+    typeof override.zIndex === "number" ? "position:relative!important" : "",
+    override.hidden ? "display:none!important" : "",
+  ].filter(Boolean).join(";");
+}
+
+function elementStyleOverrideCss(page: PageKey, overrides: ElementStyleOverride[]) {
+  return overrides
+    .filter((override) => override.page === page)
+    .map((override) => `${override.selector}{${elementStyleOverrideStyles(override)}}`)
+    .join("\n");
+}
+
 function liveStaticNodeStyle(node: CanvasNode): React.CSSProperties {
   return {
     position: "absolute",
@@ -508,12 +569,13 @@ export function AppDesignStudio() {
   const pathname = usePathname();
   const page = pageKey(pathname);
   const dragRef = useRef<DragState | null>(null);
+  const elementDragRef = useRef<ElementDragState | null>(null);
   const [ready, setReady] = useState(false);
   const [open, setOpen] = useState(false);
   const [store, setStore] = useState<DesignStore>(DEFAULT_STORE);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [elementPickMode, setElementPickMode] = useState(false);
-  const [selectedElement, setSelectedElement] = useState<{ selector: string; label: string; rect: LiveRect } | null>(null);
+  const [selectedElement, setSelectedElement] = useState<SelectedElement | null>(null);
   const [templateName, setTemplateName] = useState("");
   const [notice, setNotice] = useState("Design Engine ready.");
   const [, setMeasureTick] = useState(0);
@@ -525,8 +587,18 @@ export function AppDesignStudio() {
   const sortedNodes = [...layout.nodes].filter((node) => !node.hidden).sort((a, b) => a.order - b.order);
   const pageTemplates = store.templates.filter((template) => template.page === page);
   const pageElementResets = (store.elementCssResets ?? []).filter((reset) => reset.page === page);
+  const pageElementOverrides = (store.elementStyleOverrides ?? []).filter((override) => override.page === page);
+  const pageElementEditCount = pageElementResets.length + pageElementOverrides.length;
+  const selectedElementOverride = selectedElement ? pageElementOverrides.find((override) => override.selector === selectedElement.selector) : null;
   const wiredStatus = FULLY_WIRED_PAGES.has(page) ? "Canvas-enabled" : "Registered placeholder";
-  const appliedLayoutCss = useMemo(() => [liveLayoutCss(page, layout), elementResetCss(page, store.elementCssResets ?? [])].filter(Boolean).join("\n"), [layout, page, store.elementCssResets]);
+  const appliedLayoutCss = useMemo(
+    () => [
+      liveLayoutCss(page, layout),
+      elementResetCss(page, store.elementCssResets ?? []),
+      elementStyleOverrideCss(page, store.elementStyleOverrides ?? []),
+    ].filter(Boolean).join("\n"),
+    [layout, page, store.elementCssResets, store.elementStyleOverrides],
+  );
 
   const updateStore = useCallback((updater: (current: DesignStore) => DesignStore) => {
     setStore((current) => {
@@ -535,6 +607,31 @@ export function AppDesignStudio() {
       return next;
     });
   }, []);
+
+  const updateElementOverride = useCallback((selector: string, updates: Partial<ElementStyleOverride>) => {
+    const label = selectedElement?.selector === selector ? selectedElement.label : selector;
+    updateStore((current) => {
+      const existing = current.elementStyleOverrides ?? [];
+      const currentOverride = existing.find((override) => override.page === page && override.selector === selector);
+      const nextOverride: ElementStyleOverride = {
+        ...currentOverride,
+        id: currentOverride?.id ?? uid("element-style"),
+        page,
+        selector,
+        label: currentOverride?.label ?? label,
+        createdAt: currentOverride?.createdAt ?? now(),
+        ...updates,
+        updatedAt: now(),
+      };
+      return {
+        ...current,
+        elementStyleOverrides: [
+          ...existing.filter((override) => !(override.page === page && override.selector === selector)),
+          nextOverride,
+        ],
+      };
+    });
+  }, [page, selectedElement, updateStore]);
 
   const updateLayout = useCallback((updater: (current: PageLayout) => PageLayout) => {
     updateStore((current) => {
@@ -607,6 +704,36 @@ export function AppDesignStudio() {
       window.removeEventListener("mouseup", onUp);
     };
   }, [layout.gridSize, layout.nodes, layout.snapEnabled, open, updateNode]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onMove = (event: MouseEvent) => {
+      const state = elementDragRef.current;
+      if (!state) return;
+      event.preventDefault();
+      if (state.mode === "move") {
+        updateElementOverride(state.selector, {
+          x: snap(state.baseX + event.clientX - state.startX, layout.gridSize, layout.snapEnabled),
+          y: snap(state.baseY + event.clientY - state.startY, layout.gridSize, layout.snapEnabled),
+        });
+      } else {
+        updateElementOverride(state.selector, {
+          width: Math.max(12, snap(state.baseWidth + event.clientX - state.startX, layout.gridSize, layout.snapEnabled)),
+          height: Math.max(12, snap(state.baseHeight + event.clientY - state.startY, layout.gridSize, layout.snapEnabled)),
+        });
+      }
+      setMeasureTick((tick) => tick + 1);
+    };
+    const onUp = () => {
+      elementDragRef.current = null;
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [layout.gridSize, layout.snapEnabled, open, updateElementOverride]);
 
   useEffect(() => {
     if (!open || !selected) return;
@@ -844,6 +971,21 @@ export function AppDesignStudio() {
     updateNode(selected.id, updates);
   }
 
+  function updateSelectedElement(updates: Partial<ElementStyleOverride>) {
+    if (!selectedElement) {
+      setNotice("Turn on Element Inspect and click a page element first.");
+      return;
+    }
+    updateElementOverride(selectedElement.selector, updates);
+    setNotice(`Updated ${selectedElement.label}.`);
+  }
+
+  function deleteSelectedElement() {
+    if (!selectedElement) return;
+    updateElementOverride(selectedElement.selector, { hidden: true });
+    setNotice(`${selectedElement.label} hidden. Use Restore selected element to bring it back.`);
+  }
+
   function applyElementReset(mode: ElementCssResetMode) {
     if (!selectedElement) {
       setNotice("Turn on Element Inspect and click a page element first.");
@@ -872,14 +1014,43 @@ export function AppDesignStudio() {
     updateStore((current) => ({
       ...current,
       elementCssResets: (current.elementCssResets ?? []).filter((reset) => !(reset.page === page && reset.selector === selectedElement.selector)),
+      elementStyleOverrides: (current.elementStyleOverrides ?? []).filter((override) => !(override.page === page && override.selector === selectedElement.selector)),
     }));
     setNotice(`Restored styling for ${selectedElement.label}.`);
   }
 
   function clearPageElementResets() {
-    updateStore((current) => ({ ...current, elementCssResets: (current.elementCssResets ?? []).filter((reset) => reset.page !== page) }));
+    updateStore((current) => ({
+      ...current,
+      elementCssResets: (current.elementCssResets ?? []).filter((reset) => reset.page !== page),
+      elementStyleOverrides: (current.elementStyleOverrides ?? []).filter((override) => override.page !== page),
+    }));
     setSelectedElement(null);
-    setNotice(`All element CSS resets cleared for ${readable(page)}.`);
+    setNotice(`All element edits cleared for ${readable(page)}.`);
+  }
+
+  function startElementDrag(mode: ElementDragState["mode"], event: ReactMouseEvent<HTMLButtonElement>) {
+    if (!selectedElement) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const current = selectedElementOverride;
+    elementDragRef.current = mode === "move"
+      ? {
+        mode,
+        selector: selectedElement.selector,
+        startX: event.clientX,
+        startY: event.clientY,
+        baseX: current?.x ?? 0,
+        baseY: current?.y ?? 0,
+      }
+      : {
+        mode,
+        selector: selectedElement.selector,
+        startX: event.clientX,
+        startY: event.clientY,
+        baseWidth: current?.width ?? selectedElement.rect.width,
+        baseHeight: current?.height ?? selectedElement.rect.height,
+      };
   }
 
   function renderLiveOverlay(node: CanvasNode) {
@@ -998,18 +1169,39 @@ export function AppDesignStudio() {
               <>
                 <p><strong>{selectedElement.label}</strong></p>
                 <small>{selectedElement.selector}</small>
+                <div className="design-engine-form-grid">
+                  <label>X <input type="number" value={selectedElementOverride?.x ?? 0} onChange={(event) => updateSelectedElement({ x: Number(event.target.value) })} /></label>
+                  <label>Y <input type="number" value={selectedElementOverride?.y ?? 0} onChange={(event) => updateSelectedElement({ y: Number(event.target.value) })} /></label>
+                  <label>W <input type="number" min="1" value={selectedElementOverride?.width ?? Math.round(selectedElement.rect.width)} onChange={(event) => updateSelectedElement({ width: Number(event.target.value) })} /></label>
+                  <label>H <input type="number" min="1" value={selectedElementOverride?.height ?? Math.round(selectedElement.rect.height)} onChange={(event) => updateSelectedElement({ height: Number(event.target.value) })} /></label>
+                </div>
+                <div className="design-engine-form-grid">
+                  <label>BG <input type="color" value={selectedElementOverride?.background ?? "#ffffff"} onChange={(event) => updateSelectedElement({ background: event.target.value })} /></label>
+                  <label>Text <input type="color" value={selectedElementOverride?.color ?? "#13221f"} onChange={(event) => updateSelectedElement({ color: event.target.value })} /></label>
+                  <label>Border <input type="color" value={selectedElementOverride?.borderColor ?? "#dfe6e2"} onChange={(event) => updateSelectedElement({ borderColor: event.target.value })} /></label>
+                  <label>Opacity <input type="number" min="0" max="1" step="0.05" value={selectedElementOverride?.opacity ?? 1} onChange={(event) => updateSelectedElement({ opacity: Number(event.target.value) })} /></label>
+                </div>
+                <div className="design-engine-form-grid">
+                  <label>Border W <input type="number" min="0" value={selectedElementOverride?.borderWidth ?? 0} onChange={(event) => updateSelectedElement({ borderWidth: Number(event.target.value) })} /></label>
+                  <label>Radius <input type="number" min="0" max="120" value={selectedElementOverride?.radius ?? 0} onChange={(event) => updateSelectedElement({ radius: Number(event.target.value) })} /></label>
+                  <label>Layer <input type="number" min="0" max="999" value={selectedElementOverride?.zIndex ?? 1} onChange={(event) => updateSelectedElement({ zIndex: Number(event.target.value) })} /></label>
+                  <label>Hidden <input type="checkbox" checked={Boolean(selectedElementOverride?.hidden)} onChange={(event) => updateSelectedElement({ hidden: event.target.checked })} /></label>
+                </div>
                 <div className="design-engine-button-row">
                   <button type="button" onClick={() => applyElementReset("all")}>Remove all CSS</button>
                   <button type="button" onClick={() => applyElementReset("colors")}>Remove colours</button>
                   <button type="button" onClick={() => applyElementReset("spacing")}>Remove spacing</button>
                   <button type="button" onClick={() => applyElementReset("border")}>Remove borders</button>
                 </div>
-                <button type="button" onClick={restoreSelectedElement}>Restore selected element</button>
+                <div className="design-engine-button-row">
+                  <button type="button" className="design-engine-danger" onClick={deleteSelectedElement}>Delete / hide element</button>
+                  <button type="button" onClick={restoreSelectedElement}>Restore selected element</button>
+                </div>
               </>
             ) : <p>Turn on inspect, then click any page element to target it.</p>}
-            {pageElementResets.length ? (
+            {pageElementEditCount ? (
               <>
-                <small>{pageElementResets.length} saved CSS reset{pageElementResets.length === 1 ? "" : "s"} on this page.</small>
+                <small>{pageElementEditCount} saved element edit{pageElementEditCount === 1 ? "" : "s"} on this page.</small>
                 <button type="button" className="design-engine-danger" onClick={clearPageElementResets}>Restore all page elements</button>
               </>
             ) : null}
@@ -1033,6 +1225,12 @@ export function AppDesignStudio() {
 
   function renderLiveDesignMode() {
     if (typeof document === "undefined") return null;
+    const selectedElementRect = selectedElement ? {
+      left: selectedElement.rect.left + (selectedElementOverride?.x ?? 0),
+      top: selectedElement.rect.top + (selectedElementOverride?.y ?? 0),
+      width: selectedElementOverride?.width ?? selectedElement.rect.width,
+      height: selectedElementOverride?.height ?? selectedElement.rect.height,
+    } : null;
     return createPortal(
       <>
         <div className="design-live-topbar">
@@ -1050,7 +1248,14 @@ export function AppDesignStudio() {
         </div>
         <div className="design-live-notice">{notice}</div>
         <div className="design-live-overlays">{sortedNodes.map(renderLiveOverlay)}</div>
-        {selectedElement ? <div className="design-live-element-outline" style={{ left: selectedElement.rect.left, top: selectedElement.rect.top, width: selectedElement.rect.width, height: selectedElement.rect.height }}>{selectedElement.label}</div> : null}
+        {selectedElement && selectedElementRect ? (
+          <div className="design-live-element-outline" style={selectedElementRect}>
+            <button type="button" className="design-live-element-outline__handle" onMouseDown={(event) => startElementDrag("move", event)}>
+              {selectedElementOverride?.hidden ? "Hidden" : selectedElement.label}
+            </button>
+            <button type="button" className="design-live-element-outline__resize" onMouseDown={(event) => startElementDrag("resize", event)} aria-label={`Resize ${selectedElement.label}`} />
+          </div>
+        ) : null}
         {renderInlineInspector()}
       </>,
       document.body,

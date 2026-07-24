@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { KeyboardEvent as ReactKeyboardEvent } from "react";
+import type { FormEvent, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 
 import { EventTeam, EventType, Match, Team, TimelineEvent, VideoAsset, api } from "@/lib/api";
 import { sourceVideoUrl } from "@/lib/coding-api";
@@ -44,8 +44,19 @@ type ShortcutBinding = {
   zoneLength?: string;
 };
 
-type PanelTab = "clips" | "tags" | "keyboard";
+type PanelTab = "clips" | "tags" | "keyboard" | "edit";
 type AnalysisTrack = { id: string; label: string; group: "global" | "home" | "away"; team?: EventTeam };
+type TimelineDragAction = "move" | "resize-start" | "resize-end";
+type TimelineDragState = {
+  eventId: number;
+  action: TimelineDragAction;
+  pointerStartX: number;
+  laneWidth: number;
+  originalStart: number;
+  originalEnd: number;
+  draftStart: number;
+  draftEnd: number;
+};
 
 const QUICK_CODE_CAPTURE_SECONDS = 15;
 const SHORTCUT_STORAGE_KEY = "rugby-video-analysis:coding-shortcuts:v2";
@@ -467,6 +478,17 @@ function loadPlaybackSpeed() {
   return PLAYBACK_SPEED_PRESETS.includes(saved) ? saved : 1;
 }
 
+function requestedVideoAnalysisSelection() {
+  if (typeof window === "undefined") return { matchId: null, videoId: null };
+  const params = new URLSearchParams(window.location.search);
+  const matchId = Number(params.get("match_id"));
+  const videoId = Number(params.get("video_id") ?? params.get("video_asset_id"));
+  return {
+    matchId: Number.isFinite(matchId) && matchId > 0 ? matchId : null,
+    videoId: Number.isFinite(videoId) && videoId > 0 ? videoId : null,
+  };
+}
+
 function clampWindowStart(start: number, windowSeconds: number, totalSeconds: number) {
   return Math.min(Math.max(0, start), Math.max(0, totalSeconds - windowSeconds));
 }
@@ -482,6 +504,14 @@ function nearestPlaybackSpeed(value: number) {
   return PLAYBACK_SPEED_PRESETS.reduce((nearest, preset) => (
     Math.abs(preset - value) < Math.abs(nearest - value) ? preset : nearest
   ), 1);
+}
+
+function clampValue(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function roundTimelineSeconds(value: number) {
+  return Number(Math.max(0, value).toFixed(2));
 }
 
 export default function VideoAnalysisPage() {
@@ -507,6 +537,7 @@ export default function VideoAnalysisPage() {
   const [timelineWindowStart, setTimelineWindowStart] = useState(0);
   const [followPlayhead, setFollowPlayhead] = useState(() => loadFollowPlayhead());
   const [playbackSpeed, setPlaybackSpeed] = useState(() => loadPlaybackSpeed());
+  const [dragState, setDragState] = useState<TimelineDragState | null>(null);
 
   const selectedMatch = matches.find((match) => match.id === selectedMatchId) ?? null;
   const selectedVideo = videos.find((video) => video.id === selectedVideoId) ?? null;
@@ -526,6 +557,7 @@ export default function VideoAnalysisPage() {
   const timelineWindowLabel = timelineWindowDuration === "full"
     ? "Full match"
     : `${formatTime(visibleWindowStart)}-${formatTime(visibleWindowEnd)}`;
+  const selectedEvent = useMemo(() => events.find((event) => event.id === selectedEventId) ?? null, [events, selectedEventId]);
 
   const eventShortcuts = useMemo(() => shortcuts.filter((binding) => binding.group === "event"), [shortcuts]);
   const filteredTags = useMemo(() => {
@@ -535,11 +567,17 @@ export default function VideoAnalysisPage() {
       .filter((binding) => !search || `${binding.label} ${binding.outcome ?? ""} ${binding.category ?? ""}`.toLowerCase().includes(search));
   }, [eventShortcuts, tagSearch, teamContext]);
   const clipEvents = useMemo(() => events.filter((event) => event.clip_requested || event.clip), [events]);
+  const timelineEvents = useMemo(() => {
+    if (!dragState) return events;
+    return events.map((event) => event.id === dragState.eventId
+      ? { ...event, start_seconds: dragState.draftStart, end_seconds: dragState.draftEnd }
+      : event);
+  }, [dragState, events]);
 
   const trackRows = useMemo(() => ANALYSIS_TRACKS.map((track) => ({
     track,
-    events: events.filter((event) => trackForEvent(event) === track.label && event.end_seconds >= visibleWindowStart && event.start_seconds <= visibleWindowEnd),
-  })), [events, visibleWindowEnd, visibleWindowStart]);
+    events: timelineEvents.filter((event) => trackForEvent(event) === track.label && event.end_seconds >= visibleWindowStart && event.start_seconds <= visibleWindowEnd),
+  })), [timelineEvents, visibleWindowEnd, visibleWindowStart]);
 
   useEffect(() => {
     setShortcuts(loadShortcutBindings(activeSport));
@@ -591,11 +629,15 @@ export default function VideoAnalysisPage() {
           size_bytes: 0,
           created_at: item.created_at ?? "",
         }));
-      const nextMatch = matchData.find((match) => videoAssets.some((video) => video.match_id === match.id)) ?? matchData[0] ?? null;
+      const requested = requestedVideoAnalysisSelection();
+      const nextMatch = (requested.matchId ? matchData.find((match) => match.id === requested.matchId) : null)
+        ?? matchData.find((match) => videoAssets.some((video) => video.match_id === match.id))
+        ?? matchData[0]
+        ?? null;
       setSelectedMatchId(nextMatch?.id ?? null);
       const matchVideos = nextMatch ? videoAssets.filter((video) => video.match_id === nextMatch.id) : [];
       setVideos(matchVideos);
-      const nextVideo = matchVideos[0] ?? null;
+      const nextVideo = (requested.videoId ? matchVideos.find((video) => video.id === requested.videoId) : null) ?? matchVideos[0] ?? null;
       setSelectedVideoId(nextVideo?.id ?? null);
       setEvents(nextMatch ? await api.timeline.list(nextMatch.id, nextVideo?.id) : []);
       setNotice(nextVideo ? "Video analysis workspace ready." : "Select a match with uploaded video.");
@@ -679,6 +721,8 @@ export default function VideoAnalysisPage() {
 
   const seekToTimelineEvent = useCallback((event: TimelineEvent) => {
     setSelectedEventId(event.id);
+    setPanelOpen(true);
+    setPanelTab("edit");
     const targetSeconds = Math.max(0, event.start_seconds - EVENT_REVIEW_PREROLL_SECONDS);
     const video = videoRef.current;
     if (video) {
@@ -691,6 +735,131 @@ export default function VideoAnalysisPage() {
     centreTimelineOn((event.start_seconds + event.end_seconds) / 2);
     setNotice(`Reviewing ${eventLabel(event)} from ${formatTime(targetSeconds)}.`);
   }, [centreTimelineOn, playbackSpeed]);
+
+  const persistEventTiming = useCallback(async (eventId: number, startSeconds: number, endSeconds: number) => {
+    const start = roundTimelineSeconds(startSeconds);
+    const end = roundTimelineSeconds(Math.max(start + 0.5, endSeconds));
+    try {
+      const updated = await api.timeline.update(eventId, {
+        start_seconds: start,
+        end_seconds: end,
+      });
+      setEvents((current) => mergeTimelineEvents(current, [updated]));
+      setSelectedEventId(updated.id);
+      setNotice(`${eventLabel(updated)} timing saved from ${formatTime(updated.start_seconds)} to ${formatTime(updated.end_seconds)}. Reports and evidence now read the updated timeline event.`);
+      if (updated.clip_requested || updated.clip) {
+        void api.timeline.regenerateClip(updated.id).catch(() => undefined);
+      }
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Unable to save event timing.");
+      if (selectedMatchId) {
+        void api.timeline.list(selectedMatchId, selectedVideoId ?? undefined).then(setEvents).catch(() => undefined);
+      }
+    }
+  }, [selectedMatchId, selectedVideoId]);
+
+  const deleteTimelineEvent = useCallback(async (eventId: number) => {
+    const target = events.find((event) => event.id === eventId);
+    if (!target) return;
+    try {
+      await api.timeline.delete(eventId);
+      setEvents((current) => current.filter((event) => event.id !== eventId));
+      setSelectedEventId((current) => current === eventId ? null : current);
+      setNotice(`${eventLabel(target)} deleted from the shared timeline. Reports, evidence and clips will no longer include it.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Unable to delete timeline event.");
+    }
+  }, [events]);
+
+  const startTimelineDrag = useCallback((
+    pointerEvent: ReactPointerEvent<HTMLElement>,
+    timelineEvent: TimelineEvent,
+    action: TimelineDragAction,
+  ) => {
+    pointerEvent.preventDefault();
+    pointerEvent.stopPropagation();
+    const lane = pointerEvent.currentTarget.closest(".video-analysis-track-lane") as HTMLElement | null;
+    const laneWidth = lane?.getBoundingClientRect().width ?? 0;
+    if (!laneWidth) return;
+    setFollowPlayhead(false);
+    setSelectedEventId(timelineEvent.id);
+    setPanelOpen(true);
+    setPanelTab("edit");
+    setDragState({
+      eventId: timelineEvent.id,
+      action,
+      pointerStartX: pointerEvent.clientX,
+      laneWidth,
+      originalStart: timelineEvent.start_seconds,
+      originalEnd: timelineEvent.end_seconds,
+      draftStart: timelineEvent.start_seconds,
+      draftEnd: timelineEvent.end_seconds,
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!dragState) return;
+    const activeDrag = dragState;
+    function onPointerMove(event: PointerEvent) {
+      const deltaSeconds = ((event.clientX - activeDrag.pointerStartX) / Math.max(1, activeDrag.laneWidth)) * visibleWindowSpan;
+      const originalDuration = Math.max(0.5, activeDrag.originalEnd - activeDrag.originalStart);
+      let draftStart = activeDrag.originalStart;
+      let draftEnd = activeDrag.originalEnd;
+      if (activeDrag.action === "move") {
+        draftStart = clampValue(activeDrag.originalStart + deltaSeconds, 0, Math.max(0, timelineDuration - originalDuration));
+        draftEnd = draftStart + originalDuration;
+      }
+      if (activeDrag.action === "resize-start") {
+        draftStart = clampValue(activeDrag.originalStart + deltaSeconds, Math.max(0, activeDrag.originalEnd - 300), activeDrag.originalEnd - 0.5);
+      }
+      if (activeDrag.action === "resize-end") {
+        draftEnd = clampValue(activeDrag.originalEnd + deltaSeconds, activeDrag.originalStart + 0.5, Math.min(timelineDuration, activeDrag.originalStart + 300));
+      }
+      setDragState((current) => current ? { ...current, draftStart: roundTimelineSeconds(draftStart), draftEnd: roundTimelineSeconds(draftEnd) } : current);
+    }
+    function onPointerUp() {
+      setDragState((current) => {
+        if (current && (current.draftStart !== current.originalStart || current.draftEnd !== current.originalEnd)) {
+          void persistEventTiming(current.eventId, current.draftStart, current.draftEnd);
+        }
+        return null;
+      });
+    }
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp, { once: true });
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+    };
+  }, [dragState, persistEventTiming, timelineDuration, visibleWindowSpan]);
+
+  async function submitSelectedEventEdit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedEvent) return;
+    const form = new FormData(event.currentTarget);
+    const start = Number(form.get("start_seconds"));
+    const end = Number(form.get("end_seconds"));
+    try {
+      const updated = await api.timeline.update(selectedEvent.id, {
+        event_type: String(form.get("event_type") || selectedEvent.event_type) as EventType,
+        team: String(form.get("team") || selectedEvent.team) as EventTeam,
+        outcome: String(form.get("outcome") || "").trim() || null,
+        field_zone: String(form.get("field_zone") || "").trim() || null,
+        notes: String(form.get("notes") || "").trim() || null,
+        start_seconds: Number.isFinite(start) ? roundTimelineSeconds(start) : selectedEvent.start_seconds,
+        end_seconds: Number.isFinite(end) ? roundTimelineSeconds(end) : selectedEvent.end_seconds,
+        clip_requested: form.get("clip_requested") === "on",
+      });
+      setEvents((current) => mergeTimelineEvents(current, [updated]));
+      setSelectedEventId(updated.id);
+      setNotice(`${eventLabel(updated)} saved. Reports and evidence use the updated shared timeline event.`);
+      if (updated.clip_requested || updated.clip) {
+        void api.timeline.regenerateClip(updated.id).catch(() => undefined);
+      }
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Unable to save timeline event.");
+    }
+  }
 
   const saveShortcut = useCallback((id: string, shortcut: string) => {
     const nextShortcut = normaliseShortcut(shortcut);
@@ -765,6 +934,11 @@ export default function VideoAnalysisPage() {
         return;
       }
       if (shortcutEditable(event)) return;
+      if (event.key === "Delete" && selectedEventId) {
+        event.preventDefault();
+        void deleteTimelineEvent(selectedEventId);
+        return;
+      }
       const shortcut = shortcutFromKeyboardEvent(event);
       const binding = shortcuts.find((item) => normaliseShortcut(item.shortcut) === shortcut);
       if (!binding) return;
@@ -778,7 +952,7 @@ export default function VideoAnalysisPage() {
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [createEventFromBinding, editingShortcutId, runVideoCommand, saveShortcut, shortcuts]);
+  }, [createEventFromBinding, deleteTimelineEvent, editingShortcutId, runVideoCommand, saveShortcut, selectedEventId, shortcuts]);
 
   return (
     <main className="video-analysis-workspace">
@@ -933,16 +1107,31 @@ export default function VideoAnalysisPage() {
                           const width = Math.max(1.4, Math.min(100 - left, (clippedEnd - clippedStart) / visibleWindowSpan * 100));
                           const selected = selectedEventId === event.id;
                           return (
-                            <button
+                            <div
                               key={event.id}
-                              type="button"
+                              role="button"
+                              tabIndex={0}
                               onClick={() => seekToTimelineEvent(event)}
+                              onKeyDown={(keyEvent) => {
+                                if (keyEvent.key === "Enter" || keyEvent.key === " ") seekToTimelineEvent(event);
+                              }}
+                              onPointerDown={(pointerEvent) => startTimelineDrag(pointerEvent, event, "move")}
                               className={`video-analysis-timeline-clip team-${event.team} category-${event.event_type} ${selected ? "is-selected" : ""}`}
                               style={{ left: `${left}%`, width: `${width}%` }}
                               title={eventDetails(event, row.track.label)}
                             >
-                              {eventAbbreviation(event)}
-                            </button>
+                              <span
+                                className="video-analysis-clip-handle video-analysis-clip-handle--left"
+                                onPointerDown={(pointerEvent) => startTimelineDrag(pointerEvent, event, "resize-start")}
+                                aria-hidden="true"
+                              />
+                              <span className="video-analysis-clip-label">{eventAbbreviation(event)}</span>
+                              <span
+                                className="video-analysis-clip-handle video-analysis-clip-handle--right"
+                                onPointerDown={(pointerEvent) => startTimelineDrag(pointerEvent, event, "resize-end")}
+                                aria-hidden="true"
+                              />
+                            </div>
                           );
                         })}
                       </div>
@@ -961,19 +1150,83 @@ export default function VideoAnalysisPage() {
           </div>
 
           <div className="video-analysis-tabbar">
-            {(["clips", "tags", "keyboard"] as PanelTab[]).map((tab) => (
+            {(["edit", "clips", "tags", "keyboard"] as PanelTab[]).map((tab) => (
               <button
                 key={tab}
                 type="button"
                 className={panelTab === tab ? "is-active" : ""}
                 onClick={() => setPanelTab(tab)}
               >
-                {tab === "clips" ? "Your Clips" : tab === "tags" ? "Tags" : "Keyboard Legend"}
+                {tab === "edit" ? "Edit Event" : tab === "clips" ? "Your Clips" : tab === "tags" ? "Tags" : "Keyboard Legend"}
               </button>
             ))}
           </div>
 
           <div className="video-analysis-panel-body">
+            {panelTab === "edit" && (
+              <div className="video-analysis-edit-panel">
+                {!selectedEvent ? (
+                  <p>Select a timeline event to edit its timing, label, team and notes.</p>
+                ) : (
+                  <form key={selectedEvent.id} onSubmit={(event) => void submitSelectedEventEdit(event)}>
+                    <div className="video-analysis-edit-heading">
+                      <div>
+                        <span>Selected Event</span>
+                        <strong>{eventLabel(selectedEvent)}</strong>
+                      </div>
+                      <button type="button" onClick={() => void deleteTimelineEvent(selectedEvent.id)}>Delete</button>
+                    </div>
+                    <label>
+                      Event type
+                      <select name="event_type" defaultValue={selectedEvent.event_type}>
+                        {(["kickoff", "scrum", "lineout", "carry", "tackle", "ruck", "maul", "pass", "kick", "turnover", "penalty", "try", "conversion", "card", "stoppage", "custom"] as EventType[]).map((type) => (
+                          <option key={type} value={type}>{type}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Team
+                      <select name="team" defaultValue={selectedEvent.team}>
+                        {(["home", "away", "neutral"] as EventTeam[]).map((team) => (
+                          <option key={team} value={team}>{team}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Outcome / label
+                      <input name="outcome" defaultValue={selectedEvent.outcome ?? ""} placeholder="e.g. dominant carry" />
+                    </label>
+                    <div className="video-analysis-edit-time-grid">
+                      <label>
+                        Start seconds
+                        <input name="start_seconds" type="number" step="0.1" min="0" defaultValue={selectedEvent.start_seconds} />
+                      </label>
+                      <label>
+                        End seconds
+                        <input name="end_seconds" type="number" step="0.1" min="0" defaultValue={selectedEvent.end_seconds} />
+                      </label>
+                    </div>
+                    <label>
+                      Zone
+                      <input name="field_zone" defaultValue={selectedEvent.field_zone ?? ""} />
+                    </label>
+                    <label>
+                      Notes
+                      <textarea name="notes" defaultValue={selectedEvent.notes ?? ""} rows={4} />
+                    </label>
+                    <label className="video-analysis-checkbox">
+                      <input name="clip_requested" type="checkbox" defaultChecked={selectedEvent.clip_requested} />
+                      Include in clips/evidence queue
+                    </label>
+                    <div className="video-analysis-edit-actions">
+                      <button type="button" onClick={() => seekToTimelineEvent(selectedEvent)}>Review</button>
+                      <button type="submit">Save event</button>
+                    </div>
+                  </form>
+                )}
+              </div>
+            )}
+
             {panelTab === "clips" && (
               <div className="video-analysis-clip-list">
                 {clipEvents.length === 0 ? <p>No clipped events yet.</p> : null}

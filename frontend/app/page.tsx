@@ -259,7 +259,7 @@ export default function Home() {
             <p>Upload footage, code the game, review the timeline and convert rugby events into practical insight for coaches and players.</p>
             <div className="hero-actions">
               <a href="#workspace" className="button button--gold">Start a match</a>
-              <Link href="/coding" className="button button--ghost-light">Open coding workspace</Link>
+              <Link href="/video-analysis" className="button button--ghost-light">Open video analysis</Link>
             </div>
             <div className="hero-proof"><span>✓ Guided setup</span><span>✓ Rugby event coding</span><span>✓ Video-linked reports</span></div>
           </div>
@@ -310,7 +310,7 @@ export default function Home() {
                     {renderPipeline(pipeline)}
                     <div className="match-actions">
                       <button type="button" disabled={busy || pipeline?.status === "running"} onClick={() => void runMatchPipeline(match.id, pipeline?.video_asset_id)} className="button button--primary">Run auto pipeline</button>
-                      <Link href="/coding" className="button button--secondary">Open coding</Link>
+                      <Link href="/video-analysis" className="button button--secondary">Open video analysis</Link>
                       <Link href="/suggestions" className="button button--secondary">Review suggestions</Link>
                       <Link href="/reports" className="button button--secondary">Reports</Link>
                       <button type="button" disabled={busy} onClick={() => void deleteMatchRecord(match)} className="button button--danger">Delete match</button>
@@ -329,9 +329,9 @@ export default function Home() {
             })}</div>
           </section></div></div></div></section>
 
-      <section className="tools-section"><div className="site-container"><div className="section-heading section-heading--center"><span className="eyebrow">Connected analysis tools</span><h2>Everything stays linked to the match.</h2></div><div className="tool-grid">{[["Coding","Tag rugby events quickly and consistently.","/coding"],["Timeline","Review every coded moment chronologically.","/timeline"],["Suggestions","Compare automated candidates with analyst judgement.","/suggestions"],["Intelligence","Turn coded evidence into a coaching report.","/intelligence"]].map(([title,text,href]) => <Link href={href} key={title} className="tool-card"><span>↗</span><h3>{title}</h3><p>{text}</p></Link>)}</div></div></section>
+      <section className="tools-section"><div className="site-container"><div className="section-heading section-heading--center"><span className="eyebrow">Connected analysis tools</span><h2>Everything stays linked to the match.</h2></div><div className="tool-grid">{[["Video Analysis","Review footage, tag events and edit timeline timings in one workspace.","/video-analysis"],["Advanced Coding","Manage detailed shortcut maps and specialist coding setup.","/coding"],["Reports","Turn saved timeline events into match reporting.","/reports"],["Intelligence","Turn coded evidence into coaching insight.","/intelligence"]].map(([title,text,href]) => <Link href={href} key={title} className="tool-card"><span>↗</span><h3>{title}</h3><p>{text}</p></Link>)}</div></div></section>
 
-      <footer className="site-footer"><div className="site-container site-footer__grid"><div><strong>Rugby Video Analysis</strong><p>Professional match coding and performance intelligence.</p></div><div><Link href="/coding">Coding</Link><Link href="/timeline">Timeline</Link><Link href="/intelligence">Intelligence</Link><Link href="/system">System</Link></div></div></footer>
+      <footer className="site-footer"><div className="site-container site-footer__grid"><div><strong>Rugby Video Analysis</strong><p>Professional match coding and performance intelligence.</p></div><div><Link href="/video-analysis">Video Analysis</Link><Link href="/coding">Advanced Coding</Link><Link href="/intelligence">Intelligence</Link><Link href="/system">System</Link></div></div></footer>
     </main>
   );
 }

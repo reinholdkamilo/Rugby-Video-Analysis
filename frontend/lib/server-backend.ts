@@ -67,6 +67,7 @@ export async function proxyBackendRequest(
 ) {
   const url = new URL(request.url);
   const method = request.method.toUpperCase();
+  const backendMethod = method === "HEAD" && isMediaPlaybackPath(backendPath) ? "GET" : method;
   const body = method === "GET" || method === "HEAD" ? undefined : await request.arrayBuffer();
   const backendOrigins = backendBaseUrls();
   const errors: string[] = [];
@@ -78,7 +79,7 @@ export async function proxyBackendRequest(
 
     try {
       const response = await fetch(target, {
-        method,
+        method: backendMethod,
         headers: forwardedHeaders(request),
         body,
         cache: "no-store",
@@ -94,9 +95,9 @@ export async function proxyBackendRequest(
           { status: response.status, headers },
         );
       }
-      const responseBody = shouldStreamResponse(request, backendPath)
-        ? response.body
-        : await response.arrayBuffer();
+      const responseBody = method === "HEAD"
+        ? null
+        : (shouldStreamResponse(request, backendPath) ? response.body : await response.arrayBuffer());
       return new NextResponse(responseBody, {
         status: response.status,
         headers,

@@ -49,7 +49,19 @@ type AnalysisTrack = { id: string; label: string; group: "global" | "home" | "aw
 
 const QUICK_CODE_CAPTURE_SECONDS = 15;
 const SHORTCUT_STORAGE_KEY = "rugby-video-analysis:coding-shortcuts:v2";
+const TIMELINE_WINDOW_STORAGE_KEY = "rugby-video-analysis:video-analysis-window:v1";
+const TIMELINE_FOLLOW_STORAGE_KEY = "rugby-video-analysis:video-analysis-follow-playhead:v1";
 const ZONE_KEYS = ["KeyA", "KeyS", "KeyD", "KeyF", "KeyG", "KeyH", "KeyJ", "KeyK"];
+const DEFAULT_TIMELINE_WINDOW_SECONDS = 10 * 60;
+const TIMELINE_WINDOW_OPTIONS = [
+  { label: "Full match", seconds: "full" as const },
+  { label: "30 min", seconds: 30 * 60 },
+  { label: "15 min", seconds: 15 * 60 },
+  { label: "10 min", seconds: 10 * 60 },
+  { label: "5 min", seconds: 5 * 60 },
+  { label: "2 min", seconds: 2 * 60 },
+  { label: "1 min", seconds: 60 },
+];
 
 const GLOBAL_TRACKS = ["Ball In Play", "Race to Set 1st Phase", "WAR Zone", "Aussie"];
 const HOME_TRACKS = [
@@ -432,6 +444,31 @@ function zoneValue(binding?: Pick<ShortcutBinding, "label" | "fieldZone" | "zone
   return binding.zoneLength ? `${label} - ${binding.zoneLength}` : label;
 }
 
+function loadTimelineWindowDuration() {
+  if (typeof window === "undefined") return DEFAULT_TIMELINE_WINDOW_SECONDS;
+  const saved = window.localStorage.getItem(TIMELINE_WINDOW_STORAGE_KEY);
+  if (saved === "full") return "full" as const;
+  const parsed = Number(saved);
+  return TIMELINE_WINDOW_OPTIONS.some((option) => option.seconds === parsed) ? parsed : DEFAULT_TIMELINE_WINDOW_SECONDS;
+}
+
+function loadFollowPlayhead() {
+  if (typeof window === "undefined") return true;
+  const saved = window.localStorage.getItem(TIMELINE_FOLLOW_STORAGE_KEY);
+  return saved ? saved === "true" : true;
+}
+
+function clampWindowStart(start: number, windowSeconds: number, totalSeconds: number) {
+  return Math.min(Math.max(0, start), Math.max(0, totalSeconds - windowSeconds));
+}
+
+function timelineTicks(start: number, end: number) {
+  return [0, 0.25, 0.5, 0.75, 1].map((tick) => {
+    const seconds = start + (end - start) * tick;
+    return { tick, seconds };
+  });
+}
+
 export default function VideoAnalysisPage() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [matches, setMatches] = useState<Match[]>([]);
@@ -451,6 +488,9 @@ export default function VideoAnalysisPage() {
   const [activeZone, setActiveZone] = useState<ShortcutBinding | null>(null);
   const [editingShortcutId, setEditingShortcutId] = useState<string | null>(null);
   const [shortcuts, setShortcuts] = useState<ShortcutBinding[]>(() => buildDefaultShortcuts("rugby_union"));
+  const [timelineWindowDuration, setTimelineWindowDuration] = useState<"full" | number>(() => loadTimelineWindowDuration());
+  const [timelineWindowStart, setTimelineWindowStart] = useState(0);
+  const [followPlayhead, setFollowPlayhead] = useState(() => loadFollowPlayhead());
 
   const selectedMatch = matches.find((match) => match.id === selectedMatchId) ?? null;
   const selectedVideo = videos.find((video) => video.id === selectedVideoId) ?? null;
@@ -461,6 +501,14 @@ export default function VideoAnalysisPage() {
     ? `${homeTeam?.name ?? "Home"} vs ${awayTeam?.name ?? "Away"}`
     : "Video Analysis Workspace";
   const timelineDuration = Math.max(duration, events.reduce((max, event) => Math.max(max, event.end_seconds), 0), 90 * 60 + 43);
+  const visibleWindowDuration = timelineWindowDuration === "full" ? timelineDuration : Math.min(timelineWindowDuration, timelineDuration);
+  const visibleWindowStart = timelineWindowDuration === "full" ? 0 : clampWindowStart(timelineWindowStart, visibleWindowDuration, timelineDuration);
+  const visibleWindowEnd = timelineWindowDuration === "full" ? timelineDuration : Math.min(timelineDuration, visibleWindowStart + visibleWindowDuration);
+  const visibleWindowSpan = Math.max(1, visibleWindowEnd - visibleWindowStart);
+  const playheadVisible = currentTime >= visibleWindowStart && currentTime <= visibleWindowEnd;
+  const timelineWindowLabel = timelineWindowDuration === "full"
+    ? "Full match"
+    : `${formatTime(visibleWindowStart)}-${formatTime(visibleWindowEnd)}`;
 
   const eventShortcuts = useMemo(() => shortcuts.filter((binding) => binding.group === "event"), [shortcuts]);
   const filteredTags = useMemo(() => {
@@ -473,12 +521,36 @@ export default function VideoAnalysisPage() {
 
   const trackRows = useMemo(() => ANALYSIS_TRACKS.map((track) => ({
     track,
-    events: events.filter((event) => trackForEvent(event) === track.label),
-  })), [events]);
+    events: events.filter((event) => trackForEvent(event) === track.label && event.end_seconds >= visibleWindowStart && event.start_seconds <= visibleWindowEnd),
+  })), [events, visibleWindowEnd, visibleWindowStart]);
 
   useEffect(() => {
     setShortcuts(loadShortcutBindings(activeSport));
   }, [activeSport]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(TIMELINE_WINDOW_STORAGE_KEY, String(timelineWindowDuration));
+  }, [timelineWindowDuration]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(TIMELINE_FOLLOW_STORAGE_KEY, String(followPlayhead));
+  }, [followPlayhead]);
+
+  useEffect(() => {
+    if (timelineWindowDuration === "full") {
+      setTimelineWindowStart(0);
+      return;
+    }
+    setTimelineWindowStart((start) => clampWindowStart(start, visibleWindowDuration, timelineDuration));
+  }, [timelineDuration, timelineWindowDuration, visibleWindowDuration]);
+
+  useEffect(() => {
+    if (!followPlayhead || timelineWindowDuration === "full") return;
+    if (currentTime >= visibleWindowStart && currentTime <= visibleWindowEnd) return;
+    setTimelineWindowStart(clampWindowStart(currentTime - visibleWindowDuration / 2, visibleWindowDuration, timelineDuration));
+  }, [currentTime, followPlayhead, timelineDuration, timelineWindowDuration, visibleWindowDuration, visibleWindowEnd, visibleWindowStart]);
 
   const loadWorkspace = useCallback(async () => {
     try {
@@ -575,6 +647,17 @@ export default function VideoAnalysisPage() {
     if (command === "speed_double") video.playbackRate = 2;
   }, [seek, togglePlay]);
 
+  const moveTimelineWindow = useCallback((direction: -1 | 1) => {
+    if (timelineWindowDuration === "full") return;
+    setFollowPlayhead(false);
+    setTimelineWindowStart((start) => clampWindowStart(start + direction * visibleWindowDuration, visibleWindowDuration, timelineDuration));
+  }, [timelineDuration, timelineWindowDuration, visibleWindowDuration]);
+
+  const centreTimelineOn = useCallback((seconds: number) => {
+    if (timelineWindowDuration === "full") return;
+    setTimelineWindowStart(clampWindowStart(seconds - visibleWindowDuration / 2, visibleWindowDuration, timelineDuration));
+  }, [timelineDuration, timelineWindowDuration, visibleWindowDuration]);
+
   const saveShortcut = useCallback((id: string, shortcut: string) => {
     const nextShortcut = normaliseShortcut(shortcut);
     if (nextShortcut === "Unassigned") return;
@@ -626,11 +709,12 @@ export default function VideoAnalysisPage() {
       });
       setEvents((current) => mergeTimelineEvents(current, [created]));
       setSelectedEventId(created.id);
+      if (followPlayhead && timelineWindowDuration !== "full") centreTimelineOn(created.start_seconds);
       setNotice(`${binding.label} tagged for ${team} from ${formatTime(created.start_seconds)} to ${formatTime(created.end_seconds)}.`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Unable to add tag.");
     }
-  }, [activeZone, currentTime, selectedMatchId, selectedVideoId, teamContext]);
+  }, [activeZone, centreTimelineOn, currentTime, followPlayhead, selectedMatchId, selectedVideoId, teamContext, timelineWindowDuration]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -733,24 +817,63 @@ export default function VideoAnalysisPage() {
             </div>
 
             <div className="video-analysis-timeline">
+              <div className="video-analysis-window-controls">
+                <div className="video-analysis-window-group" aria-label="Timeline window size">
+                  {TIMELINE_WINDOW_OPTIONS.map((option) => (
+                    <button
+                      key={option.label}
+                      type="button"
+                      className={timelineWindowDuration === option.seconds ? "is-active" : ""}
+                      onClick={() => {
+                        setTimelineWindowDuration(option.seconds);
+                        if (option.seconds !== "full") {
+                          setTimelineWindowStart(clampWindowStart(currentTime - option.seconds / 2, option.seconds, timelineDuration));
+                        }
+                      }}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="video-analysis-window-actions">
+                  <button type="button" disabled={timelineWindowDuration === "full" || visibleWindowStart <= 0} onClick={() => moveTimelineWindow(-1)}>
+                    Previous window
+                  </button>
+                  <button type="button" disabled={timelineWindowDuration === "full" || visibleWindowEnd >= timelineDuration} onClick={() => moveTimelineWindow(1)}>
+                    Next window
+                  </button>
+                  <button
+                    type="button"
+                    className={followPlayhead ? "is-active" : ""}
+                    onClick={() => setFollowPlayhead((value) => !value)}
+                  >
+                    Follow playhead
+                  </button>
+                  <span>{timelineWindowLabel}</span>
+                </div>
+              </div>
               <div className="video-analysis-timeline-scroll">
                 <div className="video-analysis-timeline-board">
                   <div className="video-analysis-time-row">
                     <div className="video-analysis-track-head" />
                     <div className="video-analysis-ruler">
-                      {[0, 0.25, 0.5, 0.75, 1].map((tick) => (
-                        <span key={tick} style={{ left: `${tick * 100}%` }}>{formatTime(timelineDuration * tick)}</span>
+                      {timelineTicks(visibleWindowStart, visibleWindowEnd).map(({ tick, seconds }) => (
+                        <span key={tick} style={{ left: `${tick * 100}%` }}>{formatTime(seconds)}</span>
                       ))}
                     </div>
                   </div>
-                  <div className="video-analysis-playhead" style={{ left: `calc(220px + ${Math.min(100, Math.max(0, currentTime / timelineDuration * 100))}%)` }} />
+                  {playheadVisible ? (
+                    <div className="video-analysis-playhead" style={{ left: `calc(220px + ${Math.min(100, Math.max(0, (currentTime - visibleWindowStart) / visibleWindowSpan * 100))}%)` }} />
+                  ) : null}
                   {trackRows.map((row) => (
                     <div key={row.track.id} className={`video-analysis-track-row is-${row.track.group}`}>
                       <div className="video-analysis-track-label">{row.track.label}</div>
                       <div className="video-analysis-track-lane">
                         {row.events.map((event) => {
-                          const left = Math.min(98, Math.max(0, event.start_seconds / timelineDuration * 100));
-                          const width = Math.max(1.4, Math.min(100 - left, (event.end_seconds - event.start_seconds) / timelineDuration * 100));
+                          const clippedStart = Math.max(event.start_seconds, visibleWindowStart);
+                          const clippedEnd = Math.min(event.end_seconds, visibleWindowEnd);
+                          const left = Math.min(98, Math.max(0, (clippedStart - visibleWindowStart) / visibleWindowSpan * 100));
+                          const width = Math.max(1.4, Math.min(100 - left, (clippedEnd - clippedStart) / visibleWindowSpan * 100));
                           const selected = selectedEventId === event.id;
                           return (
                             <button
@@ -759,6 +882,7 @@ export default function VideoAnalysisPage() {
                               onClick={() => {
                                 setSelectedEventId(event.id);
                                 if (videoRef.current) videoRef.current.currentTime = event.start_seconds;
+                                centreTimelineOn((event.start_seconds + event.end_seconds) / 2);
                               }}
                               className={`video-analysis-timeline-clip team-${event.team} category-${event.event_type} ${selected ? "is-selected" : ""}`}
                               style={{ left: `${left}%`, width: `${width}%` }}

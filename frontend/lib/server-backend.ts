@@ -95,6 +95,12 @@ export async function proxyBackendRequest(
           { status: response.status, headers },
         );
       }
+      if (isMediaPlaybackPath(backendPath) && response.status >= 300 && response.status < 400) {
+        return new NextResponse(null, {
+          status: response.status,
+          headers,
+        });
+      }
       const responseBody = method === "HEAD"
         ? null
         : (shouldStreamResponse(request, backendPath) ? response.body : await response.arrayBuffer());

@@ -177,39 +177,39 @@ export default function VideoAnalysisPage() {
   }
 
   return (
-    <main className="min-h-screen overflow-hidden bg-[#0f1318] text-[#d8e0e7]">
-      <div className="grid h-screen grid-cols-[minmax(0,1fr)_480px]">
-        <section className="flex min-w-0 flex-col border-r border-[#2a333c] bg-[#11161c]">
-          <div className="flex h-14 items-center justify-between border-b border-[#26313a] bg-[#182027] px-5">
-            <Link href="/" className="flex items-center gap-2 text-sm font-bold text-[#b8c3ce]">
-              <span className="text-2xl leading-none">‹</span>
+    <main className="video-analysis-workspace">
+      <div className="video-analysis-shell">
+        <section className="video-analysis-main">
+          <div className="video-analysis-topbar">
+            <Link href="/" className="video-analysis-exit">
+              <span>‹</span>
               Exit
             </Link>
-            <button type="button" className="grid h-8 w-8 place-items-center border border-[#46515b] text-2xl leading-none text-[#b8c3ce]">›</button>
+            <button type="button" className="video-analysis-collapse">›</button>
           </div>
 
-          <div className="flex min-h-0 flex-1 flex-col">
-            <div className="grid min-h-0 flex-1 place-items-center bg-[#101419] px-24 py-6">
-              <div className="aspect-video w-full max-w-[1360px] overflow-hidden bg-black shadow-2xl">
+          <div className="video-analysis-left-stack">
+            <div className="video-analysis-stage">
+              <div className="video-analysis-player-frame">
                 {selectedVideo ? (
                   <video
                     ref={videoRef}
                     src={sourceVideoUrl(selectedVideo.id)}
                     playsInline
-                    className="h-full w-full bg-black object-contain"
+                    className="video-analysis-video"
                     onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
                     onLoadedMetadata={(event) => setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)}
                   />
                 ) : (
-                  <div className="grid h-full place-items-center bg-[radial-gradient(circle_at_50%_20%,#303a31,#12161b_58%,#080a0d)] text-sm font-bold text-[#8793a0]">
+                  <div className="video-analysis-empty-player">
                     Select a match with uploaded footage.
                   </div>
                 )}
               </div>
             </div>
 
-            <div className="h-12 border-y border-[#2b343d] bg-[#192128] px-3">
-              <div className="flex h-full items-center gap-3 text-[#c7d0d9]">
+            <div className="video-analysis-controls">
+              <div className="video-analysis-controls-inner">
                 {PLAYBACK_CONTROLS.map((control) => (
                   <button
                     key={control.label}
@@ -218,34 +218,34 @@ export default function VideoAnalysisPage() {
                       if (control.command === "play_pause") togglePlay();
                       else seek(control.delta ?? 0);
                     }}
-                    className="text-xl font-black leading-none hover:text-white"
+                    className="video-analysis-control-button"
                   >
                     {control.label}
                   </button>
                 ))}
-                <span className="ml-4 text-sm font-semibold">{formatTime(currentTime)} / {formatTime(timelineDuration)}</span>
-                <span className="ml-auto text-sm text-[#7d8994]">{notice}</span>
-                <span className="text-lg">⚙</span>
-                <span className="text-lg">⛶</span>
+                <span className="video-analysis-time">{formatTime(currentTime)} / {formatTime(timelineDuration)}</span>
+                <span className="video-analysis-notice">{notice}</span>
+                <span className="video-analysis-tool">⚙</span>
+                <span className="video-analysis-tool">⛶</span>
               </div>
             </div>
 
-            <div className="h-[330px] bg-[#151b20]">
-              <div className="relative h-full overflow-x-auto overflow-y-hidden border-t border-[#222b33]">
-                <div className="relative min-w-[1500px]">
-                  <div className="grid grid-cols-[200px_1fr] border-b border-[#29323a]">
-                    <div className="h-10 bg-[#161d23]" />
-                    <div className="relative h-10 bg-[#12181d] text-xs text-[#697784]">
+            <div className="video-analysis-timeline">
+              <div className="video-analysis-timeline-scroll">
+                <div className="video-analysis-timeline-board">
+                  <div className="video-analysis-time-row">
+                    <div className="video-analysis-track-head" />
+                    <div className="video-analysis-ruler">
                       {[0, 0.33, 0.66, 1].map((tick) => (
-                        <span key={tick} className="absolute top-5 -translate-x-1/2" style={{ left: `${tick * 100}%` }}>{formatTime(timelineDuration * tick)}</span>
+                        <span key={tick} style={{ left: `${tick * 100}%` }}>{formatTime(timelineDuration * tick)}</span>
                       ))}
                     </div>
                   </div>
-                  <div className="pointer-events-none absolute bottom-0 top-0 z-20 w-px bg-[#a6acb2]" style={{ left: `calc(200px + ${Math.min(100, Math.max(0, currentTime / timelineDuration * 100))}%)` }} />
+                  <div className="video-analysis-playhead" style={{ left: `calc(200px + ${Math.min(100, Math.max(0, currentTime / timelineDuration * 100))}%)` }} />
                   {trackRows.map((row) => (
-                    <div key={row.track} className="grid grid-cols-[200px_1fr] border-b border-[#273039]">
-                      <div className="h-6 bg-[#1a2229] px-2 text-xs font-black leading-6 text-[#b9c3cc]">{row.track}</div>
-                      <div className="relative h-6 bg-[#151c22]">
+                    <div key={row.track} className="video-analysis-track-row">
+                      <div className="video-analysis-track-label">{row.track}</div>
+                      <div className="video-analysis-track-lane">
                         {row.events.map((event) => {
                           const left = Math.min(98, Math.max(0, event.start_seconds / timelineDuration * 100));
                           const width = Math.max(2, Math.min(100 - left, (event.end_seconds - event.start_seconds) / timelineDuration * 100));
@@ -254,9 +254,9 @@ export default function VideoAnalysisPage() {
                               key={event.id}
                               type="button"
                               onClick={() => {
-                                if (videoRef.current) videoRef.current.currentTime = event.start_seconds;
-                              }}
-                              className="absolute top-0.5 h-5 overflow-hidden rounded-sm bg-[#25364a] px-1 text-left text-[10px] font-semibold text-[#dce7f4]"
+                              if (videoRef.current) videoRef.current.currentTime = event.start_seconds;
+                            }}
+                              className="video-analysis-timeline-clip"
                               style={{ left: `${left}%`, width: `${width}%` }}
                             >
                               Fixture Name ▶ {eventLabel(event)}
@@ -272,31 +272,31 @@ export default function VideoAnalysisPage() {
           </div>
         </section>
 
-        <aside className="flex min-h-0 flex-col bg-[#192026]">
-          <div className="flex h-[76px] items-center bg-[#303a44] px-5 text-base font-black text-white">
+        <aside className="video-analysis-tags">
+          <div className="video-analysis-title">
             {fixtureTitle}
           </div>
 
-          <div className="grid grid-cols-2 border-b border-[#2b343d] bg-[#192026]">
-            <button type="button" className="h-[72px] border-b-4 border-transparent text-sm font-black text-[#657487]">Your Clips</button>
-            <button type="button" className="h-[72px] border-b-4 border-[#586779] text-sm font-black text-white">Tags</button>
+          <div className="video-analysis-tabbar">
+            <button type="button">Your Clips</button>
+            <button type="button" className="is-active">Tags</button>
           </div>
 
-          <div className="border-b border-[#29323a] p-5">
-            <label className="grid gap-2 text-base text-[#d7dee6]">
+          <div className="video-analysis-search">
+            <label>
               Search
-              <div className="flex h-10 items-center justify-between rounded border border-[#56616d] px-3 text-sm text-[#77818d]">
+              <div>
                 What are you looking for?
-                <span className="text-2xl leading-none">⌄</span>
+                <span>⌄</span>
               </div>
             </label>
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-5">
+          <div className="video-analysis-tag-list">
             {TAG_GROUPS.map((group) => (
-              <button key={group} type="button" className="flex w-full items-center justify-between border-b border-[#404b55] py-4 text-left text-lg font-black text-[#c1cbd5]">
+              <button key={group} type="button" className="video-analysis-tag-button">
                 {group}
-                <span className="text-2xl leading-none text-[#b1bbc5]">⌄</span>
+                <span>⌄</span>
               </button>
             ))}
           </div>

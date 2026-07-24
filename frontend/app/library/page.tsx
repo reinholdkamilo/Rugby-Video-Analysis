@@ -42,7 +42,7 @@ function codingHref(item: LibraryItem) {
   const query = new URLSearchParams();
   if (item.match_id) query.set("match_id", String(item.match_id));
   if (item.video_asset_id) query.set("video_id", String(item.video_asset_id));
-  return `/coding${query.size ? `?${query}` : ""}`;
+  return `/video-analysis${query.size ? `?${query}` : ""}`;
 }
 
 export default function LibraryPage() {
@@ -139,7 +139,7 @@ export default function LibraryPage() {
           </div>
           <nav className="flex gap-3 text-sm">
             <Link href="/upload" className="rounded-lg border border-slate-700 px-3 py-2">Upload</Link>
-            <Link href="/coding" className="rounded-lg border border-slate-700 px-3 py-2">Coding</Link>
+            <Link href="/video-analysis" className="rounded-lg border border-slate-700 px-3 py-2">Video Analysis</Link>
             <button type="button" onClick={createReviewPackage} disabled={busy || !selectedIds.length} className="rounded-lg bg-emerald-400 px-4 py-2 font-bold text-slate-950 disabled:opacity-50">
               Create Coach Review
             </button>
@@ -223,7 +223,7 @@ export default function LibraryPage() {
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <Link href={itemHref(item)} className="rounded-lg bg-slate-950 px-3 py-2 text-sm font-bold text-white">Open</Link>
-                    {item.match_id ? <Link href={codingHref(item)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-bold">Open in Coding</Link> : null}
+                    {item.match_id ? <Link href={codingHref(item)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-bold">Open in Video Analysis</Link> : null}
                     {item.match_id ? <Link href={`/reports?match_id=${item.match_id}`} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-bold">Report</Link> : null}
                   </div>
                 </div>

@@ -7,11 +7,11 @@ const links = [
   ["/", "Home"],
   ["/library", "Library"],
   ["/upload", "Upload"],
-  ["/coding", "Coding"],
   ["/video-analysis", "Video Analysis"],
   ["/reports", "Reports"],
   ["/evidence", "Evidence"],
   ["/intelligence", "Intelligence"],
+  ["/coding", "Advanced Coding"],
 ] as const;
 
 export function AppNav() {

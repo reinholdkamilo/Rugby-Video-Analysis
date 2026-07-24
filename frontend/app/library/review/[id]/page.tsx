@@ -186,7 +186,7 @@ export default function CoachReviewPage() {
           </div>
           <nav className="flex gap-3 text-sm">
             <Link href="/library" className="rounded-lg border border-slate-700 px-3 py-2">Library</Link>
-            {selectedMatchId ? <Link href={`/coding?match_id=${selectedMatchId}`} className="rounded-lg border border-slate-700 px-3 py-2">Open Coding</Link> : null}
+            {selectedMatchId ? <Link href={`/video-analysis?match_id=${selectedMatchId}`} className="rounded-lg border border-slate-700 px-3 py-2">Open Video Analysis</Link> : null}
             {selectedMatchId ? <Link href={`/reports?match_id=${selectedMatchId}`} className="rounded-lg bg-emerald-400 px-4 py-2 font-bold text-slate-950">Report</Link> : null}
           </nav>
         </div>

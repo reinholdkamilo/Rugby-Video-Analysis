@@ -236,17 +236,16 @@ body:not(.design-engine-editing) [data-design-id="coding-video-shell-block"] > v
 }
 
 .video-analysis-controls {
-  height: 48px;
-  flex: 0 0 48px;
+  min-height: 56px;
+  flex: 0 0 auto;
   border-top: 1px solid #2b343d;
   border-bottom: 1px solid #2b343d;
   background: #192128;
-  padding: 0 12px;
+  padding: 6px 12px;
 }
 
 .video-analysis-controls-inner {
   display: flex;
-  height: 100%;
   min-width: 0;
   align-items: center;
   gap: 12px;
@@ -272,6 +271,42 @@ body:not(.design-engine-editing) [data-design-id="coding-video-shell-block"] > v
   white-space: nowrap;
   font-size: .9rem;
   font-weight: 750;
+}
+
+.video-analysis-speed-controls {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.video-analysis-speed-controls span {
+  border: 1px solid #3c4953;
+  border-radius: 999px;
+  background: #10161b;
+  padding: 5px 8px;
+  color: #f4f8fb;
+  font-size: .76rem;
+  font-weight: 950;
+  white-space: nowrap;
+}
+
+.video-analysis-speed-controls button {
+  border: 1px solid #34414b;
+  border-radius: 4px;
+  background: transparent;
+  padding: 5px 7px;
+  color: #aab7c3;
+  font-size: .72rem;
+  font-weight: 900;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.video-analysis-speed-controls button.is-active {
+  border-color: #f5b400;
+  background: #2c2718;
+  color: #fff;
 }
 
 .video-analysis-notice {
@@ -795,6 +830,11 @@ body:not(.design-engine-editing) [data-design-id="coding-video-shell-block"] > v
   }
 
   .video-analysis-window-actions {
+    flex-wrap: wrap;
+  }
+
+  .video-analysis-controls-inner,
+  .video-analysis-speed-controls {
     flex-wrap: wrap;
   }
 }

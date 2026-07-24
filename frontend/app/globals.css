@@ -101,6 +101,372 @@ body:not(.design-engine-editing) [data-design-id="coding-video-shell-block"] > v
   cursor: pointer !important;
 }
 
+/* Fixed Sportscode-style workspace for the Video Analysis tab. */
+.video-analysis-workspace {
+  min-height: 100vh;
+  overflow: hidden;
+  background: #0f1318;
+  color: #d8e0e7;
+}
+
+.video-analysis-shell {
+  display: grid;
+  height: 100vh;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) 480px;
+}
+
+.video-analysis-main {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  border-right: 1px solid #2a333c;
+  background: #11161c;
+}
+
+.video-analysis-topbar {
+  display: flex;
+  height: 56px;
+  flex: 0 0 56px;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #26313a;
+  background: #182027;
+  padding: 0 20px;
+}
+
+.video-analysis-exit {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #b8c3ce;
+  font-size: .9rem;
+  font-weight: 800;
+}
+
+.video-analysis-exit span {
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.video-analysis-collapse {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px solid #46515b;
+  background: transparent;
+  color: #b8c3ce;
+  font-size: 1.6rem;
+  line-height: 1;
+}
+
+.video-analysis-left-stack {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.video-analysis-stage {
+  display: grid;
+  min-height: 0;
+  flex: 1;
+  place-items: center;
+  background: #101419;
+  padding: 24px clamp(24px, 5vw, 96px);
+}
+
+.video-analysis-player-frame {
+  width: 100%;
+  max-width: 1360px;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: #000;
+  box-shadow: 0 26px 70px rgba(0,0,0,.36);
+}
+
+.video-analysis-video,
+.video-analysis-empty-player {
+  width: 100%;
+  height: 100%;
+  background: #000;
+}
+
+.video-analysis-video {
+  display: block;
+  object-fit: contain;
+}
+
+.video-analysis-empty-player {
+  display: grid;
+  place-items: center;
+  background: radial-gradient(circle at 50% 20%, #303a31, #12161b 58%, #080a0d);
+  color: #8793a0;
+  font-size: .9rem;
+  font-weight: 800;
+}
+
+.video-analysis-controls {
+  height: 48px;
+  flex: 0 0 48px;
+  border-top: 1px solid #2b343d;
+  border-bottom: 1px solid #2b343d;
+  background: #192128;
+  padding: 0 12px;
+}
+
+.video-analysis-controls-inner {
+  display: flex;
+  height: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+  color: #c7d0d9;
+}
+
+.video-analysis-control-button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 1.25rem;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.video-analysis-control-button:hover,
+.video-analysis-tool:hover {
+  color: #fff;
+}
+
+.video-analysis-time {
+  margin-left: 16px;
+  white-space: nowrap;
+  font-size: .9rem;
+  font-weight: 750;
+}
+
+.video-analysis-notice {
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+  color: #7d8994;
+  font-size: .85rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.video-analysis-tool {
+  color: #c7d0d9;
+  font-size: 1.1rem;
+}
+
+.video-analysis-timeline {
+  height: 330px;
+  flex: 0 0 330px;
+  background: #151b20;
+}
+
+.video-analysis-timeline-scroll {
+  position: relative;
+  height: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-top: 1px solid #222b33;
+}
+
+.video-analysis-timeline-board {
+  position: relative;
+  min-width: 1500px;
+}
+
+.video-analysis-time-row,
+.video-analysis-track-row {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  border-bottom: 1px solid #273039;
+}
+
+.video-analysis-time-row {
+  border-bottom-color: #29323a;
+}
+
+.video-analysis-track-head {
+  height: 40px;
+  background: #161d23;
+}
+
+.video-analysis-ruler {
+  position: relative;
+  height: 40px;
+  background: #12181d;
+  color: #697784;
+  font-size: .72rem;
+}
+
+.video-analysis-ruler span {
+  position: absolute;
+  top: 20px;
+  transform: translateX(-50%);
+}
+
+.video-analysis-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 20;
+  width: 1px;
+  pointer-events: none;
+  background: #a6acb2;
+}
+
+.video-analysis-track-label {
+  height: 24px;
+  overflow: hidden;
+  background: #1a2229;
+  padding: 0 8px;
+  color: #b9c3cc;
+  font-size: .72rem;
+  font-weight: 950;
+  line-height: 24px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.video-analysis-track-lane {
+  position: relative;
+  height: 24px;
+  background: #151c22;
+}
+
+.video-analysis-timeline-clip {
+  position: absolute;
+  top: 2px;
+  height: 20px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 2px;
+  background: #25364a;
+  padding: 0 4px;
+  color: #dce7f4;
+  font-size: .64rem;
+  font-weight: 750;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.video-analysis-tags {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  background: #192026;
+}
+
+.video-analysis-title {
+  display: flex;
+  height: 76px;
+  flex: 0 0 76px;
+  align-items: center;
+  background: #303a44;
+  padding: 0 20px;
+  color: #fff;
+  font-size: 1rem;
+  font-weight: 950;
+}
+
+.video-analysis-tabbar {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border-bottom: 1px solid #2b343d;
+  background: #192026;
+}
+
+.video-analysis-tabbar button {
+  height: 72px;
+  border: 0;
+  border-bottom: 4px solid transparent;
+  background: transparent;
+  color: #657487;
+  font-size: .9rem;
+  font-weight: 950;
+}
+
+.video-analysis-tabbar button.is-active {
+  border-bottom-color: #586779;
+  color: #fff;
+}
+
+.video-analysis-search {
+  border-bottom: 1px solid #29323a;
+  padding: 20px;
+}
+
+.video-analysis-search label {
+  display: grid;
+  gap: 8px;
+  color: #d7dee6;
+  font-size: 1rem;
+}
+
+.video-analysis-search label > div {
+  display: flex;
+  height: 40px;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid #56616d;
+  border-radius: 4px;
+  padding: 0 12px;
+  color: #77818d;
+  font-size: .88rem;
+}
+
+.video-analysis-search span,
+.video-analysis-tag-button span {
+  color: #b1bbc5;
+  font-size: 1.45rem;
+  line-height: 1;
+}
+
+.video-analysis-tag-list {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 20px;
+}
+
+.video-analysis-tag-button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  border: 0;
+  border-bottom: 1px solid #404b55;
+  background: transparent;
+  padding: 16px 0;
+  color: #c1cbd5;
+  font-size: 1.05rem;
+  font-weight: 950;
+  text-align: left;
+}
+
+@media (max-width: 1100px) {
+  .video-analysis-shell {
+    height: auto;
+    min-height: 100vh;
+    grid-template-columns: 1fr;
+  }
+
+  .video-analysis-tags {
+    min-height: 520px;
+  }
+
+  .video-analysis-stage {
+    min-height: 48vw;
+  }
+}
+
 .design-mode-active .design-editable:hover {
   outline: 2px solid rgba(245,180,0,.82);
   outline-offset: 3px;

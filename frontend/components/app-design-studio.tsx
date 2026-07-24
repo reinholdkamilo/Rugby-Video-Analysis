@@ -143,6 +143,8 @@ type LiveRect = { left: number; top: number; width: number; height: number };
 type SelectedElement = { selector: string; label: string; rect: LiveRect };
 
 const STORAGE_KEY = "rugby-video-analysis:blank-canvas-design:v3";
+const RESET_MARKER_KEY = "rugby-video-analysis:blank-canvas-design:reset-revision";
+const DESIGN_RESET_REVISION = "2026-07-24-default-layout-reset";
 const SUPPORTED_PAGES: PageKey[] = ["home", "upload", "library", "coding", "reports", "evidence", "intelligence"];
 const FULLY_WIRED_PAGES = new Set<PageKey>(["coding", "library", "reports"]);
 
@@ -232,6 +234,16 @@ function readStore(): DesignStore {
     if (!saved) return DEFAULT_STORE;
     const parsed = JSON.parse(saved) as Partial<DesignStore>;
     if (parsed.version !== 3) return DEFAULT_STORE;
+    const storedResetRevision = window.localStorage.getItem(RESET_MARKER_KEY);
+    if (storedResetRevision !== DESIGN_RESET_REVISION) {
+      const resetStore: DesignStore = {
+        ...DEFAULT_STORE,
+        templates: parsed.templates ?? [],
+      };
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(resetStore));
+      window.localStorage.setItem(RESET_MARKER_KEY, DESIGN_RESET_REVISION);
+      return resetStore;
+    }
     return {
       version: 3,
       layouts: parsed.layouts ?? {},
@@ -242,6 +254,12 @@ function readStore(): DesignStore {
   } catch {
     return DEFAULT_STORE;
   }
+}
+
+function writeDesignStore(store: DesignStore) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+  window.localStorage.setItem(RESET_MARKER_KEY, DESIGN_RESET_REVISION);
 }
 
 function baseNode(overrides: Partial<CanvasNode>): CanvasNode {
@@ -669,7 +687,7 @@ export function AppDesignStudio() {
   const updateStore = useCallback((updater: (current: DesignStore) => DesignStore) => {
     setStore((current) => {
       const next = updater(current);
-      if (typeof window !== "undefined") window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      writeDesignStore(next);
       return next;
     });
   }, []);
@@ -1004,16 +1022,42 @@ export function AppDesignStudio() {
 
   function resetToBlank() {
     const next = makeEmptyLayout(page, "blank");
-    updateStore((current) => ({ ...current, layouts: { ...current.layouts, [page]: next } }));
+    updateStore((current) => ({
+      ...current,
+      layouts: { ...current.layouts, [page]: next },
+      elementCssResets: (current.elementCssResets ?? []).filter((reset) => reset.page !== page),
+      elementStyleOverrides: (current.elementStyleOverrides ?? []).filter((override) => override.page !== page),
+    }));
     setSelectedId(null);
+    setSelectedElement(null);
     setNotice(`${readable(page)} canvas reset to blank.`);
   }
 
   function resetToDefault() {
     const next = defaultLayout(page);
-    updateStore((current) => ({ ...current, layouts: { ...current.layouts, [page]: next } }));
+    updateStore((current) => ({
+      ...current,
+      layouts: { ...current.layouts, [page]: next },
+      elementCssResets: (current.elementCssResets ?? []).filter((reset) => reset.page !== page),
+      elementStyleOverrides: (current.elementStyleOverrides ?? []).filter((override) => override.page !== page),
+    }));
     setSelectedId(next.nodes[0]?.id ?? null);
+    setSelectedElement(null);
     setNotice(`${readable(page)} default template restored.`);
+  }
+
+  function resetAllToDefaults() {
+    if (!window.confirm("Reset visual layouts for every app tab? This only clears Design Mode layout and element style edits. Videos, events, reports, evidence, taxonomy buttons and keyboard mappings are not touched.")) return;
+    updateStore((current) => ({
+      ...current,
+      layouts: {},
+      elementCssResets: [],
+      elementStyleOverrides: [],
+    }));
+    setSelectedId(null);
+    setSelectedElement(null);
+    setElementPickMode(false);
+    setNotice("All app tab layouts restored to their default state. App data was not touched.");
   }
 
   function saveTemplate() {
@@ -1385,6 +1429,7 @@ export function AppDesignStudio() {
             <label>Grid <input type="number" min="4" max="40" value={layout.gridSize} onChange={(event) => updateLayout((current) => ({ ...current, gridSize: Number(event.target.value || 12) }))} /></label>
             <button type="button" onClick={resetToBlank}>Blank</button>
             <button type="button" onClick={resetToDefault}>Default</button>
+            <button type="button" className="design-engine-danger" onClick={resetAllToDefaults}>Reset all tabs</button>
             <button type="button" onClick={() => setOpen(false)}>Done</button>
           </div>
         </div>

@@ -651,6 +651,7 @@ function LiveStaticLayout({ layout, page }: { layout: PageLayout; page: PageKey 
 
 export function AppDesignStudio() {
   const pathname = usePathname();
+  const designDisabled = pathname.startsWith("/video-analysis");
   const page = pageKey(pathname);
   const dragRef = useRef<DragState | null>(null);
   const elementDragRef = useRef<ElementDragState | null>(null);
@@ -1453,7 +1454,7 @@ export function AppDesignStudio() {
     );
   }
 
-  if (!ready) return null;
+  if (!ready || designDisabled) return null;
 
   return (
     <>

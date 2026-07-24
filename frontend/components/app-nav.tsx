@@ -8,6 +8,7 @@ const links = [
   ["/library", "Library"],
   ["/upload", "Upload"],
   ["/coding", "Coding"],
+  ["/video-analysis", "Video Analysis"],
   ["/reports", "Reports"],
   ["/evidence", "Evidence"],
   ["/intelligence", "Intelligence"],
@@ -15,6 +16,7 @@ const links = [
 
 export function AppNav() {
   const pathname = usePathname();
+  if (pathname.startsWith("/video-analysis")) return null;
 
   return (
     <>

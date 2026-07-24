@@ -36,6 +36,7 @@ type HudPanelId = QuickColumnId;
 type HudButtonColumns = 1 | 2 | 3 | 4;
 type QuickEventSectionId = EventCategory;
 type QuickAddPanel = "event" | "zone" | null;
+type MatrixDisplayMode = "hidden" | "popup" | "overlay";
 
 type HudLayout = {
   visible: boolean;
@@ -104,7 +105,7 @@ const CODING_LAYOUT_STORAGE_KEY = "rugby-video-analysis:coding-layout:v2";
 const HUD_LAYOUT_STORAGE_KEY = "rugby-video-analysis:coding-hud-layout:v2";
 const SELECTED_MATCH_STORAGE_KEY = "rugby-video-analysis:coding-selected-match:v1";
 const SELECTED_VIDEO_STORAGE_KEY = "rugby-video-analysis:coding-selected-video:v1";
-const QUICK_CODE_CAPTURE_SECONDS = 10;
+const QUICK_CODE_CAPTURE_SECONDS = 15;
 
 const DEFAULT_QUICK_COLUMN_ORDER: QuickColumnId[] = ["home", "away"];
 const DEFAULT_CODING_LAYOUT: CodingLayout = {
@@ -649,6 +650,7 @@ export default function CodingWorkspace() {
   const [selectedVideoId, setSelectedVideoId] = useState<number | null>(null);
   const [selectedTeam] = useState<EventTeam>("home");
   const [currentTime, setCurrentTime] = useState(0);
+  const [videoDuration, setVideoDuration] = useState(0);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [shortcuts, setShortcuts] = useState<ShortcutBinding[]>(DEFAULT_SHORTCUTS);
   const [editingShortcutId, setEditingShortcutId] = useState<string | null>(null);
@@ -668,6 +670,7 @@ export default function CodingWorkspace() {
   const [draggingHudButton, setDraggingHudButton] = useState<{ panelId: HudPanelId; bindingId: string } | null>(null);
   const [quickEditBindingId, setQuickEditBindingId] = useState<string | null>(null);
   const [quickAddPanel, setQuickAddPanel] = useState<QuickAddPanel>(null);
+  const [matrixDisplayMode, setMatrixDisplayMode] = useState<MatrixDisplayMode>("hidden");
   const [showAdvancedMapping, setShowAdvancedMapping] = useState(false);
   const [hudLayouts, setHudLayouts] = useState<HudLayouts>(DEFAULT_HUD_LAYOUTS);
   const [lastCodedEvent, setLastCodedEvent] = useState<LastCodedEvent | null>(null);
@@ -950,6 +953,31 @@ export default function CodingWorkspace() {
   }, [awayTeam?.name, eventShortcuts, homeTeam?.name]);
 
   const recentEvents = useMemo(() => [...events].sort((a, b) => b.start_seconds - a.start_seconds).slice(0, 10), [events]);
+  const timelineDuration = useMemo(() => {
+    const lastEventEnd = events.reduce((max, event) => Math.max(max, event.end_seconds, event.start_seconds + QUICK_CODE_CAPTURE_SECONDS), 0);
+    return Math.max(videoDuration, lastEventEnd, currentTime, QUICK_CODE_CAPTURE_SECONDS);
+  }, [currentTime, events, videoDuration]);
+  const sportscodeTrackRows = useMemo(() => {
+    const rows: { id: EventCategory | "ball_in_play" | "possession"; label: string; events: TimelineEvent[] }[] = [
+      { id: "ball_in_play", label: "Ball In Play", events },
+      { id: "possession", label: "Possession", events: events.filter((event) => event.event_type === "carry" || event.event_type === "pass" || event.event_type === "kick" || event.event_type === "ruck") },
+      { id: "attack", label: "Attack", events: [] },
+      { id: "defence", label: "Defence", events: [] },
+      { id: "kicking", label: "Kicking", events: [] },
+      { id: "set_piece", label: "Set Piece", events: [] },
+      { id: "breakdown_ruck", label: "Breakdown / Ruck", events: [] },
+      { id: "discipline", label: "Discipline", events: [] },
+      { id: "scoring", label: "Scoring", events: [] },
+      { id: "zone_territory", label: "Zone / Territory", events: [] },
+      { id: "error", label: "Errors", events: [] },
+      { id: "other", label: "Other", events: [] },
+    ];
+    return rows.map((row) => (
+      row.events.length || row.id === "ball_in_play" || row.id === "possession"
+        ? row
+        : { ...row, events: events.filter((event) => eventCategory(event) === row.id) }
+    ));
+  }, [eventCategory, events]);
 
   const quickButtonClass = codingLayout.density === "compact"
     ? "grid grid-cols-[auto_1fr] items-center gap-2 rounded-lg border border-slate-800 bg-slate-900 px-2 py-1.5 text-left hover:border-emerald-400 disabled:opacity-40"
@@ -1533,6 +1561,7 @@ export default function CodingWorkspace() {
   function renderHudPanel(panelId: HudPanelId) {
     const layout = hudLayouts[panelId];
     const column = hudColumns.find((item) => item.id === panelId);
+    if (matrixDisplayMode !== "overlay") return null;
     if (!layout.visible || !column) return null;
     const title = panelId === "home" ? "Home coding keys" : "Away coding keys";
     const teamName = column.subtitle;
@@ -1617,24 +1646,195 @@ export default function CodingWorkspace() {
     );
   }
 
-  return (
-    <main className="min-h-screen bg-slate-950 text-white">
-      <header className="border-b border-slate-800 bg-slate-950/95">
-        <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-4 px-5 py-4">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-[0.24em] text-emerald-400">Professional coding interface</p>
-            <h1 className="mt-1 text-2xl font-bold">Match Coding Workspace</h1>
+  function renderTagButton(binding: ShortcutBinding, compact = false) {
+    return (
+      <div
+        key={binding.id}
+        className={`group grid min-w-0 grid-cols-[1fr_auto] overflow-hidden rounded-lg border border-slate-800 bg-slate-950/90 hover:border-emerald-400 ${busy || !selectedVideoId || !binding.eventType ? "opacity-50" : ""} ${editingShortcutId === binding.id ? "border-amber-300 ring-1 ring-amber-300/50" : ""}`}
+      >
+        <button
+          type="button"
+          title="Click to code. Shift-click assigns a key."
+          aria-disabled={busy || !selectedVideoId || !binding.eventType}
+          onClick={(event) => {
+            if (event.shiftKey) {
+              startShortcutRecording(binding);
+              return;
+            }
+            if (busy || !selectedVideoId || !binding.eventType) {
+              setNotice("Select a source video before coding events. Shift-click still assigns keys.");
+              return;
+            }
+            createEventFromBinding(binding);
+          }}
+          className="grid min-w-0 grid-cols-[auto_1fr] items-center gap-2 px-2 py-2 text-left"
+        >
+          <kbd className={`min-w-12 rounded border px-2 py-1 text-center text-[11px] font-black ${editingShortcutId === binding.id ? "border-amber-300 text-amber-200" : shortcutConflict(binding.shortcut) ? "border-rose-400 text-rose-400" : "border-slate-700 text-emerald-300"}`}>
+            {editingShortcutId === binding.id ? "Press" : shortcutLabel(binding.shortcut)}
+          </kbd>
+          <span className="min-w-0">
+            <span className="block truncate text-sm font-bold">{displayEventLabel(binding)}</span>
+            {!compact ? <span className="block truncate text-[10px] uppercase tracking-[0.12em] text-slate-500">{categoryLabel(binding.category)}</span> : null}
+          </span>
+        </button>
+        <button
+          type="button"
+          aria-label={`Edit ${displayEventLabel(binding)}`}
+          onClick={() => openQuickEdit(binding)}
+          className="border-l border-slate-800 px-2 text-xs font-black text-slate-500 hover:bg-slate-900 hover:text-emerald-300"
+        >
+          Edit
+        </button>
+      </div>
+    );
+  }
+
+  function renderRightCodingPanel() {
+    const rightPanelSections = QUICK_EVENT_SECTIONS.map((section) => ({
+      ...section,
+      homeItems: eventShortcuts.filter((shortcut) => shortcut.team === "home" && quickSectionForShortcut(shortcut) === section.id),
+      awayItems: eventShortcuts.filter((shortcut) => shortcut.team === "away" && quickSectionForShortcut(shortcut) === section.id),
+    })).filter((section) => section.homeItems.length || section.awayItems.length);
+
+    return (
+      <aside
+        className="min-h-0 rounded-xl border border-slate-800 bg-[#10161d] shadow-2xl"
+        data-design-id="coding-right-tag-panel"
+        data-design-label="Right coding tag panel"
+        data-design-priority="16"
+        data-coding-layout-container="true"
+      >
+        <div className="sticky top-0 z-10 border-b border-slate-800 bg-[#10161d] p-3">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-300">Tags</p>
+              <h2 className="text-lg font-black">Coding Panel</h2>
+            </div>
+            <span className="rounded bg-slate-950 px-2 py-1 text-xs font-bold text-slate-400">{eventShortcuts.length} codes</span>
           </div>
-          <nav className="flex gap-2 text-sm">
-            <Link href="/upload" className="rounded-lg border border-slate-700 px-3 py-2">Upload Match</Link>
-            <Link href="/reports" className="rounded-lg border border-slate-700 px-3 py-2">Reports</Link>
-          </nav>
+          <div className="mt-3 grid grid-cols-3 gap-2 text-xs font-bold">
+            <button type="button" onClick={() => setMatrixDisplayMode("popup")} className="rounded border border-slate-700 px-2 py-2 hover:border-emerald-400">Matrix</button>
+            <button type="button" onClick={() => setMatrixDisplayMode("overlay")} className={`rounded border px-2 py-2 ${matrixDisplayMode === "overlay" ? "border-emerald-400 text-emerald-300" : "border-slate-700"}`}>Overlay</button>
+            <button type="button" onClick={() => setMatrixDisplayMode("hidden")} className="rounded border border-slate-700 px-2 py-2 hover:border-rose-300">Hide</button>
+          </div>
+          <input
+            value={timelineSearch}
+            onChange={(event) => setTimelineSearch(event.target.value)}
+            placeholder="Search timeline or tags"
+            className={`${inputClass} mt-3 border-slate-800 bg-slate-950`}
+          />
+        </div>
+        <div className="max-h-[calc(100vh-14rem)] overflow-y-auto p-3">
+          <div className="mb-3 grid grid-cols-2 gap-2">
+            <button type="button" onClick={() => setQuickAddPanel((current) => current === "event" ? null : "event")} className="rounded-lg bg-emerald-400 px-3 py-2 text-sm font-black text-slate-950">Add rugby element</button>
+            <button type="button" onClick={() => setQuickAddPanel((current) => current === "zone" ? null : "zone")} className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-bold text-slate-200">Add zone</button>
+          </div>
+          <div className="space-y-3">
+            {rightPanelSections.map((section) => (
+              <details key={section.id} open={section.id === "attack" || section.id === "defence" || section.id === "scoring"} className="rounded-lg border border-slate-800 bg-slate-950/60">
+                <summary className="cursor-pointer px-3 py-2 text-xs font-black uppercase tracking-[0.16em] text-slate-300">{section.title}</summary>
+                <div className="grid gap-2 border-t border-slate-800 p-2">
+                  <div>
+                    <p className="mb-1 text-[10px] font-black uppercase tracking-[0.16em] text-emerald-300">{homeTeam?.name ?? "Home"}</p>
+                    <div className="grid gap-1.5">{section.homeItems.map((binding) => renderTagButton(binding, true))}</div>
+                  </div>
+                  <div>
+                    <p className="mb-1 text-[10px] font-black uppercase tracking-[0.16em] text-sky-300">{awayTeam?.name ?? "Away"}</p>
+                    <div className="grid gap-1.5">{section.awayItems.map((binding) => renderTagButton(binding, true))}</div>
+                  </div>
+                </div>
+              </details>
+            ))}
+          </div>
+        </div>
+      </aside>
+    );
+  }
+
+  function renderSportscodeTimeline() {
+    const playheadLeft = `${Math.min(100, Math.max(0, (currentTime / timelineDuration) * 100))}%`;
+    return (
+      <section
+        className="rounded-xl border border-slate-800 bg-[#0d1117] p-3 shadow-2xl"
+        data-design-id="coding-sportscode-timeline"
+        data-design-label="Sportscode timeline tracks"
+        data-design-priority="45"
+        data-coding-layout-container="true"
+      >
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-300">Timeline</p>
+            <h2 className="text-base font-black">Event Tracks</h2>
+          </div>
+          <div className="flex items-center gap-3 text-xs text-slate-400">
+            <span>{formatTime(currentTime)}</span>
+            <span>{events.length} events</span>
+            <span>{playbackRate}x</span>
+          </div>
+        </div>
+        <div className="relative overflow-x-auto rounded-lg border border-slate-800 bg-black/35">
+          <div className="sticky top-0 z-10 grid min-w-[900px] grid-cols-[132px_1fr] border-b border-slate-800 bg-slate-950 text-[10px] font-bold text-slate-500">
+            <div className="border-r border-slate-800 px-3 py-2">Track</div>
+            <div className="relative h-8">
+              {[0, 0.25, 0.5, 0.75, 1].map((tick) => (
+                <span key={tick} className="absolute top-2 -translate-x-1/2" style={{ left: `${tick * 100}%` }}>{formatTime(timelineDuration * tick)}</span>
+              ))}
+            </div>
+          </div>
+          <div className="relative min-w-[900px]">
+            <div className="pointer-events-none absolute bottom-0 top-0 z-20 w-px bg-emerald-300 shadow-[0_0_12px_rgba(52,211,153,.8)]" style={{ left: `calc(132px + ${playheadLeft})` }} />
+            {sportscodeTrackRows.map((row) => (
+              <div key={row.id} className="grid grid-cols-[132px_1fr] border-b border-slate-900 last:border-b-0">
+                <div className="border-r border-slate-800 px-3 py-2 text-xs font-bold text-slate-400">{row.label}</div>
+                <div className="relative h-10 bg-[linear-gradient(90deg,rgba(148,163,184,.08)_1px,transparent_1px)] bg-[length:10%_100%]">
+                  {row.events.map((event) => {
+                    const left = Math.min(99, Math.max(0, (event.start_seconds / timelineDuration) * 100));
+                    const width = Math.max(0.8, Math.min(100 - left, ((event.end_seconds - event.start_seconds) / timelineDuration) * 100));
+                    return (
+                      <button
+                        key={`${row.id}-${event.id}`}
+                        type="button"
+                        onClick={() => { setSelectedEventId(event.id); seekTo(event.start_seconds); }}
+                        className={`absolute top-1 h-8 overflow-hidden rounded border px-2 text-left text-[11px] font-bold ${selectedEventId === event.id ? "border-emerald-300 bg-emerald-500/35 text-white" : "border-slate-700 bg-slate-700/60 text-slate-100 hover:border-emerald-400"}`}
+                        style={{ left: `${left}%`, width: `${width}%` }}
+                        title={`${teamLabel(event.team)} ${eventLabel(event)} ${formatTime(event.start_seconds)}`}
+                      >
+                        <span className="block truncate">{eventLabel(event)}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <main className="min-h-screen bg-[#070a0f] text-white">
+      <header className="sticky top-0 z-30 border-b border-slate-800 bg-[#0b1017]/95 backdrop-blur">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <Link href="/" className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-bold text-slate-200 hover:border-emerald-400">Exit</Link>
+            <div className="min-w-0">
+              <p className="text-[10px] font-black uppercase tracking-[0.24em] text-emerald-300">Professional analyst workspace</p>
+              <h1 className="truncate text-xl font-black">{homeTeam?.name ?? "Home"} vs {awayTeam?.name ?? "Away"}</h1>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <span className="rounded-full border border-emerald-900 bg-emerald-950/50 px-3 py-1 text-xs font-bold text-emerald-200">{notice.toLowerCase().includes("unable") ? "Backend attention" : "Workspace live"}</span>
+            <button type="button" onClick={() => setMatrixDisplayMode("popup")} className="rounded-lg bg-emerald-400 px-3 py-2 font-black text-slate-950">Coding Matrix</button>
+            <button type="button" onClick={() => setMatrixDisplayMode((current) => current === "overlay" ? "hidden" : "overlay")} className="rounded-lg border border-slate-700 px-3 py-2 font-bold text-slate-200">{matrixDisplayMode === "overlay" ? "Hide overlay" : "Show overlay"}</button>
+            <Link href="/reports" className="rounded-lg border border-slate-700 px-3 py-2 font-bold">Reports</Link>
+          </div>
         </div>
       </header>
 
-      <div className="mx-auto max-w-[1600px] px-5 py-5">
+      <div className="px-3 py-3">
         <div
-          className="mb-5 grid gap-3 rounded-xl border border-slate-800 bg-slate-900 p-4 lg:grid-cols-[1fr_1fr_auto]"
+          className="mb-3 grid gap-2 rounded-xl border border-slate-800 bg-[#10161d] p-3 lg:grid-cols-[minmax(220px,1fr)_minmax(220px,1fr)_auto_auto]"
           data-design-id="coding-match-video-selector-block"
           data-design-label="Match and video selector block"
           data-design-priority="5"
@@ -1649,27 +1849,29 @@ export default function CodingWorkspace() {
             {videos.map((video) => <option key={video.id} value={video.id}>{video.original_filename}</option>)}
           </select>
           <div className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-300" data-design-id="coding-video-time-counter" data-design-label="Video time and event counter">{formatTime(currentTime)} · {events.length} events</div>
-          <div className="lg:col-span-3 rounded-lg border border-emerald-900 bg-emerald-950/30 px-4 py-2 text-sm text-emerald-100" data-design-id="coding-sport-context" data-design-label="Sport coding context">
-            <strong>{activeRulePack.displayName}</strong> · {activeRulePack.taxonomyId} · {activeRulePack.reportTemplateId}
+          <div className="rounded-lg border border-emerald-900 bg-emerald-950/30 px-4 py-2 text-sm font-bold text-emerald-100" data-design-id="coding-zone-status-block" data-design-label="Active zone status block" data-design-priority="7" data-coding-layout-container="true">
+            {activeZone ? `Zone: ${zoneValue(activeZone)}` : activeRulePack.displayName}
           </div>
+          <div className="lg:col-span-4 rounded-lg border border-slate-800 bg-slate-950 px-4 py-2 text-sm text-slate-300" data-design-id="coding-notice-block" data-design-label="Status notice block" data-design-priority="6" data-coding-layout-container="true">{notice}</div>
         </div>
 
-        <div className="mb-5 grid gap-3 md:grid-cols-[1fr_auto]">
-          <div className="rounded-xl border border-slate-800 bg-slate-900 px-4 py-3 text-sm text-slate-300" data-design-id="coding-notice-block" data-design-label="Status notice block" data-design-priority="6" data-coding-layout-container="true">{notice}</div>
-          <div className="rounded-xl border border-emerald-900 bg-emerald-950/30 px-4 py-3 text-sm font-bold text-emerald-200" data-design-id="coding-zone-status-block" data-design-label="Active zone status block" data-design-priority="7" data-coding-layout-container="true">
-            {activeZone ? `Active zone: ${zoneValue(activeZone)}` : "Timeline events save immediately"}
-          </div>
-        </div>
-
-        <section className="space-y-5">
-          <div className="rounded-xl border border-slate-800 bg-slate-900 p-4" data-design-id="coding-playback-block" data-design-label="Playback block" data-design-priority="12" data-coding-layout-container="true">
+        <section className="grid min-h-[calc(100vh-11rem)] gap-3 xl:grid-cols-[minmax(0,1fr)_390px]">
+          <div className="min-w-0 space-y-3">
+          <div className="rounded-xl border border-slate-800 bg-[#10161d] p-3" data-design-id="coding-playback-block" data-design-label="Playback block" data-design-priority="12" data-coding-layout-container="true">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="font-bold">Playback</h2>
-                <p className="text-xs text-slate-500">Centered video workspace for live coding.</p>
+                <p className="text-xs text-slate-500">{selectedVideo?.original_filename ?? "Select uploaded footage"} · {formatTime(currentTime)} / {formatTime(timelineDuration)}</p>
+              </div>
+              <div className="flex flex-wrap gap-2 text-xs font-bold">
+                <button type="button" onClick={() => runVideoCommand("seek_back_5")} className="rounded border border-slate-700 px-2 py-1">-5s</button>
+                <button type="button" onClick={() => runVideoCommand("play_pause")} className="rounded border border-slate-700 px-2 py-1">Play/Pause</button>
+                <button type="button" onClick={() => runVideoCommand("seek_forward_5")} className="rounded border border-slate-700 px-2 py-1">+5s</button>
+                <button type="button" onClick={() => runVideoCommand("speed_down")} className="rounded border border-slate-700 px-2 py-1">Slower</button>
+                <button type="button" onClick={() => runVideoCommand("speed_up")} className="rounded border border-slate-700 px-2 py-1">Faster</button>
               </div>
             </div>
-            <div className={`${videoShellClass} relative overflow-hidden rounded-xl border border-slate-800 bg-black`} data-design-id="coding-video-shell-block" data-design-label="Video player shell" data-design-priority="13" data-coding-layout-container="true">
+            <div className={`relative overflow-hidden rounded-xl border border-slate-800 bg-black ${videoLayout === "standard" ? videoShellClass : ""}`} data-design-id="coding-video-shell-block" data-design-label="Video player shell" data-design-priority="13" data-coding-layout-container="true">
               {selectedVideo ? (
                 <video
                   key={selectedVideo.id}
@@ -1680,6 +1882,7 @@ export default function CodingWorkspace() {
                   className="aspect-video w-full bg-black"
                   onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
                   onRateChange={(event) => setPlaybackRate(event.currentTarget.playbackRate)}
+                  onLoadedMetadata={(event) => setVideoDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)}
                   onError={() => setNotice("Source video is unavailable. Free Render storage is temporary and may have been cleared after sleep or redeploy.")}
                 />
               ) : <div className="flex aspect-video items-center justify-center text-slate-500">Select a match with uploaded footage.</div>}
@@ -1717,6 +1920,15 @@ export default function CodingWorkspace() {
             </div>
           </div>
 
+          {renderSportscodeTimeline()}
+          </div>
+
+          {renderRightCodingPanel()}
+        </section>
+
+        {matrixDisplayMode === "popup" ? (
+          <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/80 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Coding matrix">
+            <div className="w-full max-w-[1500px]">
           <section
             className="rounded-xl border border-slate-800 bg-slate-900 p-4"
             data-design-id="coding-quick-matrix-block"
@@ -1730,6 +1942,12 @@ export default function CodingWorkspace() {
                 <p className="text-xs text-slate-500">Home and away stay side by side. Click to code. Shift-click assigns a key. Option-click opens full settings.</p>
               </div>
               <div className="flex flex-wrap gap-2 text-sm">
+                <button type="button" onClick={() => setMatrixDisplayMode("hidden")} className="rounded-lg border border-slate-700 px-3 py-2 font-bold text-slate-200">
+                  Close
+                </button>
+                <button type="button" onClick={() => setMatrixDisplayMode("overlay")} className="rounded-lg border border-emerald-900 px-3 py-2 font-bold text-emerald-300">
+                  Send to overlay
+                </button>
                 <button type="button" onClick={() => setQuickAddPanel((current) => current === "event" ? null : "event")} className="rounded-lg bg-emerald-400 px-3 py-2 font-bold text-slate-950">
                   Add rugby element
                 </button>
@@ -1880,6 +2098,9 @@ export default function CodingWorkspace() {
               </div>
             ) : null}
           </section>
+            </div>
+          </div>
+        ) : null}
 
           {quickEditBinding ? (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4" role="dialog" aria-modal="true" aria-label={`Edit ${quickEditBinding.label}`}>
@@ -2308,7 +2529,6 @@ export default function CodingWorkspace() {
               </form>
             ) : null}
           </section>
-        </section>
       </div>
     </main>
   );

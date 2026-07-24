@@ -51,8 +51,10 @@ const QUICK_CODE_CAPTURE_SECONDS = 15;
 const SHORTCUT_STORAGE_KEY = "rugby-video-analysis:coding-shortcuts:v2";
 const TIMELINE_WINDOW_STORAGE_KEY = "rugby-video-analysis:video-analysis-window:v1";
 const TIMELINE_FOLLOW_STORAGE_KEY = "rugby-video-analysis:video-analysis-follow-playhead:v1";
+const PLAYBACK_SPEED_STORAGE_KEY = "rugby-video-analysis:video-analysis-playback-speed:v1";
 const ZONE_KEYS = ["KeyA", "KeyS", "KeyD", "KeyF", "KeyG", "KeyH", "KeyJ", "KeyK"];
 const DEFAULT_TIMELINE_WINDOW_SECONDS = 10 * 60;
+const PLAYBACK_SPEED_PRESETS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3];
 const TIMELINE_WINDOW_OPTIONS = [
   { label: "Full match", seconds: "full" as const },
   { label: "30 min", seconds: 30 * 60 },
@@ -458,6 +460,12 @@ function loadFollowPlayhead() {
   return saved ? saved === "true" : true;
 }
 
+function loadPlaybackSpeed() {
+  if (typeof window === "undefined") return 1;
+  const saved = Number(window.localStorage.getItem(PLAYBACK_SPEED_STORAGE_KEY));
+  return PLAYBACK_SPEED_PRESETS.includes(saved) ? saved : 1;
+}
+
 function clampWindowStart(start: number, windowSeconds: number, totalSeconds: number) {
   return Math.min(Math.max(0, start), Math.max(0, totalSeconds - windowSeconds));
 }
@@ -467,6 +475,12 @@ function timelineTicks(start: number, end: number) {
     const seconds = start + (end - start) * tick;
     return { tick, seconds };
   });
+}
+
+function nearestPlaybackSpeed(value: number) {
+  return PLAYBACK_SPEED_PRESETS.reduce((nearest, preset) => (
+    Math.abs(preset - value) < Math.abs(nearest - value) ? preset : nearest
+  ), 1);
 }
 
 export default function VideoAnalysisPage() {
@@ -491,6 +505,7 @@ export default function VideoAnalysisPage() {
   const [timelineWindowDuration, setTimelineWindowDuration] = useState<"full" | number>(() => loadTimelineWindowDuration());
   const [timelineWindowStart, setTimelineWindowStart] = useState(0);
   const [followPlayhead, setFollowPlayhead] = useState(() => loadFollowPlayhead());
+  const [playbackSpeed, setPlaybackSpeed] = useState(() => loadPlaybackSpeed());
 
   const selectedMatch = matches.find((match) => match.id === selectedMatchId) ?? null;
   const selectedVideo = videos.find((video) => video.id === selectedVideoId) ?? null;
@@ -502,7 +517,8 @@ export default function VideoAnalysisPage() {
     : "Video Analysis Workspace";
   const timelineDuration = Math.max(duration, events.reduce((max, event) => Math.max(max, event.end_seconds), 0), 90 * 60 + 43);
   const visibleWindowDuration = timelineWindowDuration === "full" ? timelineDuration : Math.min(timelineWindowDuration, timelineDuration);
-  const visibleWindowStart = timelineWindowDuration === "full" ? 0 : clampWindowStart(timelineWindowStart, visibleWindowDuration, timelineDuration);
+  const followWindowStart = timelineWindowDuration === "full" ? 0 : clampWindowStart(currentTime - visibleWindowDuration / 2, visibleWindowDuration, timelineDuration);
+  const visibleWindowStart = timelineWindowDuration === "full" ? 0 : followPlayhead ? followWindowStart : clampWindowStart(timelineWindowStart, visibleWindowDuration, timelineDuration);
   const visibleWindowEnd = timelineWindowDuration === "full" ? timelineDuration : Math.min(timelineDuration, visibleWindowStart + visibleWindowDuration);
   const visibleWindowSpan = Math.max(1, visibleWindowEnd - visibleWindowStart);
   const playheadVisible = currentTime >= visibleWindowStart && currentTime <= visibleWindowEnd;
@@ -539,18 +555,20 @@ export default function VideoAnalysisPage() {
   }, [followPlayhead]);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(PLAYBACK_SPEED_STORAGE_KEY, String(playbackSpeed));
+    if (videoRef.current && videoRef.current.playbackRate !== playbackSpeed) {
+      videoRef.current.playbackRate = playbackSpeed;
+    }
+  }, [playbackSpeed]);
+
+  useEffect(() => {
     if (timelineWindowDuration === "full") {
       setTimelineWindowStart(0);
       return;
     }
     setTimelineWindowStart((start) => clampWindowStart(start, visibleWindowDuration, timelineDuration));
   }, [timelineDuration, timelineWindowDuration, visibleWindowDuration]);
-
-  useEffect(() => {
-    if (!followPlayhead || timelineWindowDuration === "full") return;
-    if (currentTime >= visibleWindowStart && currentTime <= visibleWindowEnd) return;
-    setTimelineWindowStart(clampWindowStart(currentTime - visibleWindowDuration / 2, visibleWindowDuration, timelineDuration));
-  }, [currentTime, followPlayhead, timelineDuration, timelineWindowDuration, visibleWindowDuration, visibleWindowEnd, visibleWindowStart]);
 
   const loadWorkspace = useCallback(async () => {
     try {
@@ -624,11 +642,11 @@ export default function VideoAnalysisPage() {
 
   const runVideoCommand = useCallback((command: VideoCommand) => {
     const video = videoRef.current;
-    if (!video) return;
     if (command === "play_pause") {
       togglePlay();
       return;
     }
+    if (!video) return;
     if (command === "seek_back_5") seek(-5);
     if (command === "seek_forward_5") seek(5);
     if (command === "seek_back_10") seek(-10);
@@ -639,19 +657,19 @@ export default function VideoAnalysisPage() {
     if (command === "seek_forward_10m") seek(600);
     if (command === "step_back") seek(-0.04);
     if (command === "step_forward") seek(0.04);
-    if (command === "speed_down") video.playbackRate = Math.max(0.25, video.playbackRate - 0.25);
-    if (command === "speed_up") video.playbackRate = Math.min(2, video.playbackRate + 0.25);
-    if (command === "speed_quarter") video.playbackRate = 0.25;
-    if (command === "speed_half") video.playbackRate = 0.5;
-    if (command === "speed_normal") video.playbackRate = 1;
-    if (command === "speed_double") video.playbackRate = 2;
+    if (command === "speed_down") setPlaybackSpeed((speed) => nearestPlaybackSpeed(Math.max(0.25, speed - 0.25)));
+    if (command === "speed_up") setPlaybackSpeed((speed) => nearestPlaybackSpeed(Math.min(3, speed + 0.25)));
+    if (command === "speed_quarter") setPlaybackSpeed(0.25);
+    if (command === "speed_half") setPlaybackSpeed(0.5);
+    if (command === "speed_normal") setPlaybackSpeed(1);
+    if (command === "speed_double") setPlaybackSpeed(2);
   }, [seek, togglePlay]);
 
   const moveTimelineWindow = useCallback((direction: -1 | 1) => {
     if (timelineWindowDuration === "full") return;
     setFollowPlayhead(false);
-    setTimelineWindowStart((start) => clampWindowStart(start + direction * visibleWindowDuration, visibleWindowDuration, timelineDuration));
-  }, [timelineDuration, timelineWindowDuration, visibleWindowDuration]);
+    setTimelineWindowStart(clampWindowStart(visibleWindowStart + direction * visibleWindowDuration, visibleWindowDuration, timelineDuration));
+  }, [timelineDuration, timelineWindowDuration, visibleWindowDuration, visibleWindowStart]);
 
   const centreTimelineOn = useCallback((seconds: number) => {
     if (timelineWindowDuration === "full") return;
@@ -785,6 +803,7 @@ export default function VideoAnalysisPage() {
                     className="video-analysis-video"
                     onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
                     onLoadedMetadata={(event) => setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)}
+                    onLoadedData={(event) => { event.currentTarget.playbackRate = playbackSpeed; }}
                   />
                 ) : (
                   <div className="video-analysis-empty-player">
@@ -811,6 +830,19 @@ export default function VideoAnalysisPage() {
                   </button>
                 ))}
                 <span className="video-analysis-time">{formatTime(currentTime)} / {formatTime(timelineDuration)}</span>
+                <div className="video-analysis-speed-controls" aria-label="Playback speed controls">
+                  <span>{playbackSpeed}x</span>
+                  {PLAYBACK_SPEED_PRESETS.map((speed) => (
+                    <button
+                      key={speed}
+                      type="button"
+                      className={playbackSpeed === speed ? "is-active" : ""}
+                      onClick={() => setPlaybackSpeed(speed)}
+                    >
+                      {speed}x
+                    </button>
+                  ))}
+                </div>
                 <span className="video-analysis-notice">{notice}</span>
                 <span className="video-analysis-zone">{activeZone ? zoneValue(activeZone) : "No active zone"}</span>
               </div>
@@ -845,7 +877,15 @@ export default function VideoAnalysisPage() {
                   <button
                     type="button"
                     className={followPlayhead ? "is-active" : ""}
-                    onClick={() => setFollowPlayhead((value) => !value)}
+                    onClick={() => {
+                      setFollowPlayhead((value) => {
+                        if (value) {
+                          setTimelineWindowStart(visibleWindowStart);
+                          return false;
+                        }
+                        return true;
+                      });
+                    }}
                   >
                     Follow playhead
                   </button>

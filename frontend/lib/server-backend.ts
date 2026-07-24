@@ -52,8 +52,12 @@ function responseHeaders(response: Response) {
   return headers;
 }
 
+function isMediaPlaybackPath(backendPath: string) {
+  return backendPath.startsWith("/media/") || /^\/api\/videos\/\d+\/stream$/.test(backendPath);
+}
+
 function shouldStreamResponse(request: NextRequest, backendPath: string) {
-  return request.headers.has("range") || backendPath.startsWith("/media/");
+  return request.headers.has("range") || isMediaPlaybackPath(backendPath);
 }
 
 export async function proxyBackendRequest(
@@ -78,6 +82,7 @@ export async function proxyBackendRequest(
         headers: forwardedHeaders(request),
         body,
         cache: "no-store",
+        redirect: isMediaPlaybackPath(backendPath) ? "manual" : "follow",
         signal: controller.signal,
       });
 

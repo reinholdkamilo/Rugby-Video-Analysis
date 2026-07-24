@@ -15,6 +15,7 @@ async function handler(request: NextRequest, context: RouteContext) {
 }
 
 export const GET = handler;
+export const HEAD = handler;
 export const POST = handler;
 export const PATCH = handler;
 export const PUT = handler;

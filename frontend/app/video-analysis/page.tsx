@@ -54,6 +54,7 @@ const TIMELINE_FOLLOW_STORAGE_KEY = "rugby-video-analysis:video-analysis-follow-
 const PLAYBACK_SPEED_STORAGE_KEY = "rugby-video-analysis:video-analysis-playback-speed:v1";
 const ZONE_KEYS = ["KeyA", "KeyS", "KeyD", "KeyF", "KeyG", "KeyH", "KeyJ", "KeyK"];
 const DEFAULT_TIMELINE_WINDOW_SECONDS = 10 * 60;
+const EVENT_REVIEW_PREROLL_SECONDS = 2;
 const PLAYBACK_SPEED_PRESETS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3];
 const TIMELINE_WINDOW_OPTIONS = [
   { label: "Full match", seconds: "full" as const },
@@ -676,6 +677,21 @@ export default function VideoAnalysisPage() {
     setTimelineWindowStart(clampWindowStart(seconds - visibleWindowDuration / 2, visibleWindowDuration, timelineDuration));
   }, [timelineDuration, timelineWindowDuration, visibleWindowDuration]);
 
+  const seekToTimelineEvent = useCallback((event: TimelineEvent) => {
+    setSelectedEventId(event.id);
+    const targetSeconds = Math.max(0, event.start_seconds - EVENT_REVIEW_PREROLL_SECONDS);
+    const video = videoRef.current;
+    if (video) {
+      video.playbackRate = playbackSpeed;
+      video.currentTime = targetSeconds;
+      void video.play().catch(() => {
+        setNotice(`Seeked to ${eventLabel(event)} at ${formatTime(targetSeconds)}. Press play to review.`);
+      });
+    }
+    centreTimelineOn((event.start_seconds + event.end_seconds) / 2);
+    setNotice(`Reviewing ${eventLabel(event)} from ${formatTime(targetSeconds)}.`);
+  }, [centreTimelineOn, playbackSpeed]);
+
   const saveShortcut = useCallback((id: string, shortcut: string) => {
     const nextShortcut = normaliseShortcut(shortcut);
     if (nextShortcut === "Unassigned") return;
@@ -799,6 +815,7 @@ export default function VideoAnalysisPage() {
                   <video
                     ref={videoRef}
                     src={sourceVideoUrl(selectedVideo.id)}
+                    preload="metadata"
                     playsInline
                     className="video-analysis-video"
                     onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
@@ -919,11 +936,7 @@ export default function VideoAnalysisPage() {
                             <button
                               key={event.id}
                               type="button"
-                              onClick={() => {
-                                setSelectedEventId(event.id);
-                                if (videoRef.current) videoRef.current.currentTime = event.start_seconds;
-                                centreTimelineOn((event.start_seconds + event.end_seconds) / 2);
-                              }}
+                              onClick={() => seekToTimelineEvent(event)}
                               className={`video-analysis-timeline-clip team-${event.team} category-${event.event_type} ${selected ? "is-selected" : ""}`}
                               style={{ left: `${left}%`, width: `${width}%` }}
                               title={eventDetails(event, row.track.label)}
@@ -969,10 +982,7 @@ export default function VideoAnalysisPage() {
                     key={event.id}
                     type="button"
                     className={selectedEventId === event.id ? "is-selected" : ""}
-                    onClick={() => {
-                      setSelectedEventId(event.id);
-                      if (videoRef.current) videoRef.current.currentTime = event.start_seconds;
-                    }}
+                    onClick={() => seekToTimelineEvent(event)}
                   >
                     <span>{eventLabel(event)}</span>
                     <small>{event.team} | {formatTime(event.start_seconds)}-{formatTime(event.end_seconds)}</small>

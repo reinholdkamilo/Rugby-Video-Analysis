@@ -1871,7 +1871,7 @@ export default function CodingWorkspace() {
                 <button type="button" onClick={() => runVideoCommand("speed_up")} className="rounded border border-slate-700 px-2 py-1">Faster</button>
               </div>
             </div>
-            <div className={`relative overflow-hidden rounded-xl border border-slate-800 bg-black ${videoLayout === "standard" ? videoShellClass : ""}`} data-design-id="coding-video-shell-block" data-design-label="Video player shell" data-design-priority="13" data-coding-layout-container="true">
+            <div className={`relative grid min-h-[280px] overflow-hidden rounded-xl border border-slate-800 bg-black ${videoLayout === "standard" ? videoShellClass : ""}`} data-design-id="coding-video-shell-block" data-design-label="Video player shell" data-design-priority="13" data-coding-layout-container="true">
               {selectedVideo ? (
                 <video
                   key={selectedVideo.id}
@@ -1879,7 +1879,9 @@ export default function CodingWorkspace() {
                   src={sourceVideoUrl(selectedVideo.id)}
                   controls
                   playsInline
-                  className="aspect-video w-full bg-black"
+                  className="block h-full max-h-full w-full max-w-full bg-black object-contain"
+                  data-design-id="coding-source-video"
+                  data-design-label="Source video"
                   onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
                   onRateChange={(event) => setPlaybackRate(event.currentTarget.playbackRate)}
                   onLoadedMetadata={(event) => setVideoDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)}

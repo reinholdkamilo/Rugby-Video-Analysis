@@ -4,7 +4,7 @@ import { MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useRef,
 import { usePathname } from "next/navigation";
 import { createPortal } from "react-dom";
 
-type PageKey = "home" | "upload" | "library" | "coding" | "reports" | "evidence" | "intelligence";
+type PageKey = "home" | "upload" | "library" | "coding" | "reports" | "evidence" | "intelligence" | "vision" | "understanding" | "suggestions" | "timeline" | "catalog" | "system";
 type NodeType = "section" | "row" | "column" | "container" | "group" | "static" | "slot";
 type LayoutMode = "free" | "stack" | "row" | "grid";
 type StaticKind = "blank" | "text" | "heading" | "label" | "notes" | "divider" | "spacer" | "button" | "image";
@@ -101,6 +101,7 @@ type ElementStyleOverride = {
   zIndex?: number;
   display?: "revert" | "block" | "flex" | "grid";
   flexDirection?: "row" | "column";
+  autoFit?: boolean;
   columns?: number;
   rows?: number;
   gap?: number;
@@ -144,8 +145,8 @@ type SelectedElement = { selector: string; label: string; rect: LiveRect };
 
 const STORAGE_KEY = "rugby-video-analysis:blank-canvas-design:v3";
 const RESET_MARKER_KEY = "rugby-video-analysis:blank-canvas-design:reset-revision";
-const DESIGN_RESET_REVISION = "2026-07-24-default-layout-reset";
-const SUPPORTED_PAGES: PageKey[] = ["home", "upload", "library", "coding", "reports", "evidence", "intelligence"];
+const DESIGN_RESET_REVISION = "2026-07-24-element-edit-reflow-reset";
+const SUPPORTED_PAGES: PageKey[] = ["home", "upload", "library", "coding", "reports", "evidence", "intelligence", "vision", "understanding", "suggestions", "timeline", "catalog", "system"];
 const FULLY_WIRED_PAGES = new Set<PageKey>(["coding", "library", "reports"]);
 
 const DEFAULT_STORE: DesignStore = { version: 3, layouts: {}, templates: [], elementCssResets: [], elementStyleOverrides: [] };
@@ -416,35 +417,8 @@ function selectorForElement(element: HTMLElement) {
   return parts.join(" > ");
 }
 
-function designIdFromSelector(selector: string) {
-  const match = selector.match(/^\[data-design-id="(.+)"\]$/);
-  return match ? match[1].replace(/\\([^a-zA-Z0-9_-])/g, "$1") : null;
-}
-
-function isSimplifiedDesignRootId(designId: string) {
-  if (designId.endsWith("-key-overlay") || designId.endsWith("-overlay") || designId.endsWith("-hud")) return true;
-  if (designId.endsWith("-block")) return !(designId.includes("shell") || designId.includes("grid") || designId.includes("list") || designId.includes("box"));
-  if (designId.includes("shell") || designId.includes("grid") || designId.includes("list") || designId.includes("board")) return false;
-  if (designId.includes("box") || designId.includes("card") || designId.includes("row") || designId.includes("section")) return false;
-  if (designId.includes("column") || designId.includes("form") || designId.includes("field") || designId.includes("selector")) return false;
-  if (designId.includes("button") || designId.includes("key") || designId.includes("text") || designId.includes("count")) return false;
-  return false;
-}
-
-function isSimplifiedSelector(selector: string) {
-  const designId = designIdFromSelector(selector);
-  return !designId || isSimplifiedDesignRootId(designId);
-}
-
 function simplifiedDesignElement(element: HTMLElement) {
-  const roots: HTMLElement[] = [];
-  let current: HTMLElement | null = element;
-  while (current && current.tagName.toLowerCase() !== "main") {
-    const designId = current.getAttribute("data-design-id");
-    if (designId && isSimplifiedDesignRootId(designId)) roots.push(current);
-    current = current.parentElement;
-  }
-  return roots[0] ?? element.closest<HTMLElement>("[data-design-id]") ?? element;
+  return element.closest<HTMLElement>("[data-design-id]") ?? element;
 }
 
 function isDesignChromeElement(element: HTMLElement) {
@@ -464,6 +438,14 @@ function selectableElementFromPoint(target: HTMLElement, clientX: number, client
     if (candidate) return simplifiedDesignElement(candidate);
   }
   return null;
+}
+
+function readElementRect(selector: string): LiveRect | null {
+  if (typeof document === "undefined") return null;
+  const element = document.querySelector<HTMLElement>(selector);
+  if (!element) return null;
+  const rect = element.getBoundingClientRect();
+  return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
 }
 
 function liveNodeStyles(node: CanvasNode) {
@@ -551,7 +533,7 @@ function elementResetStyles(mode: ElementCssResetMode) {
 
 function elementResetCss(page: PageKey, resets: ElementCssReset[]) {
   return resets
-    .filter((reset) => reset.page === page && reset.mode !== "none" && isSimplifiedSelector(reset.selector))
+    .filter((reset) => reset.page === page && reset.mode !== "none")
     .map((reset) => `${reset.selector}{${elementResetStyles(reset.mode)}}`)
     .join("\n");
 }
@@ -575,10 +557,14 @@ function elementStyleOverrideStyles(override: ElementStyleOverride) {
     typeof override.zIndex === "number" ? "position:relative!important" : "",
     override.display && override.display !== "revert" ? `display:${override.display}!important` : "",
     override.display === "flex" && override.flexDirection ? `flex-direction:${override.flexDirection}!important` : "",
-    override.display === "grid" && override.columns ? `grid-template-columns:repeat(${override.columns}, minmax(0, 1fr))!important` : "",
+    override.display === "grid" && override.autoFit ? "grid-template-columns:repeat(auto-fit, minmax(min(150px, 100%), 1fr))!important" : "",
+    override.display === "grid" && !override.autoFit && override.columns ? `grid-template-columns:repeat(${override.columns}, minmax(0, 1fr))!important` : "",
     override.display === "grid" && override.rows ? `grid-template-rows:repeat(${override.rows}, minmax(0, auto))!important` : "",
     typeof override.gap === "number" ? `gap:${override.gap}px!important` : "",
     typeof override.padding === "number" ? `padding:${override.padding}px!important` : "",
+    override.display === "grid" || override.display === "flex" ? "align-content:start!important" : "",
+    override.display === "grid" || override.display === "flex" ? "min-width:0!important" : "",
+    override.display === "grid" || override.display === "flex" ? "max-width:100%!important" : "",
     override.textAlign ? `text-align:${override.textAlign}!important` : "",
     override.alignItems ? `align-items:${override.alignItems}!important` : "",
     override.justifyContent ? `justify-content:${override.justifyContent}!important` : "",
@@ -588,7 +574,7 @@ function elementStyleOverrideStyles(override: ElementStyleOverride) {
 
 function elementStyleOverrideCss(page: PageKey, overrides: ElementStyleOverride[]) {
   return overrides
-    .filter((override) => override.page === page && isSimplifiedSelector(override.selector))
+    .filter((override) => override.page === page)
     .map((override) => `${override.selector}{${elementStyleOverrideStyles(override)}}`)
     .join("\n");
 }
@@ -671,8 +657,8 @@ export function AppDesignStudio() {
   const usedComponents = usedStatefulComponents(layout);
   const sortedNodes = [...layout.nodes].filter((node) => !node.hidden).sort((a, b) => a.order - b.order);
   const pageTemplates = store.templates.filter((template) => template.page === page);
-  const pageElementResets = (store.elementCssResets ?? []).filter((reset) => reset.page === page && isSimplifiedSelector(reset.selector));
-  const pageElementOverrides = (store.elementStyleOverrides ?? []).filter((override) => override.page === page && isSimplifiedSelector(override.selector));
+  const pageElementResets = (store.elementCssResets ?? []).filter((reset) => reset.page === page);
+  const pageElementOverrides = (store.elementStyleOverrides ?? []).filter((override) => override.page === page);
   const pageElementEditCount = pageElementResets.length + pageElementOverrides.length;
   const selectedElementOverride = selectedElement ? pageElementOverrides.find((override) => override.selector === selectedElement.selector) : null;
   const wiredStatus = FULLY_WIRED_PAGES.has(page) ? "Canvas-enabled" : "Registered placeholder";
@@ -758,6 +744,18 @@ export function AppDesignStudio() {
       window.removeEventListener("scroll", refresh, true);
     };
   }, [open]);
+
+  useEffect(() => {
+    if (!open || !selectedElement) return;
+    const nextRect = readElementRect(selectedElement.selector);
+    if (!nextRect) return;
+    const sameRect =
+      Math.round(nextRect.left) === Math.round(selectedElement.rect.left) &&
+      Math.round(nextRect.top) === Math.round(selectedElement.rect.top) &&
+      Math.round(nextRect.width) === Math.round(selectedElement.rect.width) &&
+      Math.round(nextRect.height) === Math.round(selectedElement.rect.height);
+    if (!sameRect) setSelectedElement((current) => current ? { ...current, rect: nextRect } : current);
+  }, [layout, open, selectedElement, selectedElementOverride, store.elementStyleOverrides]);
 
   useEffect(() => {
     if (!open) return;
@@ -1119,7 +1117,15 @@ export function AppDesignStudio() {
       setNotice("Turn on Element Inspect and click a page element first.");
       return;
     }
-    updateElementOverride(selectedElement.selector, updates);
+    const target = typeof document === "undefined" ? null : document.querySelector<HTMLElement>(selectedElement.selector);
+    const shouldAutoReflow =
+      target &&
+      target.children.length > 1 &&
+      ("width" in updates || "height" in updates) &&
+      !("display" in updates) &&
+      !selectedElementOverride?.display;
+    updateElementOverride(selectedElement.selector, shouldAutoReflow ? { display: "grid", autoFit: true, gap: selectedElementOverride?.gap ?? 8, ...updates } : updates);
+    setMeasureTick((tick) => tick + 1);
     setNotice(`Updated ${selectedElement.label}.`);
   }
 
@@ -1344,9 +1350,13 @@ export function AppDesignStudio() {
                     <option value="row">Rows</option>
                     <option value="column">Columns</option>
                   </select></label>
-                  <label>Columns <input type="number" min="1" max="12" value={selectedElementOverride?.columns ?? 2} onChange={(event) => updateSelectedElement({ columns: Number(event.target.value), display: "grid" })} /></label>
+                  <label>Columns <input type="number" min="1" max="12" value={selectedElementOverride?.columns ?? 2} onChange={(event) => updateSelectedElement({ columns: Number(event.target.value), autoFit: false, display: "grid" })} /></label>
                   <label>Rows <input type="number" min="1" max="12" value={selectedElementOverride?.rows ?? 1} onChange={(event) => updateSelectedElement({ rows: Number(event.target.value), display: "grid" })} /></label>
                 </div>
+                <label className="design-engine-checkbox-row">
+                  <input type="checkbox" checked={Boolean(selectedElementOverride?.autoFit)} onChange={(event) => updateSelectedElement({ autoFit: event.target.checked, display: "grid" })} />
+                  Auto-fit contents into responsive rows
+                </label>
                 <div className="design-engine-form-grid">
                   <label>Gap <input type="number" min="0" max="80" value={selectedElementOverride?.gap ?? 0} onChange={(event) => updateSelectedElement({ gap: Number(event.target.value) })} /></label>
                   <label>Padding <input type="number" min="0" max="120" value={selectedElementOverride?.padding ?? 0} onChange={(event) => updateSelectedElement({ padding: Number(event.target.value) })} /></label>
@@ -1372,7 +1382,8 @@ export function AppDesignStudio() {
                   </select></label>
                   <button type="button" onClick={() => updateSelectedElement({ display: "flex", flexDirection: "row" })}>Fit in row</button>
                   <button type="button" onClick={() => updateSelectedElement({ display: "flex", flexDirection: "column" })}>Fit in column</button>
-                  <button type="button" onClick={() => updateSelectedElement({ display: "grid", columns: selectedElementOverride?.columns ?? 2 })}>Fit grid</button>
+                  <button type="button" onClick={() => updateSelectedElement({ display: "grid", columns: selectedElementOverride?.columns ?? 2, autoFit: false })}>Fit grid</button>
+                  <button type="button" onClick={() => updateSelectedElement({ display: "grid", autoFit: true, gap: selectedElementOverride?.gap ?? 8 })}>Auto-fit grid</button>
                 </div>
                 <div className="design-engine-button-row">
                   <button type="button" onClick={() => applyElementReset("all")}>Remove all CSS</button>

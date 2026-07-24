@@ -45,6 +45,52 @@ body main :is(section, article, form, aside, header, .rounded-xl, .rounded-2xl) 
   border-radius: var(--design-radius, 18px);
 }
 
+body.design-engine-editing main :is(*, button, a, input, select, textarea, video) {
+  cursor: pointer;
+}
+
+body.design-engine-editing main :is(input, textarea, select, [contenteditable=true]) {
+  cursor: text;
+}
+
+body main :is(video, canvas, iframe, img) {
+  max-width: 100%;
+}
+
+body main video {
+  object-fit: contain;
+}
+
+[data-coding-layout-container="true"],
+[data-design-id] {
+  min-width: 0;
+}
+
+[data-coding-layout-container="true"] :is(.grid, [class*="grid-cols"]) {
+  min-width: 0;
+}
+
+[data-coding-layout-container="true"] :is(button, input, select, textarea, kbd, span, p, h2, h3, h4) {
+  max-width: 100%;
+}
+
+[data-coding-layout-container="true"] :is(button, input, select, textarea) {
+  min-width: 0;
+}
+
+[data-coding-layout-container="true"] [data-design-label*="quick button" i],
+[data-coding-layout-container="true"] [data-design-label*="event grid" i],
+[data-coding-layout-container="true"] [data-design-label*="button board" i] {
+  min-width: 0;
+}
+
+body:not(.design-engine-editing) [data-design-id="coding-source-video"],
+body:not(.design-engine-editing) [data-design-id="coding-video-shell-block"] > video {
+  width: 100%;
+  height: 100%;
+  max-height: inherit;
+}
+
 .design-editable-parent {
   display: flex !important;
   flex-direction: column;
@@ -309,6 +355,17 @@ body main :is(section, article, form, aside, header, .rounded-xl, .rounded-2xl) 
   color: #dce7e2;
   font-size: .73rem;
   font-weight: 900;
+}
+
+.design-engine-form .design-engine-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.design-engine-form .design-engine-checkbox-row input {
+  width: auto;
+  min-height: 0;
 }
 
 .design-engine-form input,
